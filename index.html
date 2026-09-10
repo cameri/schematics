@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic Schematics — Buildable specs for AI agents</title>
   <meta name="description" content="Agentic Schematics: published build specifications that anyone — any LLM, any team — can implement independently, with zero coordination with the author. The spec is the only coordination mechanism.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230ea5e9'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='monospace'>S</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23000'/><text x='50' y='70' font-size='56' text-anchor='middle' fill='oklch(70%25 .24 340)' font-family='monospace'>S</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
   <header class="nav">
-    <a class="nav-brand" href="/">
-      <span class="nav-logo">⚡</span>
-      <span>Agentic Schematics</span>
-    </a>
+    <a class="nav-brand" href="/">agentic schematics</a>
     <nav class="nav-links">
       <a href="#what">What</a>
       <a href="#how">How</a>
@@ -26,18 +26,17 @@
   <main>
     <!-- ─── Hero ─────────────────────────────────────────── -->
     <section class="hero">
-      <div class="hero-grid" aria-hidden="true"></div>
       <p class="hero-kicker">THE AGENTIC SCHEMATIC SPEC</p>
-      <h1 class="hero-title">Publish a <span class="gradient">schematic</span>.<br>Anyone builds it. No coordination.</h1>
+      <h1 class="hero-title">Publish a <em>schematic</em>.<br>Anyone builds it. No coordination.</h1>
       <p class="hero-sub">
-        A schematic is a self-contained build specification — every requirement,
-        parameter, dependency, phase, and acceptance test for a capability — published
-        once, implementable by <em>any</em> LLM, team, or org, in <em>any</em> runtime,
-        without ever contacting the author. The spec is the only coordination mechanism.
+        A schematic is a self-contained build specification — every requirement, parameter,
+        dependency, phase, and acceptance test for a capability — implementable by
+        <em>any LLM, team, or org</em>, in <em>any runtime</em>, without ever contacting the
+        author. The spec is the only coordination mechanism.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="#catalog">Browse Schematics</a>
-        <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-primary" href="#catalog">Browse schematics</a>
+        <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub ↗</a>
       </div>
       <div class="hero-stats">
         <div class="stat"><span class="stat-num" id="stat-count">0</span><span class="stat-label">schematics</span></div>
@@ -48,47 +47,36 @@
 
     <!-- ─── What ─────────────────────────────────────────── -->
     <section class="section" id="what">
-      <h2 class="section-title">What is an Agentic Schematic?</h2>
+      <h2 class="section-title">What is an agentic schematic?</h2>
       <p class="section-lede">
-        In Daniel Suarez's <em>Daemon</em>, the Darknet spreads through shared schematics:
-        publish the spec, and independent teams build the network — no central authority,
-        no coordination, no permission. An agentic schematic applies the same pattern to
-        software capabilities: the author publishes once, and any builder anywhere can
-        construct the capability from the spec alone.
-      </p>
-      <p class="section-lede">
-        The schematic replaces the author. No meetings, no shared history, no access to
-        the original conversation. If a fact matters, it lives in the package — or it
-        doesn't exist.
+        In Daniel Suarez's <em>Daemon</em>, the Darknet spreads through shared schematics: publish the
+        spec, and independent teams build the network — no central authority, no coordination.
+        Agentic schematics apply the same pattern to software capabilities. The schematic
+        <strong>replaces the author</strong>: no meetings, no shared history, no access to the original
+        conversation. If a fact matters, it lives in the package — or it doesn't exist.
       </p>
       <div class="grid-3">
-        <div class="card">
-          <div class="card-icon">📦</div>
+        <div class="feature">
           <h3>Self-contained</h3>
           <p>Every requirement, parameter, dependency, phase, and test lives inside the package. No "see the original repo", no "ask the author".</p>
         </div>
-        <div class="card">
-          <div class="card-icon">🔌</div>
+        <div class="feature">
           <h3>Vendor-agnostic</h3>
-          <p>Plain Markdown and portable shell. No agent tool names, no harness features, no skill formats. Any LLM with a shell and a text editor can execute it.</p>
+          <p>Plain Markdown and portable shell. Any LLM with a shell and a text editor can execute it.</p>
         </div>
-        <div class="card">
-          <div class="card-icon">♻️</div>
+        <div class="feature">
           <h3>Idempotent</h3>
-          <p>Every implementation phase is safe to re-run. Verification gives the same verdict every time. The spec never depends on "do it like last time".</p>
+          <p>Every phase is safe to re-run. Verification gives the same verdict every time.</p>
         </div>
-        <div class="card">
-          <div class="card-icon">🧩</div>
+        <div class="feature">
           <h3>Modular</h3>
-          <p>Every separable concern is a module with an explicit contract: inputs, outputs, dependencies, failure behavior. No hidden coupling.</p>
+          <p>Every separable concern is a module with an explicit contract. No hidden coupling.</p>
         </div>
-        <div class="card">
-          <div class="card-icon">🎛️</div>
+        <div class="feature">
           <h3>Parameterized</h3>
-          <p>Every environment-specific value is a named parameter with a discovery method. Behavior differences between deployments are configuration, never code edits.</p>
+          <p>Every environment-specific value is a named parameter with a discovery method. Behavior differences are configuration, never code edits.</p>
         </div>
-        <div class="card">
-          <div class="card-icon">🧹</div>
+        <div class="feature">
           <h3>Pluggable</h3>
           <p>Clean seams with a stated removal procedure. Detach the capability and the host keeps working.</p>
         </div>
@@ -96,34 +84,27 @@
     </section>
 
     <!-- ─── How ──────────────────────────────────────────── -->
-    <section class="section alt" id="how">
+    <section class="section" id="how">
       <h2 class="section-title">How it works</h2>
       <div class="flow">
         <div class="flow-step">
-          <span class="flow-num">1</span>
-          <div>
-            <h3>Author or reverse-engineer</h3>
-            <p>Write a schematic from an idea, or distill one from a working implementation. Install the <code>schematics</code> plugin and its <code>create-schematic</code> skill walks any agent through it.</p>
-          </div>
+          <span class="flow-num">01</span>
+          <h3>Author or reverse-engineer</h3>
+          <p>Write a schematic from an idea, or distill one from a working implementation. Install the <code>schematics</code> plugin and its <code>create-schematic</code> skill walks any agent through it.</p>
         </div>
         <div class="flow-step">
-          <span class="flow-num">2</span>
-          <div>
-            <h3>Publish once</h3>
-            <p>One Markdown file is the entire coordination. Push it to a repo, paste it into a session, hand it to a stranger — the package carries everything.</p>
-          </div>
+          <span class="flow-num">02</span>
+          <h3>Publish once</h3>
+          <p>One Markdown file is the entire coordination. Push it to a repo, paste it into a session, hand it to a stranger — the package carries everything.</p>
         </div>
         <div class="flow-step">
-          <span class="flow-num">3</span>
-          <div>
-            <h3>Anyone builds, independently</h3>
-            <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted.</p>
-          </div>
+          <span class="flow-num">03</span>
+          <h3>Anyone builds, independently</h3>
+          <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted.</p>
         </div>
       </div>
       <div class="code-window">
         <div class="code-head">
-          <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
           <span class="code-title">SCHEMATIC.md (skeleton)</span>
         </div>
         <pre class="code-body"><code>---
@@ -152,45 +133,43 @@ description: One-line summary copied to the marketplace
 
     <!-- ─── Catalog ──────────────────────────────────────── -->
     <section class="section" id="catalog">
-      <h2 class="section-title">The Catalog</h2>
+      <h2 class="section-title">The catalog</h2>
       <p class="section-lede">
-        Every entry is an installable <strong>plugin</strong>, and every plugin carries a
-        <strong>schematic</strong> — the build specification for its capability. Capability
-        plugins ship a <code>SCHEMATIC.md</code> you can copy and implement anywhere, no plugin
-        required. Live from <code>.agent-schematics/marketplace.json</code>.
+        Every entry is an installable <strong>plugin</strong> carrying a <strong>schematic</strong> — the
+        build spec for its capability. Copy the <code>SCHEMATIC.md</code> and implement it anywhere,
+        no plugin required. Live from <code>.agent-schematics/marketplace.json</code>.
       </p>
       <div class="catalog" id="catalog"><!-- rendered by site.js --></div>
     </section>
 
     <!-- ─── Spec ─────────────────────────────────────────── -->
-    <section class="section alt" id="spec">
-      <h2 class="section-title">The Spec</h2>
+    <section class="section" id="spec">
+      <h2 class="section-title">The spec</h2>
       <div class="grid-2">
-        <div class="card">
+        <div>
           <h3>The ten binding principles</h3>
           <ol class="principles">
-            <li>Vendor-agnostic — no agent-specific tools or formats</li>
-            <li>Portable — no absolute paths or machine-specific literals</li>
-            <li>Self-contained — the package is the complete world</li>
-            <li>Predictable — identical layout, sections in the same order</li>
-            <li>Idempotent — re-runnable without damage</li>
-            <li>Parameterized — every tunable in one table</li>
-            <li>Dependencies called out — with discovery and failure behavior</li>
-            <li>Applicable context stated — discover vs assume vs don't-change</li>
-            <li>Configuration flexibility — behavior is config, never code edits</li>
-            <li>Pluggable — clean seams and a stated removal procedure</li>
+            <li><strong>Vendor-agnostic</strong> — no agent-specific tools or formats</li>
+            <li><strong>Portable</strong> — no absolute paths or machine-specific literals</li>
+            <li><strong>Self-contained</strong> — the package is the complete world</li>
+            <li><strong>Predictable</strong> — identical layout, sections in the same order</li>
+            <li><strong>Idempotent</strong> — re-runnable without damage</li>
+            <li><strong>Parameterized</strong> — every tunable in one table</li>
+            <li><strong>Dependencies called out</strong> — with discovery and failure behavior</li>
+            <li><strong>Applicable context stated</strong> — discover vs assume vs don't-change</li>
+            <li><strong>Configuration flexibility</strong> — behavior is config, never code edits</li>
+            <li><strong>Pluggable</strong> — clean seams and a stated removal procedure</li>
           </ol>
         </div>
-        <div class="card">
+        <div>
           <h3>File formats, self-describing</h3>
-          <p>Uncommon file types ship with their own <code>.schema</code> companion that documents the format, so an agent with zero prior knowledge of the syntax can still work with it:</p>
           <ul class="principles">
             <li><code>agent.rego</code> + <code>agent.rego.schema</code> — Rego policy language guide</li>
             <li><code>openssl-server.conf</code> + <code>.conf.schema</code> — OpenSSL config syntax</li>
             <li><code>SCHEMATIC.md</code> + <code>SCHEMATIC.md.schema</code> — this spec's own format</li>
             <li><code>marketplace.json</code> + <code>marketplace.json.schema</code> — catalog format</li>
           </ul>
-          <p class="muted">The convention: every <code>&lt;name&gt;.&lt;ext&gt;</code> gets a <code>&lt;name&gt;.&lt;ext&gt;.schema</code> alongside it.</p>
+          <p>The convention: every <code>&lt;name&gt;.&lt;ext&gt;</code> gets a <code>&lt;name&gt;.&lt;ext&gt;.schema</code> alongside it, so an agent with zero prior knowledge of the syntax can still work with the file.</p>
         </div>
       </div>
     </section>
@@ -198,9 +177,9 @@ description: One-line summary copied to the marketplace
 
   <footer class="footer">
     <div class="footer-inner">
-      <span>© 2026 Agentic Schematics</span>
+      <span>© 2026 agentic schematics</span>
       <a href="https://github.com/cameri/schematics" target="_blank" rel="noopener">github.com/cameri/schematics</a>
-      <span class="muted">Inspired by the shared schematics of Daniel Suarez's <em>Daemon</em></span>
+      <span>Inspired by the shared schematics of Daniel Suarez's <em>Daemon</em></span>
     </div>
   </footer>
 
