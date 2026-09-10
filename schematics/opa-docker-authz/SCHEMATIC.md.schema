@@ -55,4 +55,4 @@ In this order (from `template/SCHEMA.template.md`):
 ## See Also
 
 - `SCHEMATIC.md` in any schematic directory — a concrete example
-- `docs/schematics/opa-docker-authz/SCHEMATIC.md` — the first schematic implementing this format
+- `schematics/opa-docker-authz/SCHEMATIC.md` — the first schematic implementing this format

@@ -113,7 +113,7 @@ preference:
 9. **Configuration flexibility** — behavior is config, never code edits
 10. **Pluggable** — clean seams and a stated removal procedure
 
-Full details: [`schematics/skills/create-schematic/references/schematic-principles.md`](schematics/skills/create-schematic/references/schematic-principles.md).
+Full details: [`skills/schematics/skills/create-schematic/references/schematic-principles.md`](skills/schematics/skills/create-schematic/references/schematic-principles.md).
 
 ## The catalog
 
@@ -129,9 +129,9 @@ build specification for the capability it provides:
 
 | Plugin | Kind | What it provides |
 |--------|------|------------------|
-| [`schematics`](schematics/README.md) | authoring | The `create-schematic` skill: author, reverse-engineer, and maintain schematics |
-| [`opa-docker-authz`](opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
-| [`sops-env-secrets`](sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
+| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` skill: author, reverse-engineer, and maintain schematics |
+| [`opa-docker-authz`](schematics/opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
+| [`sops-env-secrets`](schematics/sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 
 ### Install
 
@@ -160,7 +160,7 @@ living specs. Install it, then ask any agent to "create a schematic" or
 ```
 
 Or read the skill directly:
-[`schematics/skills/create-schematic/SKILL.md`](schematics/skills/create-schematic/SKILL.md).
+[`skills/schematics/skills/create-schematic/SKILL.md`](skills/schematics/skills/create-schematic/SKILL.md).
 
 To publish a schematic here: create `<name>/SCHEMATIC.md`, add an entry to
 `.agent-schematics/marketplace.json`, and open a PR.

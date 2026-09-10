@@ -55,4 +55,4 @@ In this order (from `template/SCHEMA.template.md`):
 ## See Also
 
 - `SCHEMATIC.md` in any schematic directory: a concrete example
-- `sops-env-secrets/SCHEMATIC.md`: the schematic that ships this companion
+- `schematics/sops-env-secrets/SCHEMATIC.md`: the schematic that ships this companion
