@@ -27,7 +27,7 @@
       "category": "infrastructure",          // Classification tag
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
-        "url": "https://agenticschemas.ai"
+        "url": "https://schemaformat.ai"
       },
       "keywords": ["docker", "opa", "tls"]  // Search keywords
     }

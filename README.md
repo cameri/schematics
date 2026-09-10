@@ -4,7 +4,7 @@
 
 ### Publish a schematic. Anyone builds it. No coordination.
 
-**[agenticschemas.ai](https://agenticschemas.ai)** · [The Spec](#the-spec) · [The Catalog](#the-catalog) · [Author a Schematic](#author-a-schematic)
+**[schemaformat.ai](https://schemaformat.ai)** · [The Spec](#the-spec) · [The Catalog](#the-catalog) · [Author a Schematic](#author-a-schematic)
 
 </div>
 
@@ -120,7 +120,7 @@ Full details: [`create-schematic/skills/create-schematic/references/schematic-pr
 The `.agent-schematics/marketplace.json` file lists every schematic in this
 repository — name, description, category, source path — and doubles as a
 Claude Code / omp plugin marketplace. The website at
-[agenticschemas.ai](https://agenticschemas.ai) renders it live with
+[schemaformat.ai](https://schemaformat.ai) renders it live with
 one-click copy-as-Markdown for each entry.
 
 ### Current schematics
