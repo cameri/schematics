@@ -77,6 +77,14 @@ criteria:
 |-----|------|------------|-----------|------------------|
 | D-1 |      |            |           |                  |
 
+For composition schematics, the Kind column accepts `schematic`: a
+dependency on a sibling package in this catalog, linked with a RELATIVE
+path (`../<name>/SCHEMATIC.md`) and pinned by the marketplace entry. A
+composition schematic contains no images or services of its own - only
+the shared contracts (volumes, networks, parameters), the isolation
+rules between the parts, and the end-to-end acceptance test. Parts must
+pass their own acceptance tests in isolation before any glue phase.
+
 ## Parameters
 
 Every environment-specific value. Referenced by name from prose and code.

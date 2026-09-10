@@ -10,6 +10,9 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 - [sops-env-secrets](https://schemaformat.ai/schematics/sops-env-secrets/SCHEMATIC.md): Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory. Dual-recipient encryption, per-service key blast radius, rotation without rebuilds.
 - [docker-socket-proxy](https://schemaformat.ai/schematics/docker-socket-proxy/SCHEMATIC.md): Exposes a deny-by-default Docker API to containers over an internal network; endpoint allowlist proxy in front of docker.sock, with an audit script that proves the allowlist.
 - [webhook-rolling-deploy](https://schemaformat.ai/schematics/webhook-rolling-deploy/SCHEMATIC.md): Self-updating Docker Compose deployments: GitHub push webhook via Cloudflare tunnel and path-token receiver into an in-memory queue; a worker pulls the new image through a scoped Docker API proxy. Ack in milliseconds, pull in the background.
+- [media-fetching](https://schemaformat.ai/schematics/media-fetching/SCHEMATIC.md): Privately fetching books and audiobooks: gluetun as a structural VPN kill switch, Deluge sharing its netns, Chaptarr automation, IP-sync for single-IP indexers; tailnet-only UIs.
+- [media-serving](https://schemaformat.ai/schematics/media-serving/SCHEMATIC.md): Audiobookshelf reading the same dataset the fetcher writes; exposure as a first-class parameter (Tailscale by default, tsdproxy or Cloudflare for a hostname).
+- [media-library](https://schemaformat.ai/schematics/media-library/SCHEMATIC.md): Composition schematic wiring media-fetching and media-serving together through a shared volume contract; establishes the schematic-to-schematic dependency convention.
 
 ## The spec
 

@@ -134,6 +134,9 @@ build specification for the capability it provides:
 | [`sops-env-secrets`](schematics/sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 | [`docker-socket-proxy`](schematics/docker-socket-proxy/SCHEMATIC.md) | infrastructure | A spec-only schematic: a deny-by-default Docker API proxy in front of docker.sock, with an audit script that proves the allowlist |
 | [`webhook-rolling-deploy`](schematics/webhook-rolling-deploy/SCHEMATIC.md) | devops | A spec-only schematic: GitHub push webhooks drive image pulls through a tunnel, a path-token receiver, an in-memory queue, and a scoped Docker API proxy — ack in milliseconds, pull in the background |
+| [`media-fetching`](schematics/media-fetching/SCHEMATIC.md) | media | A spec-only schematic: gluetun as a structural VPN kill switch, Deluge sharing its netns, Chaptarr automating grabs, and IP-sync for single-IP indexers; tailnet-only UIs |
+| [`media-serving`](schematics/media-serving/SCHEMATIC.md) | media | A spec-only schematic: Audiobookshelf reading the same dataset the fetcher writes, exposure as a first-class parameter (Tailscale by default, tsdproxy or Cloudflare for a hostname) |
+| [`media-library`](schematics/media-library/SCHEMATIC.md) | media | A composition schematic: no images of its own; it wires media-fetching and media-serving together through a shared volume contract and one grab-to-listen acceptance test |
 
 ### Install
 

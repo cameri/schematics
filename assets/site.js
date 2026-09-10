@@ -104,6 +104,13 @@
     if (plugin.featured) {
       head.appendChild(el("span", "cat-kind kind-featured", "featured"));
     }
+    if (plugin.composes && plugin.composes.length) {
+      var comp = el("span", "cat-kind kind-composes",
+        "composes " + plugin.composes.join(" + "));
+      comp.title = "Composition schematic: wires " +
+        plugin.composes.join(", ") + " into one stack";
+      head.appendChild(comp);
+    }
     card.appendChild(head);
 
       var desc = el("p", "cat-desc", plugin.description || "");

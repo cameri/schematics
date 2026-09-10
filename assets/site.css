@@ -256,6 +256,7 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem; }
 }
 .cat-kind.kind-authoring { color: var(--accent); border-color: var(--accent); }
 .cat-kind.kind-featured { color: var(--accent-2); border-color: var(--accent-2); }
+.cat-kind.kind-composes { color: var(--fg-dim); border-color: var(--rule); }
 .cat-desc { color: var(--fg-dim); font-size: 0.92rem; margin-bottom: 0.8rem; }
 .cat-meta {
   display: flex;

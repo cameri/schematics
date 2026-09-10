@@ -35,13 +35,18 @@ schematic must satisfy, not a style preference:
 7. **Dependencies called out** — every external dependency (runtime, library,
    service, credential, network path) is declared with its purpose, a discovery
    method, and a fallback or failure behavior.
-8. **Applicable context stated** — what the implementer must know about the target
+8. **Composable in kind** - a dependency may be another schematic in the
+   catalog (Kind `schematic` in the Dependencies table, relative link to its
+   SCHEMATIC.md, version pinned by the marketplace entry). A composition
+   schematic owns no images or services: only the shared contracts, the
+   isolation rules between the parts, and the end-to-end acceptance test.
+9. **Applicable context stated** — what the implementer must know about the target
    environment, and explicitly what it must discover locally versus what it may
    assume.
-9. **Configuration flexibility** — behavior differences between deployments are
+10. **Configuration flexibility** — behavior differences between deployments are
    configuration, never code edits. The schematic names every configurable knob,
    its type, default, and effect.
-10. **Pluggable** — the capability defines clean seams: where it attaches to its
+11. **Pluggable** — the capability defines clean seams: where it attaches to its
     host, what interfaces it exposes, and how to remove or replace it without
     collateral damage.
 
