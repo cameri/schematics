@@ -96,6 +96,7 @@
       if (plugin.category) meta.appendChild(el("span", null, plugin.category));
       if (plugin.source) meta.appendChild(el("span", null, plugin.source));
       card.appendChild(meta);
+      var actions = el("div", "cat-actions");
 
       // The copyable artifact: the schematic spec (SCHEMATIC.md) for
       // capability plugins; the skill definition for the authoring plugin.
