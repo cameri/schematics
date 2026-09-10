@@ -8,14 +8,14 @@
 # run on alpine/busybox as well as debian.
 #
 # Parameters:
-#   P-4/P-5/P-10  SECRET_FILE  in-container path of the encrypted dotenv store
+#   P-5/P-10      SECRET_TARGET_PATH  in-container path of the encrypted dotenv store
 #                              default /run/secrets/secrets.env (MUST end .env)
 #   P-9           AGE_KEY_ENV  SOPS_AGE_KEY_FILE=/run/secrets/age-keys
 #   P-6           APP_CMD      the application command line
 
 set -e
 
-SECRET_FILE="${SECRET_FILE:-/run/secrets/secrets.env}"
+SECRET_TARGET_PATH="${SECRET_TARGET_PATH:-/run/secrets/secrets.env}"
 AGE_KEY_ENV="${AGE_KEY_ENV:-SOPS_AGE_KEY_FILE}"
 export "$AGE_KEY_ENV=${SOPS_AGE_KEY_FILE:-/run/secrets/age-keys}"
 
@@ -34,8 +34,8 @@ export "$AGE_KEY_ENV=${SOPS_AGE_KEY_FILE:-/run/secrets/age-keys}"
 
 # Fail loudly if the secret file is missing: a container that starts without
 # its secrets is worse than one that does not start at all (R-9).
-if [ ! -f "$SECRET_FILE" ]; then
-  echo "entrypoint: secret file not found: $SECRET_FILE" >&2
+if [ ! -f "$SECRET_TARGET_PATH" ]; then
+  echo "entrypoint: secret file not found: $SECRET_TARGET_PATH" >&2
   exit 1
 fi
 
@@ -50,4 +50,4 @@ fi
 
 # Decrypt into the process environment and replace this shell with the app.
 # No `--` separator: exec-env takes the command directly after the file.
-exec sops exec-env "$SECRET_FILE" "$APP_CMD"
+exec sops exec-env "$SECRET_TARGET_PATH" "$APP_CMD"

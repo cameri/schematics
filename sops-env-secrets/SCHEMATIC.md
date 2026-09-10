@@ -22,6 +22,16 @@ application process environment. There is no sidecar container, no shared
 secrets volume, and no cleartext on disk. Rotating a secret is one command plus
 a container restart, no rebuild, no ciphertext re-templating.
 
+**Terms used throughout:**
+- **SOPS** (Secrets OPerationS): the encryption tool that encrypts *values*
+  inside a structured file while leaving keys and comments readable, so the
+  result is diffable.
+- **age**: the modern file-encryption tool SOPS uses as its key type here. Each
+  key file holds a private key (`AGE-SECRET-KEY-1...`); the matching public
+  half is the `age1...` string called a *recipient*.
+- **dotenv**: the `KEY=value` line format of a `.env` file.
+- **UID**: the numeric user identifier a process runs as.
+
 Two encryption recipients are used for every secret file: a **host-only master
 key** (break-glass, never inside any container) and a **dedicated per-service
 key** (the only key mounted into that service). A compromised service can
@@ -201,6 +211,7 @@ this schematic was reverse-engineered from):
 | P-8  | KEY_FILE_MODE | octal | `0644` | Compare host UID to container UID (Applicable Context) | Permissions on the mounted dedicated key; `0600` when host UID == container UID, `0644` for a non-root container on a differently-numbered host user |
 | P-9  | AGE_KEY_ENV | string | `SOPS_AGE_KEY_FILE` | N/A: a sops convention | Environment variable pointing sops at the mounted dedicated key |
 | P-10 | SECRET_TARGET_PATH | path | `/run/secrets/${SECRET_MOUNT_NAME}` | N/A: a design decision | Where compose mounts the encrypted file inside the container |
+| P-11 | ENV_FILE_NAME | string | `.env.encrypted` | `test -f` in the service directory | File name the helper scripts operate on inside `P-3`'s service directory (the `.encrypted` suffix is why every sops call passes an explicit `--input-type`) |
 
 ## Modules
 

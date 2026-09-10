@@ -16,7 +16,7 @@
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `SECRET_FILE` | `/run/secrets/secrets.env` | In-container path of the encrypted dotenv store (`P-5`, `P-10`). The name MUST end in `.env`. |
+| `SECRET_TARGET_PATH` | `/run/secrets/secrets.env` | In-container path of the encrypted dotenv store (`P-5`, `P-10`). The name MUST end in `.env`. |
 | `SOPS_AGE_KEY_FILE` | `/run/secrets/age-keys` | Path of the mounted dedicated age key (`P-9`); sops reads it automatically. |
 | `APP_CMD` | (required) | Application command line (`P-6`). Taken from the container's argv when arguments are present, else from the environment. |
 
@@ -26,7 +26,7 @@
 2. Verify the encrypted file exists: exit 1 with a message on stderr if not
    (never start the application without secrets).
 3. Resolve `APP_CMD` from argv or the environment: exit 1 if empty.
-4. `exec sops exec-env "$SECRET_FILE" "$APP_CMD"`: sops decrypts the file
+4. `exec sops exec-env "$SECRET_TARGET_PATH" "$APP_CMD"`: sops decrypts the file
    into the environment it passes to the command and replaces itself with it.
 
 ## Why Not a `--` Separator
