@@ -3,7 +3,7 @@ package docker.authz
 # ─── OPA authorization policy for restricted Docker sandbox access ──
 #
 # This file contains PLACEHOLDERS that must be replaced with values from
-# the Parameters table in BLUEPRINT.md before deployment:
+# the Parameters table in SCHEMA.md before deployment:
 #
 #   SANDBOX_USERNAME          → P-4 value (e.g. "sandbox-agent")
 #   AUTH_HEADER_NAME          → P-9 header name (e.g. "X-Sandbox-Agent")

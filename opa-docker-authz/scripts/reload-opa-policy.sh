@@ -29,7 +29,7 @@ PLUGIN="opa-docker-authz"
 # ─── Step 1: Validate source file ───────────────────────────────
 if [ ! -f "$POLICY_SRC" ]; then
     echo "ERROR: policy source not found: $POLICY_SRC" >&2
-    echo "  Pass the path as an argument, or run from the blueprint root." >&2
+    echo "  Pass the path as an argument, or run from the schema root." >&2
     exit 1
 fi
 

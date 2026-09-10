@@ -1,0 +1,56 @@
+# OpenSSL Configuration File — `.conf` Schema
+#
+# This file documents the OpenSSL configuration format used in
+# `openssl-server.conf` for generating server certificates with
+# Subject Alternative Names (SANs).
+
+## File Extension
+`.conf` — plain text, passed to `openssl req` via the `-config` flag.
+OpenSSL's config format is INI-like with brackets for sections.
+
+## Sections Used
+
+```
+[req]
+distinguished_name = <section>    # Which section defines the DN fields
+req_extensions = <section>        # Extensions to include in the CSR
+x509_extensions = <section>       # Extensions to include in the self-signed cert
+prompt = no                        # Don't prompt for DN values — read from file
+
+[req_distinguished_name]
+CN = <common-name>                 # Common Name for the certificate
+
+[req_ext]                          # Extension definitions
+subjectAltName = @<san-section>    # Reference to SAN list section
+
+[san]
+DNS.1 = <hostname>                 # DNS subject alternative name
+IP.1 = <ip-address>                # IP subject alternative name
+IP.2 = <ip-address>                # Additional IPs
+```
+
+## Behaviour
+
+- `prompt = no` makes OpenSSL read DN values directly from the config instead
+  of prompting interactively. If omitted, OpenSSL waits for stdin input.
+- `req_extensions` applies to Certificate Signing Requests.
+- `x509_extensions` applies when generating a self-signed certificate with
+  `openssl req -x509`.
+- The `@san` syntax references a section by name, not as a string.
+
+## Key Points for Implementers
+
+- The `DOCKER_HOST_IP` placeholder in the template MUST be replaced with
+  the actual host IP before use. Both `IP.1 = 127.0.0.1` and the real IP
+  are needed so Docker accepts connections from both localhost and external
+  clients.
+- OpenSSL's `openssl x509 -req` requires `-extfile` to pass extensions when
+  signing a CSR — just having them in the CSR config is not enough.
+- The server certificate uses `extendedKeyUsage = serverAuth` (implicit in
+  the `san` section); the client certificate uses
+  `extendedKeyUsage = clientAuth`.
+
+## See Also
+
+- `man openssl-req`, `man openssl-x509`, `man openssl.cnf`
+- `skeleton/openssl-server.conf` — the actual config template

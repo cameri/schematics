@@ -1,0 +1,65 @@
+# Agentic Schemas Marketplace — `marketplace.json` Schema
+#
+# This file documents the format of `marketplace.json`, which lists
+# all schemas in this repository for discovery by AI coding agents.
+# The format follows the Claude Code marketplace plugin discovery spec.
+
+## File Extension
+`.json` — standard JSON, stored at `<repo-root>/.agent-schemas/marketplace.json`.
+
+## Structure
+
+```jsonc
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "onlygpus-schemas",              // Marketplace identifier
+  "description": "Agentic schemas for...",   // One-line description
+  "owner": {
+    "name": "Ricardo Arturo Cabral Mejía",  // Author name
+    "url": "https://example.com"            // Optional URL
+  },
+  "plugins": [                               // List of schema entries
+    {
+      "name": "opa-docker-authz",            // Schema directory name
+      "description": "Grants a...",          // From SCHEMA.md frontmatter
+      "source": "./opa-docker-authz",        // Relative path to schema dir
+      "category": "infrastructure",          // Classification tag
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "url": "https://agenticschemas.ai"
+      },
+      "keywords": ["docker", "opa", "tls"]  // Search keywords
+    }
+  ]
+}
+```
+
+## Fields
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `$schema` | yes | string | Validation schema URL |
+| `name` | yes | string | Marketplace identifier (`onlygpus-schemas`) |
+| `description` | yes | string | Brief description of the repo |
+| `owner.name` | yes | string | Author's full name |
+| `owner.email` | no | string | Contact email |
+| `owner.url` | no | string | Author website |
+| `plugins[].name` | yes | string | Schema name (matches directory) |
+| `plugins[].description` | yes | string | From SCHEMA.md `description:` frontmatter |
+| `plugins[].source` | yes | string | Relative path to schema directory |
+| `plugins[].category` | yes | string | `infrastructure`, `engineering`, `devops`, etc. |
+| `plugins[].keywords` | no | string[] | Search keywords |
+| `plugins[].author.name` | no | string | Per-schema author override |
+| `plugins[].author.email` | no | string | Per-schema author email |
+| `plugins[].author.url` | no | string | Per-schema author URL |
+
+## Adding a New Schema
+
+1. Create `schemas/<name>/SCHEMA.md` with `description:` in frontmatter.
+2. Add an entry to `plugins[]` in marketplace.json.
+3. Commit and push.
+
+## See Also
+
+- `SCHEMA.md` — the full schema document for a single capability
+- `docs/schemas/.agent-schemas/marketplace.json` — the actual file

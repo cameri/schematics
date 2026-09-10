@@ -1,0 +1,89 @@
+# Rego Policy File — `.rego` Schema
+#
+# Rego is Open Policy Agent's policy language. This file describes the
+# structure and conventions used in `agent.rego` so any LLM implementer
+# can read and modify it without prior Rego knowledge.
+
+## File Extension
+`.rego` — plain text, evaluated by the OPA engine embedded in the
+`opa-docker-authz` Docker plugin.
+
+## Syntax Overview
+
+```
+package <name>              # Every file declares a package.
+                            # The plugin expects "docker.authz".
+
+import future.keywords.in    # Enables the `in` operator (membership check).
+
+default <rule> := <value>    # Default value when no rule matches.
+                            # The plugin reads `allow` — default `false` = deny.
+
+<rule> if { <conditions> }   # A rule body. If all conditions are true,
+                            # the rule assigns `true` to itself.
+                            # Multiple rules with the same name = OR logic:
+                            # `allow if { A }` and `allow if { B }` means
+                            # "allow when A OR B".
+
+<rule> if {                  # Multiple conditions are ANDed.
+    condition1
+    condition2
+}
+```
+
+## Built-in Functions Used in This Policy
+
+| Function | Purpose | Example |
+|----------|---------|---------|
+| `contains(str, substr)` | String contains check | `contains(input.PathPlain, "/build")` |
+| `startswith(str, prefix)` | String prefix check | `startswith(name, "/buildx_buildkit_")` |
+| `endswith(str, suffix)` | String suffix check | `endswith(input.PathPlain, "/start")` |
+| `object.get(obj, [keys], default)` | Safe key access — returns default if key missing | `object.get(body, ["Labels"], {})` |
+| `sprintf(format, [args])` | String formatting | `sprintf("/%s", [action])` |
+
+## Input Schema (Provided by the Plugin)
+
+Every Docker API request produces this JSON, which OPA evaluates as `input`:
+
+```json
+{
+  "User": "sandbox-agent",       // TLS certificate CN, or "" for unix socket
+  "Method": "GET",               // HTTP method
+  "Path": "/v1.47/containers/json",
+  "PathPlain": "/containers/json?all=true",   // Path without API version
+  "Headers": { "X-My-Header": ["true"] },
+  "Body": {
+    "Labels": { "key": "value" },
+    "HostConfig": {
+      "Binds": ["/src:/dst"],
+      "Mounts": [{"Source": "/src", "Target": "/dst", "Type": "bind"}]
+    },
+    "Name": "/container-name"
+  }
+}
+```
+
+## Output
+
+The policy sets `allow` to `true` or `false`. The `opa-docker-authz` plugin
+reads this value. If `allow` is undefined or `false`, the plugin returns
+`403 Forbidden: authorization denied by plugin opa-docker-authz`.
+
+## Evaluation Model
+
+- Every rule is evaluated from every request — there is no caching.
+- If `allow` is not set by any rule, it defaults to `false` (the `default allow := false` declaration).
+- Multiple `allow if { ... }` rules are OR-ed: the request is allowed if ANY rule's conditions are true.
+- Multiple conditions inside one rule are AND-ed: all must be true.
+
+## Idempotency
+
+Rego evaluation is pure (no side effects) and stateless. The same input always
+produces the same output. Policy files are read at plugin-enable time; changing
+a `.rego` file requires a plugin bounce (disable + enable) to take effect.
+
+## See Also
+
+- [Open Policy Agent documentation](https://www.openpolicyagent.org/docs/latest/policy-language/)
+- `skeleton/agent.rego` — the actual policy file using these patterns
+- `modules/opa-policy.md` — module contract for this policy

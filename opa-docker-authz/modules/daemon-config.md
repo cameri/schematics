@@ -12,7 +12,7 @@ conflict with that flag.
 
 ## Inputs
 
-- Parameters P-1, P-2, P-6, P-10 from BLUEPRINT.md.
+- Parameters P-1, P-2, P-6, P-10 from SCHEMA.md.
 - The certificate files created in Phase 2: `ca.pem`, `server-cert.pem`,
   `server-key.pem`.
 - The existing `daemon.json` at P-6/daemon.json (may be absent).
@@ -36,7 +36,7 @@ conflict with that flag.
   `authorization-plugins: ["opa-docker-authz"]` with valid JSON syntax.
 - **Invalid daemon.json**: Docker fails to start. Check logs with
   `journalctl -u docker -n 50 --no-pager`. Rollback is described in
-  BLUEPRINT.md.
+  SCHEMA.md.
 - **systemd drop-in conflict**: If the drop-in uses a different ExecStart
   format than the host's Docker version requires, check `systemctl show
   docker --property=ExecStart` for the current argument pattern and adapt.
