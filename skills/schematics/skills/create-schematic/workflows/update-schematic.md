@@ -27,17 +27,17 @@ never edited — tell the user and stop.
   discovery method, fixed example, clearer wording) → edit, patch version bump.
 - **Implementation drift** (the implementer built it differently and the user
   ratified the difference) → update the schematic to match ratified reality;
-  record the decision in the Decisions Log.
+  record the decision in the Decisions and Open Questions section.
 
 ## Step 3: Apply the edit under living-spec rules
 
 - Never delete a requirement, acceptance test, or parameter. Replace it with
   its successor and mark the old entry `superseded: by R-<n>` (kept for
   traceability with implementations built against the older revision).
-- Every change adds an entry to the Changelog section: version, date, one-line
-  summary, sections touched.
 - Every judgment call made during the update (ambiguity resolved, tradeoff
-  chosen) gets a Decisions Log entry — the next updater reads that log first.
+  chosen) gets an entry in the Decisions and Open Questions section — the
+  next updater reads that log first. The frontmatter version carries the
+  rest of the history.
 - Parameter changes update the Parameters table AND every usage of the
   parameter elsewhere in the package — grep the whole package for the old name
   before finishing.
@@ -58,7 +58,7 @@ This workflow is complete when:
 
 - [ ] Change classified; version bumped per severity
 - [ ] No requirement/test/parameter deleted — superseded entries retained
-- [ ] Changelog and Decisions Log updated
+- [ ] Decisions and Open Questions section updated
 - [ ] All usages of renamed/changed parameters updated across the whole package
 - [ ] Re-audit passes; committed; delta summarized to the user
 </success_criteria>

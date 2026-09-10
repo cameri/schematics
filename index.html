@@ -18,6 +18,7 @@
       <a href="#what">What</a>
       <a href="#how">How</a>
       <a href="#differences">vs Skills</a>
+      <a href="#faq">FAQ</a>
       <a href="#catalog">Catalog</a>
       <a href="#spec">The Spec</a>
     </nav>
@@ -155,6 +156,38 @@ description: One-line summary copied to the marketplace
         but a shell and a text editor. Skills and plugins are how one agent gets an ability; schematics
         are how everyone gets the ability rebuilt, anywhere.
       </p>
+    </section>
+
+
+    <!-- ─── FAQ ──────────────────────────────────────────── -->
+    <section class="section" id="faq">
+      <h2 class="section-title">Hard questions, answered plainly</h2>
+      <div class="grid-2">
+        <div class="feature">
+          <h3>Why rebuild from a spec when you could fork the code?</h3>
+          <p>Most of the time you shouldn't — code is copy-once, and forking is the right default. A schematic wins where forking loses: the source can't be shared, the target environment diverges enough that adaptation costs more than a parameterized rebuild, or you don't want to run a stranger's artifact and prefer that your agent builds from something fully readable. If none of those apply, fork.</p>
+        </div>
+        <div class="feature">
+          <h3>Isn't a malicious schematic just prompt injection with shell steps?</h3>
+          <p>It would be, if implementation were automatic. It isn't: building only places files, and the hard gate requires a human to review the spec — including every shell command the phases will run — before any implementation starts. Threat model, plainly: safer than pulling an opaque image (every line is readable), weaker than writing the capability yourself.</p>
+        </div>
+        <div class="feature">
+          <h3>Isn't this just a README with a numbering scheme?</h3>
+          <p>A README rarely answers "could an agent that never spoke to the author succeed?" That is the test a schematic is written to pass, and the numbering is what makes it auditable: every acceptance test maps to a requirement, so verification is checkable rather than vibes. The convention does cost more than a README; we think the audit trail is the part worth paying for.</p>
+        </div>
+        <div class="feature">
+          <h3>Don't Terraform, Helm, and Ansible already do this?</h3>
+          <p>For infrastructure with a runtime, yes — use them. A schematic is what you reach for when no runtime expresses the work: cross-domain capabilities that mix config, policy, certificates, and procedure, executed by an agent with a shell and a text editor instead of a toolchain.</p>
+        </div>
+        <div class="feature">
+          <h3>Won't better models make this obsolete?</h3>
+          <p>Parts of it, and we trim those parts as they do. What ages well: verification literals, parameter discovery, explicit failure behavior. What ages badly: hand-holding. The format is maintained as a living spec precisely so the dumb-builder scaffolding can be cut as builders get smarter.</p>
+        </div>
+        <div class="feature">
+          <h3>Who has actually built anything from one?</h3>
+          <p>The format is new and independent adoption is the honest gap. The first schematic was reverse-engineered from a production fleet and re-implemented from the spec; the next milestone is an independent build by someone with no connection to the author, logged publicly.</p>
+        </div>
+      </div>
     </section>
 
     <!-- ─── Catalog (schematics only) ────────────────────── -->

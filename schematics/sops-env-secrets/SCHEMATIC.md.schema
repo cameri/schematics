@@ -38,10 +38,7 @@ In this order (from `template/SCHEMA.template.md`):
 11. **Verification and Acceptance**: A-1, A-2, ... coverage map to requirements
 12. **Failure Modes and Rollback**: per-phase failure detection and recovery
 13. **Removal**: clean uninstall procedure
-14. **Open Questions**: undecided points with defaults
-15. **Decisions Log**: date-stamped judgments
-16. **Changelog**: version table
-17. **Package Layout**: directory tree with file purposes
+14. **Decisions and Open Questions**: judgment calls, newest last, and undecided points each with the implementer's default
 
 ## Authoring Rules
 

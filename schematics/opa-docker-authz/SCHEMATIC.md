@@ -1,6 +1,6 @@
 ---
 name: opa-docker-authz
-version: 0.1.0
+version: 0.2.0
 status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
@@ -512,7 +512,18 @@ docker ps    # on unix socket — should work
 docker --tlsverify -H tcp://P-1:P-2 ... ps  # should fail (no listener)
 ```
 
-## Open Questions
+## Decisions and Open Questions
+
+Decisions:
+
+- 2026-09-09 — Schematic reverse-engineered from the `containers/claude/`
+  repository at `/workspace/containers/`. The setup includes: a self-hosted
+  Docker TLS certificate infrastructure, the OPA authorization plugin, a Rego
+  policy file, sandbox container provisioning files, and a policy reload
+  script. The original host is running Ubuntu with systemd and the sandbox
+  container uses `agent` as the non-root user.
+
+Open questions:
 
 - **Q-1**: The OPA policy uses `sprintf` for string concatenation (`lifecycle_action`
   path check) — some OPA versions may require `sprintf("%s", [action])` instead
@@ -528,37 +539,5 @@ docker --tlsverify -H tcp://P-1:P-2 ... ps  # should fail (no listener)
   If using a different tag, the `import future.keywords.in` syntax may not be
   supported. Default: specify `v0.10` or later.
 
-## Decisions Log
 
-- 2026-09-09 — Schematic reverse-engineered from the `containers/claude/`
-  repository at `/workspace/containers/`. The setup includes: a self-hosted
-  Docker TLS certificate infrastructure, the OPA authorization plugin, a Rego
-  policy file, sandbox container provisioning files, and a policy reload
-  script. The original host is running Ubuntu with systemd and the sandbox
-  container uses `agent` as the non-root user.
 
-## Changelog
-
-| Version | Date       | Summary                        | Sections touched       |
-|---------|------------|--------------------------------|------------------------|
-| 0.1.0   | 2026-09-09 | Initial schematic (reverse-engineered) | all                   |
-
-## Package Layout
-
-```
-docs/schemas/opa-docker-authz/
-├── SCHEMA.md               ← this file
-├── SCHEMA.md.schema        ← format spec for SCHEMA.md (frontmatter + sections)
-├── modules/
-│   ├── opa-policy.md        ← Rego policy doc + the policy text
-│   ├── daemon-config.md     ← Docker daemon.json + systemd drop-in spec
-│   ├── sandbox-provisioning.md ← Client certs, env, config.json
-│   └── policy-reload.md     ← Plugin bounce procedure
-├── scripts/
-│   └── reload-opa-policy.sh ← Host-side policy reload (portable version)
-└── skeleton/
-    ├── openssl-server.conf      ← OpenSSL config template with SANs
-    ├── openssl-server.conf.schema ← format spec for OpenSSL .conf syntax
-    ├── agent.rego               ← The Rego policy file ready to deploy
-    └── agent.rego.schema        ← format spec for Rego policy language
-```

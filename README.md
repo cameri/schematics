@@ -212,6 +212,10 @@ independently — if you've built something an agent or a team should be able to
 reproduce from a spec, distill it and open a PR. The
 `schematics` plugin's reverse-engineering workflow does the distilling.
 
+The hard questions (why rebuild instead of fork, prompt-injection risk,
+"IaC already does this") are answered in the site
+[FAQ](https://schemaformat.ai/#faq).
+
 **Rule: no PRs without an issue.** Every PR must reference an open issue
 opened beforehand to start the discussion. PRs from outside contributors
 without a prior issue are rejected automatically, and the rejection cites

@@ -1,6 +1,6 @@
 ---
 name: sops-env-secrets
-version: 0.1.0
+version: 0.2.0
 status: stable
 spec: 1
 description: Encrypt service secrets with SOPS + age and inject them into container processes as environment variables at boot, in-memory, dual-recipient encryption, per-service key blast-radius, docker-secret wiring, and rotation without rebuilds.
@@ -522,7 +522,18 @@ git status --porcelain .env.encrypted       # still tracked, untouched
 Keeping the encrypted file is intentional: it is the only artifact that cannot
 be reconstructed if the keys are ever rotated back into use.
 
-## Open Questions
+## Decisions and Open Questions
+
+Decisions:
+
+- 2026-09-10: Reverse-engineered from a production Docker Compose fleet where
+  the single-container `sops exec-env` pattern runs in a dozen services. Two
+  things were deliberately simplified out of the original: the older
+  sidecar/watcher container pattern (superseded; it appears only in Removal
+  context as historical), and repository-specific helper naming. The public
+  contract kept intact is the in-memory decrypt + per-service key blast radius.
+
+Open questions:
 
 - **Q-1**: Exact `age-keygen` behaviour differs across age versions: some write
   the public key as a comment line in the private key file, some do not.
@@ -537,39 +548,5 @@ be reconstructed if the keys are ever rotated back into use.
   operator. Default: no, the recipient list is recoverable from the encrypted
   file with `grep -o 'age1[a-z0-9]*'`.
 
-## Decisions Log
 
-- 2026-09-10: Reverse-engineered from a production Docker Compose fleet where
-  the single-container `sops exec-env` pattern runs in a dozen services. Two
-  things were deliberately simplified out of the original: the older
-  sidecar/watcher container pattern (superseded; it appears only in Removal
-  context as historical), and repository-specific helper naming. The public
-  contract kept intact is the in-memory decrypt + per-service key blast radius.
 
-## Changelog
-
-| Version | Date       | Summary | Sections touched |
-|---------|------------|---------|------------------|
-| 0.1.0   | 2026-09-10 | Initial schematic (reverse-engineered) | all |
-
-## Package Layout
-
-```
-sops-env-secrets/
-├── SCHEMATIC.md          ← this file
-├── modules/
-│   ├── key-hierarchy.md  ← master vs dedicated keys, dual-recipient encryption
-│   ├── env-secrets.md    ← the sops exec-env boot pattern
-│   ├── binary-secrets.md ← non-env secrets (SSH keys, keystores)
-│   └── rotation.md       ← value changes without rebuilds
-├── scripts/
-│   ├── sops-set-env.sh   ← set one secret over stdin (never argv)
-│   └── sops-prepare-service.sh ← dedicated key + dual-recipient re-encrypt
-└── skeleton/
-    ├── Containerfile.sops      ← variant A (copy binary) / B (base on sops)
-    ├── Containerfile.sops.schema
-    ├── compose-secrets.yml     ← service + secrets wiring
-    ├── compose-secrets.yml.schema
-    ├── entrypoint.sh           ← the boot wrapper
-    └── entrypoint.sh.schema
-```

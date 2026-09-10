@@ -133,28 +133,21 @@ How to detach/uninstall the capability and leave the host working: what was
 added where, what is safe to delete, what must be restored, and how to
 confirm clean removal. (Pluggability: a stated, safe procedure.)
 
-## Open Questions
+## Decisions and Open Questions
 
-Undecided points, each with the default the implementer may take if the
-author has not answered by implementation time.
-
-- **Q-1**: ... default: ...
-
-## Decisions Log
+Decisions:
 
 Judgment calls made during authoring and updating, newest last. The next
 updater reads this first.
 
 - <date> — <decision and why>
 
-## Changelog
+Open questions:
 
-| Version | Date | Summary | Sections touched |
-|---------|------|---------|------------------|
-| 0.1.0   |      | Initial schematic | all |
+Undecided points, each with the default the implementer may take if the
+author has not answered by implementation time.
 
-## Package Layout
+- **Q-1**: ... default: ...
 
-What ships in this directory besides SCHEMATIC.md and how each part is meant
-to be used by the implementer (`modules/`, `scripts/`, `skeleton/`,
-`templates/` — list only what exists).
+
+
