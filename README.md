@@ -162,8 +162,10 @@ living specs. Install it, then ask any agent to "create a schematic" or
 Or read the skill directly:
 [`skills/schematics/skills/create-schematic/SKILL.md`](skills/schematics/skills/create-schematic/SKILL.md).
 
-To publish a schematic here: create `<name>/SCHEMATIC.md`, add an entry to
-`.agent-schematics/marketplace.json`, and open a PR.
+To publish a schematic here: open an issue describing the capability, then
+create `<name>/SCHEMATIC.md`, add an entry to
+`.agent-schematics/marketplace.json`, and open a PR referencing the issue.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full process.
 
 ## Contributing
 
@@ -171,6 +173,11 @@ Schematics are contributions. A schematic is a capability others can build
 independently — if you've built something an agent or a team should be able to
 reproduce from a spec, distill it and open a PR. The
 `schematics` plugin's reverse-engineering workflow does the distilling.
+
+**Rule: no PRs without an issue.** Every PR must reference an open issue
+opened beforehand to start the discussion. PRs from outside contributors
+without a prior issue are rejected automatically, and the rejection cites
+this rule. Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
