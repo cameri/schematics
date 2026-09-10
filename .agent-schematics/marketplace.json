@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "schematics",
-      "description": "The authoring plugin — authors, reverse-engineers, and maintains agentic schematics: self-contained build specifications anyone can implement independently, without central coordination. Provides the create-schematic skill.",
+      "description": "The authoring plugin — authors, reverse-engineers, and maintains agentic schematics: self-contained build specifications anyone can implement independently, without central coordination. Provides the create-schematic and build-schematic skills.",
       "source": "./skills/schematics",
       "spec": "skills/create-schematic/SKILL.md",
       "category": "authoring",

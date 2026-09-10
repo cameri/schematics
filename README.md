@@ -129,7 +129,7 @@ build specification for the capability it provides:
 
 | Plugin | Kind | What it provides |
 |--------|------|------------------|
-| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` skill: author, reverse-engineer, and maintain schematics |
+| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` and `build-schematic` skills: author, reverse-engineer, maintain, and build schematics from any repo |
 | [`opa-docker-authz`](schematics/opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 | [`sops-env-secrets`](schematics/sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 
@@ -146,6 +146,44 @@ A schematic doesn't need to be installed — it's a spec, not a program. Hand
 `SCHEMATIC.md` (plus referenced files) to any agent session, or copy it from
 the website with one click. The agent implements the phases and verifies
 against the acceptance tests. No interview, no plugin required.
+
+### Build from any repo
+
+The `schematics` plugin's `build-schematic` skill pulls a schematic package
+from any public GitHub repository into the current project:
+
+```
+build <name>@<user>/<repo>
+```
+
+It resolves the package (via the repo's `.agent-schematics/marketplace.json`
+catalog or conventional paths), downloads the spec plus its modules, scripts,
+and skeleton, validates the spec against the schematic format, and does
+nothing but place files — nothing executes at build time, and fetched specs
+are treated as untrusted data. The package lands in `.schematics/<name>/`;
+review it, then ask the session to implement it.
+
+## Schematics vs skills and plugins
+
+A **skill** teaches an agent a procedure in the agent's own format. It is
+tied to the harness that loads it, and its instructions assume the agent's
+tools and context.
+
+A **plugin** is a distribution wrapper: it packages skills, commands, and
+agents for one harness's marketplace and installer.
+
+A **schematic** is none of these. It is a vendor-agnostic build specification:
+plain Markdown and portable shell, with every requirement, dependency,
+parameter, phase, and acceptance test stated inside the package. A schematic
+doesn't extend an agent — it instructs how to build a capability, and any
+builder (any LLM, any team, any org) can execute it with zero coordination
+with the author. Skills and plugins are how one agent gets an ability;
+schematics are how everyone gets the ability rebuilt, anywhere.
+
+The relationship is complementary: this repo ships the authoring skills as a
+plugin because that is a convenient way to distribute them, but the
+schematics those skills produce deliberately depend on nothing but a shell
+and a text editor.
 
 ## Author a schematic
 

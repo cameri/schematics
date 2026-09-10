@@ -1,6 +1,6 @@
 {
   "name": "schematics",
-  "description": "Creates decentralized capability schematics — published, self-contained build specifications that remove the author from the loop entirely: once published, any builder (any LLM, any human team, any organization) can construct the capability independently, with zero coordination with the author — the spec is the only coordination mechanism. Also reverse-engineers schematics from existing implementations and maintains them as living specs.",
-  "version": "0.1.0",
+  "description": "Creates decentralized capability schematics — published, self-contained build specifications that remove the author from the loop entirely: once published, any builder (any LLM, any human team, any organization) can construct the capability independently, with zero coordination with the author — the spec is the only coordination mechanism. Also reverse-engineers schematics from existing implementations, maintains them as living specs, and builds schematic packages from any public GitHub repository (build <name>@<user>/<repo>).",
+  "version": "0.2.0",
   "keywords": ["schematic", "specification", "portability", "handoff", "architecture", "decentralized"]
 }

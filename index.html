@@ -17,6 +17,7 @@
     <nav class="nav-links">
       <a href="#what">What</a>
       <a href="#how">How</a>
+      <a href="#differences">vs Skills</a>
       <a href="#catalog">Catalog</a>
       <a href="#spec">The Spec</a>
     </nav>
@@ -100,7 +101,7 @@
         <div class="flow-step">
           <span class="flow-num">03</span>
           <h3>Anyone builds, independently</h3>
-          <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted.</p>
+          <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted. Or build one from any GitHub repo: <code>build &lt;name&gt;@&lt;user&gt;/&lt;repo&gt;</code>.</p>
         </div>
       </div>
       <div class="code-window">
@@ -129,6 +130,31 @@ description: One-line summary copied to the marketplace
 ## Acceptance         → A-1, A-2, ... (one per requirement)
 ## Removal            → stated, safe uninstall procedure</code></pre>
       </div>
+    </section>
+
+    <!-- ─── Differences ──────────────────────────────────── -->
+    <section class="section" id="differences">
+      <h2 class="section-title">Schematics vs skills and plugins</h2>
+      <div class="grid-3">
+        <div class="feature">
+          <h3>Skill</h3>
+          <p>Teaches one agent a procedure in that agent's own format. Tied to the harness that loads it; its instructions assume the agent's tools and context.</p>
+        </div>
+        <div class="feature">
+          <h3>Plugin</h3>
+          <p>A distribution wrapper: packages skills, commands, and agents for one harness's marketplace and installer.</p>
+        </div>
+        <div class="feature">
+          <h3>Schematic</h3>
+          <p>None of these. A vendor-agnostic build specification — plain Markdown and portable shell. It doesn't extend an agent; it instructs how to build a capability, and any builder can execute it with zero coordination with the author.</p>
+        </div>
+      </div>
+      <p class="section-lede">
+        The relationship is complementary: this repo ships the authoring skills as a plugin because that
+        is a convenient way to distribute them, but the schematics those skills produce depend on nothing
+        but a shell and a text editor. Skills and plugins are how one agent gets an ability; schematics
+        are how everyone gets the ability rebuilt, anywhere.
+      </p>
     </section>
 
     <!-- ─── Catalog ──────────────────────────────────────── -->
@@ -163,13 +189,13 @@ description: One-line summary copied to the marketplace
         </div>
         <div>
           <h3>File formats, self-describing</h3>
-          <ul class="principles">
-            <li><code>agent.rego</code> + <code>agent.rego.schema</code> — Rego policy language guide</li>
-            <li><code>openssl-server.conf</code> + <code>.conf.schema</code> — OpenSSL config syntax</li>
-            <li><code>SCHEMATIC.md</code> + <code>SCHEMATIC.md.schema</code> — this spec's own format</li>
-            <li><code>marketplace.json</code> + <code>marketplace.json.schema</code> — catalog format</li>
-          </ul>
-          <p>The convention: every <code>&lt;name&gt;.&lt;ext&gt;</code> gets a <code>&lt;name&gt;.&lt;ext&gt;.schema</code> alongside it, so an agent with zero prior knowledge of the syntax can still work with the file.</p>
+          <p>Whatever file types a schematic uses, the package must explain them. Any file format a
+          builder can't be assumed to know ships with its own schema companion documenting the syntax,
+          so an agent with zero prior knowledge of it can still work with the file:</p>
+          <p class="code-inline"><code>&lt;name&gt;.&lt;ext&gt;</code> + <code>&lt;name&gt;.&lt;ext&gt;.schema</code></p>
+          <p>The convention is format-agnostic: config files, policy files, manifests, whatever the
+          capability needs. If a reader would have to look the syntax up elsewhere, the package carries
+          the syntax.</p>
         </div>
       </div>
     </section>

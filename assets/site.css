@@ -31,6 +31,8 @@ body {
 }
 ::selection { background: var(--selection); }
 a { color: var(--accent); text-decoration: none; }
+.code-inline { margin: 0.8rem 0; }
+.code-inline code { font-size: 0.9em; color: var(--fg); padding: 0.3em 0.6em; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 code {
   font-family: var(--mono);
