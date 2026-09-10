@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "onlygpus-schemas",
-  "description": "Agentic schemas for the OnlyGPUs project stack — self-contained specification packages any LLM can implement.",
+  "name": "onlygpus-schematics",
+  "description": "Agentic schematics for the OnlyGPUs project stack — self-contained specification packages any LLM can implement.",
   "owner": {
     "name": "Ricardo Arturo Cabral Mejía",
     "email": "me@ricardocabral.io"

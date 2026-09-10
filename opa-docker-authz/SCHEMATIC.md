@@ -8,9 +8,9 @@ created: 2026-09-09
 updated: 2026-09-09
 ---
 
-# Schema: OPA Authorization for Docker Sandbox Access
+# Schematic: OPA Authorization for Docker Sandbox Access
 
-> **Reverse-engineered.** This schema was reconstructed from a running
+> **Reverse-engineered.** This schematic was reconstructed from a running
 > implementation at `/workspace/containers/claude/`. Components where the
 > reconstruction inferred behaviour from code rather than observing it at
 > runtime carry `inferred:` markers in their sections. Two
@@ -24,7 +24,7 @@ updated: 2026-09-09
 
 Grants a sandbox container (isolated agent, CI runner, or untrusted workload)
 restricted TCP access to the host Docker daemon, policed by Open Policy Agent.
-After implementing this schema, the host's Docker daemon listens on a TLS
+After implementing this schematic, the host's Docker daemon listens on a TLS
 port, an OPA plugin authorizes every API call against a Rego policy, and the
 sandbox container carries a client TLS certificate and environment variables that
 let it run Docker commands — but only operations the policy permits.
@@ -490,7 +490,7 @@ Clean teardown reverses each phase in the opposite order:
    docker plugin disable opa-docker-authz
    docker plugin rm opa-docker-authz
    ```
-3. Restore daemon.json to pre-schema state:
+3. Restore daemon.json to pre-schematic state:
    ```bash
    # Remove tlsverify, tlscacert, tlscert, tlskey, authorization-plugins
    # or restore from backup
@@ -530,7 +530,7 @@ docker --tlsverify -H tcp://P-1:P-2 ... ps  # should fail (no listener)
 
 ## Decisions Log
 
-- 2026-09-09 — Schema reverse-engineered from the `containers/claude/`
+- 2026-09-09 — Schematic reverse-engineered from the `containers/claude/`
   repository at `/workspace/containers/`. The setup includes: a self-hosted
   Docker TLS certificate infrastructure, the OPA authorization plugin, a Rego
   policy file, sandbox container provisioning files, and a policy reload
@@ -541,7 +541,7 @@ docker --tlsverify -H tcp://P-1:P-2 ... ps  # should fail (no listener)
 
 | Version | Date       | Summary                        | Sections touched       |
 |---------|------------|--------------------------------|------------------------|
-| 0.1.0   | 2026-09-09 | Initial schema (reverse-engineered) | all                   |
+| 0.1.0   | 2026-09-09 | Initial schematic (reverse-engineered) | all                   |
 
 ## Package Layout
 

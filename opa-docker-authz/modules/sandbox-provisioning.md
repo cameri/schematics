@@ -15,7 +15,7 @@ sensitive material — it's injected at runtime through the bind mount.
 
 ## Inputs
 
-- Parameters P-1, P-2, P-8, P-9 from SCHEMA.md.
+- Parameters P-1, P-2, P-8, P-9 from SCHEMATIC.md.
 - Certificate files from Phase 2: `ca.pem`, `sandbox-cert.pem`,
   `sandbox-key.pem`.
 

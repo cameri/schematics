@@ -12,7 +12,7 @@ policy in under a second with zero container impact.
 
 ## Inputs
 
-- Parameters P-6, P-7 from SCHEMA.md.
+- Parameters P-6, P-7 from SCHEMATIC.md.
 - The updated `agent.rego` policy file at `<POLICY_SRC>` (the implementer's
   working copy, e.g. in a git repository).
 - The OPA plugin must be installed and enabled (from Phase 4).
@@ -56,5 +56,5 @@ For most setups this window is under one second.
 ## Removal Notes
 
 - No removal needed for this module — it's a maintenance procedure, not a
-  component. If the entire capability is removed (per SCHEMA.md's Removal
+  component. If the entire capability is removed (per SCHEMATIC.md's Removal
   section), this procedure becomes moot.

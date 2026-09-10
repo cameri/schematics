@@ -1,6 +1,6 @@
-# Agentic Schema Document — `SCHEMA.md` Format
+# Agentic Schematic Document — `SCHEMATIC.md` Format
 #
-# A SCHEMA.md is a self-contained specification for a capability that
+# A SCHEMATIC.md is a self-contained specification for a capability that
 # any LLM can implement without external context. This file documents
 # the required frontmatter and section structure.
 
@@ -11,7 +11,7 @@
 
 ```yaml
 ---
-name: <kebab-case-name>       # REQUIRED: Unique schema identifier
+name: <kebab-case-name>       # REQUIRED: Unique schematic identifier
 version: 0.1.0                # REQUIRED: Semantic version
 status: draft                 # REQUIRED: draft | stable | superseded
 spec: 1                       # REQUIRED: Blueprint format version (always 1)
@@ -25,7 +25,7 @@ updated: 2026-09-09           # REQUIRED: ISO date
 
 In this order (from `template/SCHEMA.template.md`):
 
-1. **Title** — `# Schema: <Name>` with optional reverse-engineered note
+1. **Title** — `# Schematic: <Name>` with optional reverse-engineered note
 2. **Applicable Context** — three lists: Must discover locally, May assume, Must not change
 3. **Scope** — In scope, Out of scope / non-goals, Preservation List (reverse-engineered only)
 4. **Requirements** — numbered R-1, R-2, ... (testable, each maps to an acceptance test)
@@ -54,5 +54,5 @@ In this order (from `template/SCHEMA.template.md`):
 
 ## See Also
 
-- `SCHEMA.md` in any schema directory — a concrete example
-- `docs/schemas/opa-docker-authz/SCHEMA.md` — the first schema implementing this format
+- `SCHEMATIC.md` in any schematic directory — a concrete example
+- `docs/schematics/opa-docker-authz/SCHEMATIC.md` — the first schematic implementing this format

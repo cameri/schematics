@@ -44,7 +44,7 @@ Side effects: none. The Rego evaluation is pure and stateless.
 
 ## Dependencies
 
-- D-1, D-3, D-4 (from SCHEMA.md)
+- D-1, D-3, D-4 (from SCHEMATIC.md)
 - Parameters P-3, P-4, P-8, P-9, P-11, P-12
 
 ## Failure Behavior
