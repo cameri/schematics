@@ -25,6 +25,7 @@
       "source": "./opa-docker-authz",        // Relative path to schematic dir
       "spec": "SCHEMATIC.md",                // Optional: copyable spec file (default SCHEMATIC.md)
       "category": "infrastructure",          // Classification tag
+      "featured": true,                      // Optional: featured on the site, rotated over time
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
         "url": "https://schemaformat.ai"
@@ -49,6 +50,7 @@
 | `plugins[].description` | yes | string | From SCHEMATIC.md `description:` frontmatter |
 | `plugins[].source` | yes | string | Relative path to schematic directory |
 | `plugins[].spec` | no | string | File the site's "Copy as Markdown" button fetches, relative to `source`. Default: `SCHEMATIC.md`. Use for plugins whose copyable artifact lives elsewhere (e.g. `skills/create-schematic/SKILL.md`). |
+| `plugins[].featured` | no | boolean | Featured on the site; featured entries sort first and carry a badge. Rotation is flipping this flag. |
 | `plugins[].category` | yes | string | `infrastructure`, `authoring`, `engineering`, `devops`, etc. |
 | `plugins[].keywords` | no | string[] | Search keywords |
 | `plugins[].author.name` | no | string | Per-schematic author override |

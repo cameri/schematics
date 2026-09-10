@@ -70,7 +70,9 @@
     // Plugins and schematics are different things: capability entries carry a
     // SCHEMATIC.md build spec; the authoring entry is the plugin that creates
     // them. They render into separate hosts and never mix.
-    var schematics = (plugins || []).filter(function (p) { return p.category !== "authoring"; });
+    var schematics = (plugins || [])
+      .filter(function (p) { return p.category !== "authoring"; })
+      .sort(function (a, b) { return (b.featured ? 1 : 0) - (a.featured ? 1 : 0); });
     var pluginEntry = (plugins || []).find(function (p) { return p.category === "authoring"; });
 
     // Hero stat: schematic count (the authoring plugin is not a schematic)
@@ -98,6 +100,9 @@
     head.appendChild(el("h3", null, plugin.name));
     if (isAuthoring) {
       head.appendChild(el("span", "cat-kind kind-authoring", "plugin · authoring"));
+    }
+    if (plugin.featured) {
+      head.appendChild(el("span", "cat-kind kind-featured", "featured"));
     }
 
       var desc = el("p", "cat-desc", plugin.description || "");

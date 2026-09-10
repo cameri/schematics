@@ -132,6 +132,8 @@ build specification for the capability it provides:
 | [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` and `build-schematic` skills: author, reverse-engineer, maintain, and build schematics from any repo |
 | [`opa-docker-authz`](schematics/opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 | [`sops-env-secrets`](schematics/sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
+| [`docker-socket-proxy`](schematics/docker-socket-proxy/SCHEMATIC.md) | infrastructure | A spec-only schematic: a deny-by-default Docker API proxy in front of docker.sock, with an audit script that proves the allowlist |
+| [`webhook-rolling-deploy`](schematics/webhook-rolling-deploy/SCHEMATIC.md) | devops | A spec-only schematic: GitHub push webhooks drive image pulls through a tunnel, a path-token receiver, an in-memory queue, and a scoped Docker API proxy — ack in milliseconds, pull in the background |
 
 ### Install
 

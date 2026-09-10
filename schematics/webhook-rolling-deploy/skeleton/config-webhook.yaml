@@ -1,0 +1,84 @@
+# redpanda-connect config: GitHub webhook receiver for the deploy pipeline.
+#
+# Trust chain: Cloudflare edge (proxy + optional WAF rule restricting
+# /webhook/* to GitHub's hook IP ranges) -> this config (static secret: the
+# webhook URL path carries a random token from .env) -> puller container
+# (enqueues onto redis) -> socket proxy (scoped Docker API).
+#
+# Response contract with GitHub:
+#   - valid push for the watched ref  -> 200 {"status":"accepted",...} in
+#     milliseconds; the pull is performed asynchronously by the puller
+#     container via the redis queue (GitHub requires a response within ~10s,
+#     a pull can take minutes).
+#   - wrong path                      -> 404 (http_server path miss)
+#   - ping event / unwatched ref      -> 200, body echoed, nothing enqueued
+#     (processing error, but sync_response still answers and the pull path
+#     is never reached)
+#   - duplicate delivery id           -> 200, nothing enqueued (cache add
+#     fails; GitHub retries on timeout and this makes retries a no-op)
+#
+http:
+  address: 0.0.0.0:4195
+  enabled: true
+
+input:
+  http_server:
+    # WEBHOOK_TOKEN comes from .env; GitHub's webhook URL must match
+    # https://webhooks.tnsor.network/webhook/<token>
+    path: /webhook/${WEBHOOK_TOKEN}
+    allowed_verbs: ["POST"]
+    sync_response: {}
+
+cache_resources:
+  - label: delivery_dedup
+    memory: {}
+
+pipeline:
+  processors:
+    # Reject duplicate deliveries (GitHub retries on timeout; the pull is
+    # async so retries should not double-pull).
+    - cache:
+        resource: delivery_dedup
+        key: '${! meta("X-Github-Delivery") }'
+        operator: add
+
+    # Only act on push events for the watched ref.
+    - mapping: |
+        let event = meta("X-Github-Event") | ""
+        let ref = this.ref | ""
+        if $event != "push" {
+          root = throw("ignoring event: " + $event)
+        }
+        if $ref != "refs/heads/${WATCHED_BRANCH}" {
+          root = throw("ignoring ref: " + $ref)
+        }
+        root = {
+          "status": "accepted",
+          "event": $event,
+          "ref": $ref,
+          "head": this.after | "",
+          "pusher": this.pusher.name | "unknown",
+          "delivery": meta("X-Github-Delivery") | ""
+        }
+
+output:
+  # Errored messages (duplicate delivery, wrong event/ref) only hit
+  # sync_response so GitHub gets its 200 and the pull path is never reached.
+  switch:
+    cases:
+      - check: errored()
+        output:
+          sync_response: {}
+      - output:
+          broker:
+            pattern: fan_out
+            outputs:
+              # ack to GitHub immediately; the queued pull runs async
+              - sync_response: {}
+              # RPUSH acks in milliseconds — do NOT replace this with a
+              # direct http_client pull: the docker pull streams for 30s+
+              # and the fan_out broker would hold the HTTP response past
+              # the 5s sync-response timeout (GitHub would see a 408).
+              - redis_list:
+                  url: redis://pull-queue:6379
+                  key: pull-requests

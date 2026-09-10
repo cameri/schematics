@@ -8,6 +8,8 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 
 - [opa-docker-authz](https://schemaformat.ai/schematics/opa-docker-authz/SCHEMATIC.md): Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent. Certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
 - [sops-env-secrets](https://schemaformat.ai/schematics/sops-env-secrets/SCHEMATIC.md): Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory. Dual-recipient encryption, per-service key blast radius, rotation without rebuilds.
+- [docker-socket-proxy](https://schemaformat.ai/schematics/docker-socket-proxy/SCHEMATIC.md): Exposes a deny-by-default Docker API to containers over an internal network; endpoint allowlist proxy in front of docker.sock, with an audit script that proves the allowlist.
+- [webhook-rolling-deploy](https://schemaformat.ai/schematics/webhook-rolling-deploy/SCHEMATIC.md): Self-updating Docker Compose deployments: GitHub push webhook via Cloudflare tunnel and path-token receiver into an in-memory queue; a worker pulls the new image through a scoped Docker API proxy. Ack in milliseconds, pull in the background.
 
 ## The spec
 

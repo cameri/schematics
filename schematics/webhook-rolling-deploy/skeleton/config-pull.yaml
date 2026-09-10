@@ -1,0 +1,32 @@
+# redpanda-connect config: nostream-dev image pull worker.
+#
+# Consumes pull requests from the in-memory redis queue (BLPOP, blocks until
+# one arrives) and performs the docker image pull through the scoped socket
+# proxy. Body content is irrelevant — the image and tag are pinned by env.
+#
+# Retries: 3 attempts with 1m spacing; on final failure the message is
+# re-queued (auto_replay_nacks), so the pull is attempted again on the next
+# delivery cycle rather than lost.
+#
+input:
+  redis_list:
+    url: redis://pull-queue:6379
+    key: pull-requests
+    auto_replay_nacks: true
+
+pipeline:
+  processors:
+    # The pull request carries no data we need; clear the body so the POST
+    # to /images/create is empty (docker reads image/tag from the query).
+    - mapping: 'root = ""'
+
+output:
+  http_client:
+    verb: POST
+    url: ${SOCKET_PROXY_URL}/images/create?fromImage=${TARGET_IMAGE}&tag=${TARGET_TAG}
+    # connect's default timeout is 5s — a registry manifest check alone can
+    # exceed that, and a real pull streams for minutes. Be generous.
+    timeout: 10m
+    retries: 3
+    retry_period: 1m
+    max_retry_backoff: 5m

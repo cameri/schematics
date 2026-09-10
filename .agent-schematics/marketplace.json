@@ -29,6 +29,7 @@
       "name": "opa-docker-authz",
       "description": "Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.",
       "source": "./schematics/opa-docker-authz",
+      "featured": true,
       "category": "infrastructure",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
@@ -47,6 +48,7 @@
       "name": "sops-env-secrets",
       "description": "Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory: dual-recipient encryption, a per-service key blast radius, docker-secret wiring, and rotation without rebuilds.",
       "source": "./schematics/sops-env-secrets",
+      "featured": true,
       "category": "infrastructure",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
@@ -60,6 +62,46 @@
         "compose",
         "encryption",
         "infrastructure"
+      ]
+    },
+    {
+      "name": "docker-socket-proxy",
+      "description": "Exposes a deny-by-default Docker API to containers over an internal network — an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon, with an audit script that proves the allowlist.",
+      "source": "./schematics/docker-socket-proxy",
+      "featured": true,
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "docker",
+        "security",
+        "socket-proxy",
+        "least-privilege",
+        "hardening",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "webhook-rolling-deploy",
+      "description": "Self-updating Docker Compose deployments — a GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.",
+      "source": "./schematics/webhook-rolling-deploy",
+      "featured": true,
+      "category": "devops",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "github",
+        "webhooks",
+        "cloudflare",
+        "deploy",
+        "docker",
+        "redis",
+        "devops",
+        "automation"
       ]
     }
   ]

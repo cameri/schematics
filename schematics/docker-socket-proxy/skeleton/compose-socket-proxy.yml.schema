@@ -1,0 +1,30 @@
+# Schema: compose-socket-proxy.yml
+#
+# Documents the compose wiring for the socket proxy so an agent with no
+# prior docker-socket-proxy knowledge can work with the file.
+
+## Structure
+
+YAML with `services:` and `networks:` top-level keys (Docker Compose v2).
+
+## services.socket-proxy
+
+| Field | Meaning | Rule |
+|-------|---------|------|
+| image | tecnativa/docker-socket-proxy, pinned `@sha256:` | Digest REQUIRED (R-4) |
+| environment | One var per enabled endpoint group, value `1` | Deny-by-default (R-2); each entry needs a comment justification (R-3) |
+| volumes | Exactly `/var/run/docker.sock:/var/run/docker.sock:ro` | Read-only REQUIRED (R-6) |
+| networks | The internal network only | No `ports:` key may exist (R-5) |
+| restart | `unless-stopped` | Proxy is infrastructure; restart is always safe |
+
+## networks.<name>
+
+- `driver: bridge`
+- `internal: true` preferred: blocks outbound masquerading. Drop only if
+  the same network must carry routed egress for another service.
+
+## Validation checks
+
+1. `grep -c "ports:" compose-socket-proxy.yml` is 0.
+2. Every `environment:` entry has a trailing comment with a justification.
+3. The image reference contains `@sha256:`.

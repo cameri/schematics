@@ -1,0 +1,35 @@
+# Schema: audit-access.sh
+#
+# Documents the audit script so an agent unfamiliar with it can run and
+# interpret it.
+
+## Purpose
+
+Enumerates Docker API endpoint groups against a running docker-socket-proxy
+and prints an allowed/denied matrix. Acceptance tests A-2 (and the periodic
+policy re-check) run this script.
+
+## Interface
+
+- Invocation: `audit-access.sh <proxy-base-url>` (e.g. `http://socket-proxy:2375`)
+- Must execute from a container attached to the proxy's internal network
+  (R-5 means the endpoint exists nowhere else).
+- Exit 0: matrix printed. Exit 1: endpoint unreachable (proxy down or
+  caller not on the network).
+
+## Interpretation
+
+| Output | Meaning |
+|--------|---------|
+| `ALLOWED` (2xx) | Group enabled; must match the documented allowlist (R-2) |
+| `denied` (403) | Group disabled; the expected state for everything unlisted |
+| `unexpected(NNN)` | 5xx: daemon or proxy misbehaving; 000: timeout - investigate, do not assume policy |
+
+## Rules the script follows
+
+- POSIX sh, curl only: runs in any consumer container with a shell.
+- Probes are representative requests per group, never destructive: the
+  exec/build probes target nonexistent resources and expect 403 on a
+  correctly-scoped proxy.
+- Never prints response bodies (they can carry container names/labels);
+  only the verdict.
