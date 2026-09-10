@@ -3,6 +3,7 @@ name: opa-docker-authz
 version: 0.1.0
 status: draft
 spec: 1
+description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
 created: 2026-09-09
 updated: 2026-09-09
 ---

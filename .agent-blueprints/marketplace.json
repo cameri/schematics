@@ -1,0 +1,29 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "onlygpus-blueprints",
+  "description": "Capability blueprints for the OnlyGPUs project stack — self-contained specification packages any LLM can implement.",
+  "owner": {
+    "name": "Ricardo Arturo Cabral Mejía",
+    "email": "me@ricardocabral.io"
+  },
+  "plugins": [
+    {
+      "name": "opa-docker-authz",
+      "description": "Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.",
+      "source": "./opa-docker-authz",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "docker",
+        "opa",
+        "authorization",
+        "sandbox",
+        "tls",
+        "infrastructure"
+      ]
+    }
+  ]
+}
