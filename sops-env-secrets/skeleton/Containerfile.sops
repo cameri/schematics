@@ -1,0 +1,44 @@
+# Skeleton: Containerfile.sops
+
+Two variants for getting the sops binary into the service image. Pick the one
+that matches the base image; see `../modules/env-secrets.md`.
+
+# ---------------------------------------------------------------------------
+# VARIANT A, the base image already has a POSIX shell (debian, alpine, ubuntu)
+# ---------------------------------------------------------------------------
+#
+# Copy the pinned sops binary out of the upstream image into the final image.
+# Nothing else from the builder stage is kept.
+
+FROM ghcr.io/getsops/sops:v3.11.0-alpine AS sops
+
+FROM <your-base-image>
+
+COPY --from=sops /usr/local/bin/sops /usr/local/bin/sops
+
+# The application's own layers continue unchanged from here.
+# ...
+
+ENTRYPOINT ["sh", "-c", "exec sops exec-env /run/secrets/secrets.env \"$APP_CMD\""]
+
+
+# ---------------------------------------------------------------------------
+# VARIANT B, the base image is distroless / scratch / has no shell
+# ---------------------------------------------------------------------------
+#
+# `sops exec-env` spawns the application through /bin/sh, so the image MUST
+# have a shell. Base the final image on the sops alpine image and copy the
+# application's binary and runtime dependencies in from its original image.
+# Note: the sops image contains `sops` at /usr/local/bin/sops and busybox sh.
+
+# FROM alpine:3.20              # ← the sops image's own base, useful to know
+FROM ghcr.io/getsops/sops:v3.11.0-alpine
+
+# Bring the application binary + its shared libraries from the original image.
+COPY --from=<application-image> /usr/local/bin/<app> /usr/local/bin/<app>
+COPY --from=<application-image> /usr/lib/<app-deps> /usr/lib/<app-deps>
+
+# busybox provides sh; add anything the app needs (ca-certs, tzdata, ...).
+RUN apk add --no-cache ca-certificates tzdata
+
+ENTRYPOINT ["sh", "-c", "exec sops exec-env /run/secrets/secrets.env \"$APP_CMD\""]

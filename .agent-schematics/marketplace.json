@@ -42,6 +42,25 @@
         "tls",
         "infrastructure"
       ]
+    },
+    {
+      "name": "sops-env-secrets",
+      "description": "Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory: dual-recipient encryption, a per-service key blast radius, docker-secret wiring, and rotation without rebuilds.",
+      "source": "./sops-env-secrets",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sops",
+        "age",
+        "secrets",
+        "docker",
+        "compose",
+        "encryption",
+        "infrastructure"
+      ]
     }
   ]
 }

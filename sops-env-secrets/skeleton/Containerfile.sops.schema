@@ -1,0 +1,57 @@
+# Containerfile, `.sops` Schema
+#
+# This file is a Containerfile (Dockerfile) that shows how to place the sops
+# binary into a service image. It is not executed as-is: replace the angle
+# bracket placeholders with the real base and application images.
+
+## File Format
+
+Standard Containerfile/Dockerfile syntax, one instruction per line, comments
+with `#`. Instructions used here:
+
+| Instruction | Meaning |
+|-------------|---------|
+| `FROM <image> AS <stage>` | Start a build stage from a base image, optionally named |
+| `COPY --from=<stage-or-image> <src> <dst>` | Copy files from another build stage or from any image (no stage needed) |
+| `RUN <cmd>` | Run a command at build time (needs a shell in that stage) |
+| `ENTRYPOINT ["exec", "form"]` | JSON array form: no shell interpolation, the process runs directly |
+| `ENTRYPOINT ["sh", "-c", "..."]` | Shell form via an explicit `sh -c`: required here because `sops exec-env` needs a shell |
+
+## Stage Model
+
+`FROM ghcr.io/getsops/sops:<version>-alpine AS sops` pulls the upstream image
+that ships a statically linked `sops` at `/usr/local/bin/sops`. It exists only
+as a **source of that binary**, the final image does not inherit anything else
+from it.
+
+Variant A keeps the application's own base image and copies the binary in
+(`COPY --from=sops ...`). The `--from=` reference works with a named stage.
+
+Variant B inverts that: the final image **is** the sops image (so it has
+busybox `sh`), and the application's binary plus its shared libraries are
+copied in from the application image.
+
+## Constraints
+
+- The final image MUST contain a POSIX shell (`/bin/sh`); `sops exec-env`
+  execs the application through `/bin/sh -c`, so a distroless or scratch base
+  cannot be used unless the entrypoint is changed to a shell-free form (which
+  `exec-env` does not support).
+- The application command is passed as the `$APP_CMD` environment variable (or
+  written literally into the shell string); quoting inside the JSON array form
+  is significant, the inner `\"` characters are how a quote survives the JSON
+  array into the shell command.
+- The sops version tag is a parameter (`P-7`); pin it to a real release
+  (`v3.11.0` is the version this schematic was reverse-engineered against).
+- Variant B loses the application base image's package manager expectations:
+  anything the app needs at runtime (`ca-certificates` for TLS, `tzdata`,
+  locale files) must be re-added with `apk`.
+
+## Placeholders to Replace
+
+| Placeholder | Meaning | Example |
+|-------------|---------|---------|
+| `<your-base-image>` | The application's existing base | `python:3.12-slim` |
+| `<application-image>` | The image that currently builds the app | `myorg/app:1.4.2` |
+| `<app>` | The application binary name | `myservice` |
+| `<app-deps>` | Shared libraries/paths from the original image | `x86_64-linux-gnu` |

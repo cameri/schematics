@@ -1,0 +1,58 @@
+# Agentic Schematic Document, `SCHEMATIC.md` Format
+#
+# A SCHEMATIC.md is a self-contained specification for a capability that
+# any LLM can implement without external context. This file documents
+# the required frontmatter and section structure.
+
+## File Extension
+`.md`, standard Markdown with YAML frontmatter between `---` delimiters.
+
+## Frontmatter Fields
+
+```yaml
+---
+name: <kebab-case-name>       # REQUIRED: Unique schematic identifier
+version: 0.1.0                # REQUIRED: Semantic version
+status: draft                 # REQUIRED: draft | stable | superseded
+spec: 1                       # REQUIRED: Blueprint format version (always 1)
+description: "One-line..."    # REQUIRED: Copied to marketplace.json
+created: 2026-09-09           # REQUIRED: ISO date
+updated: 2026-09-09           # REQUIRED: ISO date
+---
+```
+
+## Required Sections
+
+In this order (from `template/SCHEMA.template.md`):
+
+1. **Title**: `# Schematic: <Name>` with optional reverse-engineered note
+2. **Applicable Context**, three lists: Must discover locally, May assume, Must not change
+3. **Scope**: In scope, Out of scope / non-goals, Preservation List (reverse-engineered only)
+4. **Requirements**: numbered R-1, R-2, ... (testable, each maps to an acceptance test)
+5. **Design Principles**: verbatim from template (vendor-agnostic, portable, etc.)
+6. **Dependencies**, a table of: Id, What, Why needed, Discovery, Failure behavior
+7. **Parameters**, a table of: Id, Name, Type, Default, Discovery, Effect
+8. **Modules**: one subsection per module, each linking to `modules/<name>.md`
+9. **Interfaces and Contracts**: exact surfaces (endpoints, file formats, schemas)
+10. **Implementation Phases**: ordered phases with steps, skip conditions, verification
+11. **Verification and Acceptance**: A-1, A-2, ... coverage map to requirements
+12. **Failure Modes and Rollback**: per-phase failure detection and recovery
+13. **Removal**: clean uninstall procedure
+14. **Open Questions**: undecided points with defaults
+15. **Decisions Log**: date-stamped judgments
+16. **Changelog**: version table
+17. **Package Layout**: directory tree with file purposes
+
+## Authoring Rules
+
+- Every environment-specific value is a parameter, never hard-coded.
+- Every phase is idempotent (safe to re-run).
+- Every requirement has at least one acceptance test.
+- Address the reader as "the implementer": second person, imperative.
+- No vendor-specific agent tool names, no skill/plugin frontmatter.
+- Inferred content (reverse-engineered schemas) marked with `inferred:`.
+
+## See Also
+
+- `SCHEMATIC.md` in any schematic directory: a concrete example
+- `sops-env-secrets/SCHEMATIC.md`: the schematic that ships this companion
