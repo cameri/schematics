@@ -79,6 +79,8 @@
     var statCount = document.getElementById("stat-count");
     if (statCount) statCount.textContent = String(schematics.length);
 
+    // Idempotent: a re-run of init must not duplicate cards.
+    host.innerHTML = "";
     if (!schematics.length) {
       host.appendChild(el("div", "catalog-empty", "No schematics published yet."));
     }
@@ -86,8 +88,8 @@
     schematics.forEach(function (plugin) {
       host.appendChild(renderCard(plugin, false));
     });
-
     var pluginHost = document.getElementById("plugin-list");
+    if (pluginHost) pluginHost.innerHTML = ""; // idempotent re-run
     if (pluginHost && pluginEntry) {
       pluginHost.appendChild(renderCard(pluginEntry, true));
     }
