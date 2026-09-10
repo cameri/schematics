@@ -104,6 +104,7 @@
     if (plugin.featured) {
       head.appendChild(el("span", "cat-kind kind-featured", "featured"));
     }
+    card.appendChild(head);
 
       var desc = el("p", "cat-desc", plugin.description || "");
       card.appendChild(desc);
