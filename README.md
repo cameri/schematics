@@ -131,6 +131,7 @@ build specification for the capability it provides:
 |--------|------|------------------|
 | [`schematics`](schematics/README.md) | authoring | The `create-schematic` skill: author, reverse-engineer, and maintain schematics |
 | [`opa-docker-authz`](opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
+| [`sops-env-secrets`](sops-env-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 
 ### Install
 
