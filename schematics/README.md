@@ -46,7 +46,7 @@ configuration flexibility, and pluggable. See
 
 ## Install
 
-```bash
-claude plugin marketplace update cameri-skills
-claude plugin install schematics@cameri-skills
+```
+/plugin marketplace add cameri/schematics
+/plugin install schematics@cameri-schematics
 ```

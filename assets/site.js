@@ -78,7 +78,15 @@
 
     plugins.forEach(function (plugin) {
       var card = el("article", "catalog-card");
-      card.appendChild(el("h3", null, plugin.name));
+
+      // Kind badge: "authoring plugin" carries the create-schematic skill;
+      // capability plugins carry a SCHEMATIC.md build spec.
+      var isAuthoring = plugin.category === "authoring";
+      var head = el("div", "cat-head");
+      head.appendChild(el("h3", null, plugin.name));
+      head.appendChild(el("span", "cat-kind" + (isAuthoring ? " kind-authoring" : ""),
+        isAuthoring ? "plugin · authoring" : "plugin"));
+      card.appendChild(head);
 
       var desc = el("p", "cat-desc", plugin.description || "");
       card.appendChild(desc);
@@ -89,21 +97,21 @@
       if (plugin.source) meta.appendChild(el("span", null, plugin.source));
       card.appendChild(meta);
 
-      // Actions: Copy as Markdown + Open on GitHub
-      var actions = el("div", "cat-actions");
-
-      var copyBtn = el("button", "cat-btn primary", "Copy as Markdown");
+      // The copyable artifact: the schematic spec (SCHEMATIC.md) for
+      // capability plugins; the skill definition for the authoring plugin.
+      var copyBtn = el("button", "cat-btn primary",
+        isAuthoring ? "Copy skill definition" : "Copy schematic");
       copyBtn.type = "button";
       copyBtn.addEventListener("click", function () {
-        // "spec" overrides the default SCHEMATIC.md (e.g. the create-schematic
-        // plugin publishes its SKILL.md as the copyable artifact).
         var specUrl = plugin.source + "/" + (plugin.spec || "SCHEMATIC.md");
+        var busyLabel = "Fetching…";
+        var doneLabel = isAuthoring ? "Copy skill definition" : "Copy schematic";
         copyBtn.disabled = true;
-        copyBtn.textContent = "Fetching…";
+        copyBtn.textContent = busyLabel;
         fetchText(specUrl)
           .then(function (md) {
             return copyText(md).then(function () {
-              toast("Copied " + plugin.name + " schematic (" + md.length + " chars)");
+              toast("Copied " + plugin.name + " (" + md.length + " chars)");
             });
           })
           .catch(function (err) {
@@ -111,7 +119,7 @@
           })
           .finally(function () {
             copyBtn.disabled = false;
-            copyBtn.textContent = "Copy as Markdown";
+            copyBtn.textContent = doneLabel;
           });
       });
       actions.appendChild(copyBtn);

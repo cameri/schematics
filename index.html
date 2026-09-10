@@ -103,7 +103,7 @@
           <span class="flow-num">1</span>
           <div>
             <h3>Author or reverse-engineer</h3>
-            <p>Write a schematic from an idea, or distill one from a working implementation. The <code>create-schematic</code> skill walks any agent through it.</p>
+            <p>Write a schematic from an idea, or distill one from a working implementation. Install the <code>schematics</code> plugin and its <code>create-schematic</code> skill walks any agent through it.</p>
           </div>
         </div>
         <div class="flow-step">
@@ -153,7 +153,12 @@ description: One-line summary copied to the marketplace
     <!-- ─── Catalog ──────────────────────────────────────── -->
     <section class="section" id="catalog">
       <h2 class="section-title">The Catalog</h2>
-      <p class="section-lede">Live from <code>.agent-schematics/marketplace.json</code> in the repository.</p>
+      <p class="section-lede">
+        Every entry is an installable <strong>plugin</strong>, and every plugin carries a
+        <strong>schematic</strong> — the build specification for its capability. Capability
+        plugins ship a <code>SCHEMATIC.md</code> you can copy and implement anywhere, no plugin
+        required. Live from <code>.agent-schematics/marketplace.json</code>.
+      </p>
       <div class="catalog" id="catalog"><!-- rendered by site.js --></div>
     </section>
 

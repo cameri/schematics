@@ -113,47 +113,53 @@ preference:
 9. **Configuration flexibility** — behavior is config, never code edits
 10. **Pluggable** — clean seams and a stated removal procedure
 
-Full details: [`create-schematic/skills/create-schematic/references/schematic-principles.md`](create-schematic/skills/create-schematic/references/schematic-principles.md).
+Full details: [`schematics/skills/create-schematic/references/schematic-principles.md`](schematics/skills/create-schematic/references/schematic-principles.md).
 
 ## The catalog
 
-The `.agent-schematics/marketplace.json` file lists every schematic in this
-repository — name, description, category, source path — and doubles as a
-Claude Code / omp plugin marketplace. The website at
-[schemaformat.ai](https://schemaformat.ai) renders it live with
-one-click copy-as-Markdown for each entry.
+The `.agent-schematics/marketplace.json` file lists every package in this
+repository and doubles as a Claude Code / omp plugin marketplace. The website
+at [schemaformat.ai](https://schemaformat.ai) renders it live with one-click
+copy-as-Markdown for each entry.
 
-### Current schematics
+This repository holds **plugins**. Every plugin carries a schematic — the
+build specification for the capability it provides:
 
-| Schematic | Category | What it builds |
-|-----------|----------|----------------|
-| [`opa-docker-authz`](opa-docker-authz/SCHEMATIC.md) | infrastructure | Restricted Docker daemon access for a sandbox container over TLS, policed by Open Policy Agent |
+### Plugins in this repo
 
-### Use a schematic
+| Plugin | Kind | What it provides |
+|--------|------|------------------|
+| [`schematics`](schematics/README.md) | authoring | The `create-schematic` skill: author, reverse-engineer, and maintain schematics |
+| [`opa-docker-authz`](opa-docker-authz/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`opa-docker-authz/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 
-Hand `SCHEMATIC.md` (plus referenced files) to any agent session — or copy it
-from the website with one click. The agent implements the phases and verifies
-against the acceptance tests. No interview.
-
-Install a schematic as a plugin (Claude Code / omp):
+### Install
 
 ```
 /plugin marketplace add cameri/schematics
-/plugin install <schematic-name>@cameri-schematics
+/plugin install schematics@cameri-schematics
 ```
+
+### Use a schematic directly
+
+A schematic doesn't need to be installed — it's a spec, not a program. Hand
+`SCHEMATIC.md` (plus referenced files) to any agent session, or copy it from
+the website with one click. The agent implements the phases and verifies
+against the acceptance tests. No interview, no plugin required.
 
 ## Author a schematic
 
-The `create-schematic` plugin authors new schematics (interview-driven),
+The **`schematics`** plugin authors new schematics (interview-driven),
 reverse-engineers them from existing implementations, and maintains them as
-living specs:
+living specs. Install it, then ask any agent to "create a schematic" or
+"schematize this repo":
 
 ```
 /plugin marketplace add cameri/schematics
-/plugin install create-schematic@cameri-schematics
+/plugin install schematics@cameri-schematics
 ```
 
-Or read the skill directly: [`create-schematic/skills/create-schematic/SKILL.md`](create-schematic/skills/create-schematic/SKILL.md).
+Or read the skill directly:
+[`schematics/skills/create-schematic/SKILL.md`](schematics/skills/create-schematic/SKILL.md).
 
 To publish a schematic here: create `<name>/SCHEMATIC.md`, add an entry to
 `.agent-schematics/marketplace.json`, and open a PR.
@@ -163,7 +169,7 @@ To publish a schematic here: create `<name>/SCHEMATIC.md`, add an entry to
 Schematics are contributions. A schematic is a capability others can build
 independently — if you've built something an agent or a team should be able to
 reproduce from a spec, distill it and open a PR. The
-`create-schematic` plugin's reverse-engineering workflow does the distilling.
+`schematics` plugin's reverse-engineering workflow does the distilling.
 
 ## License
 

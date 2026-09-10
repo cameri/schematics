@@ -211,6 +211,15 @@ a:hover { text-decoration: underline; }
   .stat-num { font-size: 1.7rem; }
 }
 
+.cat-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.cat-kind {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.06em;
+  text-transform: uppercase; white-space: nowrap;
+  color: var(--muted); background: var(--panel-2);
+  padding: 0.2rem 0.55rem; border-radius: 6px; border: 1px solid var(--border);
+}
+.cat-kind.kind-authoring { color: var(--accent); border-color: rgba(34, 211, 238, 0.35); }
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .btn, .card, .catalog-card { transition: none; }
