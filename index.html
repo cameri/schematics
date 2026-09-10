@@ -157,15 +157,28 @@ description: One-line summary copied to the marketplace
       </p>
     </section>
 
-    <!-- ─── Catalog ──────────────────────────────────────── -->
+    <!-- ─── Catalog (schematics only) ────────────────────── -->
     <section class="section" id="catalog">
-      <h2 class="section-title">The catalog</h2>
+      <h2 class="section-title">The schematics</h2>
       <p class="section-lede">
-        Every entry is an installable <strong>plugin</strong> carrying a <strong>schematic</strong> — the
-        build spec for its capability. Copy the <code>SCHEMATIC.md</code> and implement it anywhere,
-        no plugin required. Live from <code>.agent-schematics/marketplace.json</code>.
+        Published build specifications. Copy one and hand it to any agent session, or
+        build it from here: <code>build &lt;name&gt;@cameri/schematics</code>. No plugin
+        required — the spec is the whole package. Live from
+        <code>.agent-schematics/marketplace.json</code>.
       </p>
-      <div class="catalog" id="catalog"><!-- rendered by site.js --></div>
+      <div class="catalog" id="catalog-list"><!-- rendered by site.js --></div>
+    </section>
+
+    <!-- ─── The plugin ───────────────────────────────────── -->
+    <section class="section" id="plugin">
+      <h2 class="section-title">The plugin</h2>
+      <p class="section-lede">
+        Not a schematic — a harness plugin that installs the authoring skills
+        (<code>create-schematic</code>, <code>build-schematic</code>) into coding agents that
+        support plugins. The schematics above don't need it; it just makes writing and
+        building them easier.
+      </p>
+      <div class="catalog" id="plugin-list"><!-- rendered by site.js --></div>
     </section>
 
     <!-- ─── Spec ─────────────────────────────────────────── -->

@@ -64,29 +64,41 @@
 
   // ─── Catalog rendering ─────────────────────────────────────
   function renderCatalog(plugins) {
-    var host = document.getElementById("catalog");
+    var host = document.getElementById("catalog-list");
     if (!host) return;
 
-    // Hero stat: schematic count
-    var statCount = document.getElementById("stat-count");
-    if (statCount) statCount.textContent = String(plugins.length);
+    // Plugins and schematics are different things: capability entries carry a
+    // SCHEMATIC.md build spec; the authoring entry is the plugin that creates
+    // them. They render into separate hosts and never mix.
+    var schematics = (plugins || []).filter(function (p) { return p.category !== "authoring"; });
+    var pluginEntry = (plugins || []).find(function (p) { return p.category === "authoring"; });
 
-    if (!plugins || !plugins.length) {
+    // Hero stat: schematic count (the authoring plugin is not a schematic)
+    var statCount = document.getElementById("stat-count");
+    if (statCount) statCount.textContent = String(schematics.length);
+
+    if (!schematics.length) {
       host.appendChild(el("div", "catalog-empty", "No schematics published yet."));
-      return;
     }
 
-    plugins.forEach(function (plugin) {
-      var card = el("article", "catalog-card");
+    schematics.forEach(function (plugin) {
+      host.appendChild(renderCard(plugin, false));
+    });
 
-      // Kind badge: "authoring plugin" carries the create-schematic skill;
-      // capability plugins carry a SCHEMATIC.md build spec.
-      var isAuthoring = plugin.category === "authoring";
-      var head = el("div", "cat-head");
-      head.appendChild(el("h3", null, plugin.name));
-      head.appendChild(el("span", "cat-kind" + (isAuthoring ? " kind-authoring" : ""),
-        isAuthoring ? "plugin · authoring" : "plugin"));
-      card.appendChild(head);
+    var pluginHost = document.getElementById("plugin-list");
+    if (pluginHost && pluginEntry) {
+      pluginHost.appendChild(renderCard(pluginEntry, true));
+    }
+  }
+
+  function renderCard(plugin, isAuthoring) {
+    var card = el("article", "catalog-card");
+
+    var head = el("div", "cat-head");
+    head.appendChild(el("h3", null, plugin.name));
+    if (isAuthoring) {
+      head.appendChild(el("span", "cat-kind kind-authoring", "plugin · authoring"));
+    }
 
       var desc = el("p", "cat-desc", plugin.description || "");
       card.appendChild(desc);
@@ -132,8 +144,7 @@
       actions.appendChild(ghBtn);
 
       card.appendChild(actions);
-      host.appendChild(card);
-    });
+    return card;
   }
 
   // ─── Init ──────────────────────────────────────────────────
@@ -150,7 +161,7 @@
       })
       .catch(function (err) {
         console.error("catalog load failed:", err);
-        var host = document.getElementById("catalog");
+        var host = document.getElementById("catalog-list");
         if (host) {
           host.appendChild(
             el("div", "catalog-empty", "Couldn't load the catalog: " + err.message)
