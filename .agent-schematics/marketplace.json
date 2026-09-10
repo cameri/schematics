@@ -1,12 +1,30 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "onlygpus-schematics",
-  "description": "Agentic schematics for the OnlyGPUs project stack — self-contained specification packages any LLM can implement.",
+  "name": "cameri-schematics",
+  "description": "Agentic schematics — published build specifications that any LLM, team, or org can implement independently, with zero coordination with the author. The spec is the only coordination mechanism.",
   "owner": {
     "name": "Ricardo Arturo Cabral Mejía",
     "email": "me@ricardocabral.io"
   },
   "plugins": [
+    {
+      "name": "create-schematic",
+      "description": "Authors, reverse-engineers, and maintains agentic schematics — self-contained build specifications that anyone can implement independently, without central coordination.",
+      "source": "./create-schematic",
+      "spec": "skills/create-schematic/SKILL.md",
+      "category": "authoring",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "schematic",
+        "specification",
+        "portability",
+        "decentralized",
+        "authoring"
+      ]
+    },
     {
       "name": "opa-docker-authz",
       "description": "Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.",

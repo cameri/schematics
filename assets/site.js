@@ -11,7 +11,7 @@
   // Using raw.githubusercontent.com because GH Pages doesn't serve
   // files from dotfile directories (.agent-schematics). This also
   // makes the site work on any domain, not just GH Pages.
-  var RAW_BASE = "https://raw.githubusercontent.com/onlygpus/schematics/main/";
+  var RAW_BASE = "https://raw.githubusercontent.com/cameri/schematics/main/";
 
   // ─── Helpers ───────────────────────────────────────────────
   function el(tag, className, text) {
@@ -95,7 +95,9 @@
       var copyBtn = el("button", "cat-btn primary", "Copy as Markdown");
       copyBtn.type = "button";
       copyBtn.addEventListener("click", function () {
-        var specUrl = plugin.source + "/SCHEMATIC.md";
+        // "spec" overrides the default SCHEMATIC.md (e.g. the create-schematic
+        // plugin publishes its SKILL.md as the copyable artifact).
+        var specUrl = plugin.source + "/" + (plugin.spec || "SCHEMATIC.md");
         copyBtn.disabled = true;
         copyBtn.textContent = "Fetching…";
         fetchText(specUrl)
@@ -115,7 +117,7 @@
       actions.appendChild(copyBtn);
 
       var ghBtn = el("a", "cat-btn", "GitHub ↗");
-      ghBtn.href = "https://github.com/onlygpus/schematics/tree/main/" + plugin.source;
+      ghBtn.href = "https://github.com/cameri/schematics/tree/main/" + plugin.source;
       ghBtn.target = "_blank";
       ghBtn.rel = "noopener";
       actions.appendChild(ghBtn);

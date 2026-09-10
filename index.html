@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic Schematics — Buildable specs for AI agents</title>
-  <meta name="description" content="Agentic Schematics: self-contained specification packages that any LLM can implement without context. Vendor-agnostic, portable, idempotent — hand a schematic to any agent and it builds the capability.">
+  <meta name="description" content="Agentic Schematics: published build specifications that anyone — any LLM, any team — can implement independently, with zero coordination with the author. The spec is the only coordination mechanism.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230ea5e9'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='monospace'>S</text></svg>">
   <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -20,7 +20,7 @@
       <a href="#catalog">Catalog</a>
       <a href="#spec">The Spec</a>
     </nav>
-    <a class="nav-cta" href="https://github.com/onlygpus/schematics" target="_blank" rel="noopener">GitHub ↗</a>
+    <a class="nav-cta" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">GitHub ↗</a>
   </header>
 
   <main>
@@ -28,21 +28,21 @@
     <section class="hero">
       <div class="hero-grid" aria-hidden="true"></div>
       <p class="hero-kicker">THE AGENTIC SCHEMATIC SPEC</p>
-      <h1 class="hero-title">Hand an agent a<br><span class="gradient">schematic</span>. It builds the rest.</h1>
+      <h1 class="hero-title">Publish a <span class="gradient">schematic</span>.<br>Anyone builds it. No coordination.</h1>
       <p class="hero-sub">
-        A schematic is a self-contained specification package — the requirements,
-        parameters, dependencies, implementation phases, and verification tests for
-        a capability — written so <em>any</em> LLM, in <em>any</em> runtime, can implement it
-        with zero conversation context.
+        A schematic is a self-contained build specification — every requirement,
+        parameter, dependency, phase, and acceptance test for a capability — published
+        once, implementable by <em>any</em> LLM, team, or org, in <em>any</em> runtime,
+        without ever contacting the author. The spec is the only coordination mechanism.
       </p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="#catalog">Browse Schematics</a>
-        <a class="btn btn-ghost" href="https://github.com/onlygpus/schematics" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub</a>
       </div>
       <div class="hero-stats">
         <div class="stat"><span class="stat-num" id="stat-count">0</span><span class="stat-label">schematics</span></div>
         <div class="stat"><span class="stat-num">10</span><span class="stat-label">binding principles</span></div>
-        <div class="stat"><span class="stat-num">0</span><span class="stat-label">context required</span></div>
+        <div class="stat"><span class="stat-num">0</span><span class="stat-label">coordination required</span></div>
       </div>
     </section>
 
@@ -50,9 +50,16 @@
     <section class="section" id="what">
       <h2 class="section-title">What is an Agentic Schematic?</h2>
       <p class="section-lede">
-        Think of an engineer handing a circuit schematic to a fabricator. The schematic
-        is a contract — not a conversation. It carries everything needed to build the
-        thing, and it doesn't depend on how the fabricator's workshop is set up.
+        In Daniel Suarez's <em>Daemon</em>, the Darknet spreads through shared schematics:
+        publish the spec, and independent teams build the network — no central authority,
+        no coordination, no permission. An agentic schematic applies the same pattern to
+        software capabilities: the author publishes once, and any builder anywhere can
+        construct the capability from the spec alone.
+      </p>
+      <p class="section-lede">
+        The schematic replaces the author. No meetings, no shared history, no access to
+        the original conversation. If a fact matters, it lives in the package — or it
+        doesn't exist.
       </p>
       <div class="grid-3">
         <div class="card">
@@ -95,22 +102,22 @@
         <div class="flow-step">
           <span class="flow-num">1</span>
           <div>
-            <h3>Pick a schematic</h3>
-            <p>Each schematic targets a concrete capability — an authorization policy, a service, a deployment setup.</p>
+            <h3>Author or reverse-engineer</h3>
+            <p>Write a schematic from an idea, or distill one from a working implementation. The <code>create-schematic</code> skill walks any agent through it.</p>
           </div>
         </div>
         <div class="flow-step">
           <span class="flow-num">2</span>
           <div>
-            <h3>Copy it as Markdown</h3>
-            <p>One click copies the full <code>SCHEMATIC.md</code> — the entire spec, ready to paste into any agent session.</p>
+            <h3>Publish once</h3>
+            <p>One Markdown file is the entire coordination. Push it to a repo, paste it into a session, hand it to a stranger — the package carries everything.</p>
           </div>
         </div>
         <div class="flow-step">
           <span class="flow-num">3</span>
           <div>
-            <h3>The agent implements it</h3>
-            <p>The receiving LLM follows the phases, discovers local parameters, and verifies each acceptance test. No interview needed.</p>
+            <h3>Anyone builds, independently</h3>
+            <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted.</p>
           </div>
         </div>
       </div>
@@ -187,8 +194,8 @@ description: One-line summary copied to the marketplace
   <footer class="footer">
     <div class="footer-inner">
       <span>© 2026 Agentic Schematics</span>
-      <a href="https://github.com/onlygpus/schematics" target="_blank" rel="noopener">github.com/onlygpus/schematics</a>
-      <span class="muted">agenticschemas.ai</span>
+      <a href="https://github.com/cameri/schematics" target="_blank" rel="noopener">github.com/cameri/schematics</a>
+      <span class="muted">Inspired by the shared schematics of Daniel Suarez's <em>Daemon</em></span>
     </div>
   </footer>
 
