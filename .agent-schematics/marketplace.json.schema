@@ -26,7 +26,7 @@
       "spec": "SCHEMATIC.md",                // Optional: copyable spec file (default SCHEMATIC.md)
       "category": "infrastructure",          // Classification tag
       "featured": true,                      // Optional: featured on the site, rotated over time
-      "composes": ["media-fetching"],        // Optional: composition schematics list siblings they wire together
+      "composes": ["book-fetching"],        // Optional: composition schematics list siblings they wire together
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
         "url": "https://schemaformat.ai"

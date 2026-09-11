@@ -1,11 +1,11 @@
 ---
-name: media-serving
+name: book-serving
 version: 0.1.0
 status: published
 description: Serving a self-hosted digital library - Audiobookshelf reading the same dataset the fetching stack writes, with the public surface as a first-class choice: Tailscale serve by default, tsdproxy or a Cloudflare tunnel when you want a real hostname. Read-only by posture; the media never moves.
 ---
 
-# Schematic: Media Serving (Audiobookshelf + Optional Tunnel)
+# Schematic: Book Serving (Audiobookshelf + Optional Tunnel)
 
 ## Applicable Context
 
@@ -23,7 +23,7 @@ description: Serving a self-hosted digital library - Audiobookshelf reading the 
 **May assume (with risk):**
 
 - A sibling fetching stack writes into the same tree (see
-  `media-library`); nothing here breaks if libraries are populated by
+  `book-stack`); nothing here breaks if libraries are populated by
   hand instead
 - The host runs the media on ZFS or similar (irrelevant to the wiring;
   relevant to capacity)
@@ -44,7 +44,7 @@ description: Serving a self-hosted digital library - Audiobookshelf reading the 
 
 **Out of scope / non-goals:**
 
-- Fetching (see `media-fetching`)
+- Fetching (see `book-fetching`)
 - Mobile-client configuration beyond server URLs
 - Transcoding tuning (Audiobookshelf handles on-the-fly; direct play is
   the norm for audio)
@@ -126,7 +126,7 @@ Implementation-specific binding choices:
 
 ## Interfaces and Contracts
 
-### To the fetching stack (see media-library)
+### To the fetching stack (see book-stack)
 
 - Reads `${P-1}/books`, `${P-1}/audiobooks` (read-only) - the same
   paths Chaptarr imports into. Contract: importing side owns the files,

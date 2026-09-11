@@ -1,11 +1,11 @@
 ---
-name: media-library
+name: book-stack
 version: 0.1.0
 status: published
-description: A composition schematic - assembles the media-fetching and media-serving schematics into one operating system for a self-hosted digital library, and defines the shared volume contract between them. Contains no images of its own; its content is the wiring, the shared paths, and the isolation rule that keeps the fetching stack and the serving stack from contaminating each other.
+description: A composition schematic - assembles the book-fetching and book-serving schematics into one operating system for a self-hosted digital library, and defines the shared volume contract between them. Contains no images of its own; its content is the wiring, the shared paths, and the isolation rule that keeps the fetching stack and the serving stack from contaminating each other.
 ---
 
-# Schematic: Media Library (Composition)
+# Schematic: Book Stack (Composition)
 
 This is a **composition schematic**: it has no images and no services of
 its own. It consumes two sibling schematics as dependencies and its
@@ -24,7 +24,7 @@ rules this package also establishes.
   (that is a hard prerequisite - composing two broken stacks only
   entangles the failures)
 - The media root both stacks will share (production: `/media`)
-- The exposure choice for the serving side (P-2 of media-serving)
+- The exposure choice for the serving side (P-2 of book-serving)
 
 **May assume (with risk):**
 
@@ -58,7 +58,7 @@ rules this package also establishes.
   media root; both compose files reference the SAME host directories,
   never copies.
 - **R-2**: The importing side MUST be the only writer of library data
-  (media-serving R-2 enforced stack-wide); the composition adds no
+  (book-serving R-2 enforced stack-wide); the composition adds no
   mount that lets the serving side write.
 - **R-3**: Network isolation: the fetching stack's containers (behind
   gluetun) and the serving stack's containers MUST NOT share a docker
@@ -86,8 +86,8 @@ marketplace entries as the version pins.
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker + Compose v2 | Runs both stacks | `docker compose version` | Blocker |
-| D-2 | schematic | [media-fetching](../media-fetching/SCHEMATIC.md) | Acquires books/audiobooks privately | Its phases 1-4 green | No new content; serving still works |
-| D-3 | schematic | [media-serving](../media-serving/SCHEMATIC.md) | Serves the library | Its phases 1-3 green | Library present but silent |
+| D-2 | schematic | [book-fetching](../book-fetching/SCHEMATIC.md) | Acquires books/audiobooks privately | Its phases 1-4 green | No new content; serving still works |
+| D-3 | schematic | [book-serving](../book-serving/SCHEMATIC.md) | Serves the library | Its phases 1-3 green | Library present but silent |
 | D-4 | system | One shared media root on the host | The R-1 contract | `ls <media root>` | Blocker: no common tree |
 
 ## Parameters
@@ -96,8 +96,8 @@ Only the reconciliation surface; the dependencies keep their own.
 
 | Id  | Name | Type | Default | Discovery | Effect |
 |-----|------|------|---------|-----------|--------|
-| P-1 | MEDIA_ROOT | path | `/media` | One shared value | Feeds media-fetching P-3 and media-serving P-1 (must be equal, R-4) |
-| P-2 | EXPOSURE | enum | `tailscale` | Operator choice | Passed straight to media-serving P-2 |
+| P-1 | MEDIA_ROOT | path | `/media` | One shared value | Feeds book-fetching P-3 and book-serving P-1 (must be equal, R-4) |
+| P-2 | EXPOSURE | enum | `tailscale` | Operator choice | Passed straight to book-serving P-2 |
 | P-3 | PUID/PGID/TZ | int/str | 1000/1000/host | Host facts | Passed to both stacks from one .env (R-4) |
 
 ## Modules
@@ -151,7 +151,7 @@ playable. One chain, tested as one (R-6).
 
 ### Phase 0: Install dependencies
 
-1. Execute media-fetching phases 1-4 and media-serving phases 1-3
+1. Execute book-fetching phases 1-4 and book-serving phases 1-3
    separately; each stack's own acceptance tests pass.
 2. Verification: both stacks' A-sets green BEFORE any glue exists.
 
@@ -195,7 +195,7 @@ playable. One chain, tested as one (R-6).
 - **A-4** (R-4): one env file feeds both stacks; changing MEDIA_ROOT in
   it and recreating moves BOTH stacks' binds together.
 - **A-5** (R-5): a scripted down-up cycle follows the documented order
-  and the kill-switch test (media-fetching A-1) still passes after.
+  and the kill-switch test (book-fetching A-1) still passes after.
 - **A-6** (R-6): the full grab-to-play chain completes without manual
   file moves; the file is byte-identical in the library.
 
@@ -228,7 +228,7 @@ Decisions:
   and the reconciliation of duplicated parameters. If it needed images,
   it would be a third ordinary schematic, not a composition.
 - 2026-09-10: Cross-references between packages use relative catalog
-  paths in the dependency table (`../media-fetching/SCHEMATIC.md`) so
+  paths in the dependency table (`../book-fetching/SCHEMATIC.md`) so
   links work on the site and in-repo alike; the marketplace pins are
   the version-of-record.
 

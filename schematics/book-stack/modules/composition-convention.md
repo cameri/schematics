@@ -11,7 +11,7 @@ The dependency table's Kind column accepts `schematic` alongside
 package in the same catalog:
 
 - The "What" cell links the sibling's SCHEMATIC.md with a RELATIVE path
-  (`../media-fetching/SCHEMATIC.md`) - relative so the same link works
+  (`../book-fetching/SCHEMATIC.md`) - relative so the same link works
   on the site, on GitHub, and in a local clone.
 - The version-of-record is the marketplace entry, not the link.
 - "Failure behavior" describes the composition degraded, not the
@@ -20,7 +20,7 @@ package in the same catalog:
 ## 2. Contracts, not copies
 
 A composition references the dependency's requirements by ID (e.g.
-"media-serving R-2") instead of restating them. If you find yourself
+"book-serving R-2") instead of restating them. If you find yourself
 copying a requirement into the composition, stop: either the glue
 really needs a new obligation (then write it as the composition's own
 R, referencing the source) or it does not belong here.

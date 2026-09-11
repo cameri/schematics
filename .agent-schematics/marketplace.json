@@ -105,9 +105,9 @@
       ]
     },
     {
-      "name": "media-fetching",
+      "name": "book-fetching",
       "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
-      "source": "./schematics/media-fetching",
+      "source": "./schematics/book-fetching",
       "category": "media",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
@@ -126,9 +126,9 @@
       ]
     },
     {
-      "name": "media-serving",
+      "name": "book-serving",
       "description": "Serving a self-hosted digital library - Audiobookshelf reading the same dataset the fetching stack writes, with the public surface as a first-class choice: Tailscale serve by default, tsdproxy or a Cloudflare tunnel when you want a real hostname. Read-only by posture; the media never moves.",
-      "source": "./schematics/media-serving",
+      "source": "./schematics/book-serving",
       "category": "media",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
@@ -145,9 +145,9 @@
       ]
     },
     {
-      "name": "media-library",
-      "description": "A composition schematic - assembles media-fetching and media-serving into one operating system for a self-hosted digital library, and defines the shared volume contract between them. No images of its own; the glue is the artifact: shared paths, isolation rules, and one grab-to-listen acceptance test.",
-      "source": "./schematics/media-library",
+      "name": "book-stack",
+      "description": "A composition schematic - assembles book-fetching and book-serving into one operating system for a self-hosted digital library, and defines the shared volume contract between them. No images of its own; the glue is the artifact: shared paths, isolation rules, and one grab-to-listen acceptance test.",
+      "source": "./schematics/book-stack",
       "featured": true,
       "category": "media",
       "author": {
@@ -155,8 +155,8 @@
         "email": "me@ricardocabral.io"
       },
       "composes": [
-        "media-fetching",
-        "media-serving"
+        "book-fetching",
+        "book-serving"
       ],
       "keywords": [
         "composition",

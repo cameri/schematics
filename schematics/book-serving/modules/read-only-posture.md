@@ -6,7 +6,7 @@ get double-moved; the boundary in this stack is one-directional.
 
 ## The boundary
 
-- Fetching side (media-fetching): owns the files. Imports rename and
+- Fetching side (book-fetching): owns the files. Imports rename and
   move within the tree, tag, and organize per library format.
 - Serving side (this schematic): mounts libraries `:ro` and only reads.
   Its writable surface is exactly two paths: config and metadata.

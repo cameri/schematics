@@ -1,11 +1,11 @@
 ---
-name: media-fetching
+name: book-fetching
 version: 0.1.0
 status: published
 description: Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.
 ---
 
-# Schematic: Media Fetching (Gluetun, Deluge, Chaptarr, Mousehole)
+# Schematic: Book Fetching (Gluetun, Deluge, Chaptarr, Mousehole)
 
 ## Applicable Context
 
@@ -43,7 +43,7 @@ description: Privately fetching books and audiobooks - gluetun as a structural V
 
 **Out of scope / non-goals:**
 
-- The serving side (see `media-serving`); this stack only writes into
+- The serving side (see `book-serving`); this stack only writes into
   download folders, it never serves media
 - Usenet (SABnzbd lives on another host here; imports via a read-only
   sshfs mount are an integration option, not core)

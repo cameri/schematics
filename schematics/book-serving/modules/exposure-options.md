@@ -18,7 +18,7 @@ service: any replica can serve any request. It is FATAL for anything
 with a stateful inbound contract (webhooks: a request can land on the
 connector while its queue is on another). Hence:
 
-- media-serving (this schematic): shared tunnel is acceptable in
+- book-serving (this schematic): shared tunnel is acceptable in
   production and is what production actually runs.
 - webhook-style inbound endpoints: dedicated tunnel, no exceptions.
 
