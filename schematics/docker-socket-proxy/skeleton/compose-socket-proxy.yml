@@ -22,6 +22,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - docker-proxy
+      # Only if a consumer needs P-7 (network_mode: host can't resolve
+      # this service by name — see the host-network-consumers module),
+      # replace the line above with the mapping form so the proxy gets
+      # a fixed address inside the subnet below:
+      # docker-proxy:
+      #   ipv4_address: 172.30.0.2
     # No ports: block (R-5). Nothing may be published for this service.
 
 networks:
@@ -31,3 +37,11 @@ networks:
     # proxy never needs egress; drop it if a consumer network requires
     # routed egress on the same network.
     internal: true
+    # Only needed alongside P-7 above: ipv4_address requires the network
+    # to have a fixed subnet — Docker rejects a static address on an
+    # auto-assigned one. Pick a subnet that doesn't collide with any
+    # existing network on the host before uncommenting:
+    # `docker network inspect $(docker network ls -q) | grep Subnet`
+    # ipam:
+    #   config:
+    #     - subnet: 172.30.0.0/24

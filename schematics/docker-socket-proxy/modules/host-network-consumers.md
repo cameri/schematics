@@ -42,6 +42,14 @@ reports nothing (A-5 holds).
 - The static IP is stable across `docker compose up -d socket-proxy`
   recreations (Docker preserves `ipv4_address` assignments across
   recreates as long as the compose file is unchanged).
+- **Negative control** — the reachability above is host-originated, not a
+  publish; confirm it stays that way. From a machine that is neither the
+  host nor on the bridge (another host on the LAN, or a container on an
+  unrelated network with no route to this subnet), the same curl against
+  `<static-ip>:2375` MUST time out, not merely 403. A response of any kind
+  means the exception has widened past "host-originated only" — the most
+  likely cause is `internal: true` having been dropped from the network,
+  or the static IP having been reused as a published port elsewhere.
 
 ## When not to reach for this
 

@@ -13,10 +13,10 @@ to be merged into the same compose project as compose-socket-proxy.yml
 
 | Field | Meaning | Rule |
 |-------|---------|------|
-| image | `curlimages/curl` (small, has `sh` + `curl`) | Any image with both works; this one is the smallest common choice |
+| image | `curlimages/curl` (small, has `sh` + `curl`) | Any digest-pinned image with both works (R-4 applies here too); this one is the smallest common choice |
 | profiles | `["debug"]` | REQUIRED - without a profile this starts on every `up -d` |
 | networks | The same internal network as `socket-proxy` | Must match P-5's network name; service-name resolution only works from here |
-| volumes | Bind-mounts `scripts/audit-access.sh` read-only | Path is relative to this file's location (`skeleton/`) |
+| volumes | Bind-mounts `scripts/audit-access.sh` read-only | Path is relative to this file's location (`skeleton/`); requires the package to be copied whole — `skeleton/` and `scripts/` as siblings, exactly as they ship in the package. Copying `skeleton/` alone breaks this mount. |
 | entrypoint | Runs the audit script against the proxy's service name | Change the URL only if P-5's service name was renamed |
 
 ## Usage
