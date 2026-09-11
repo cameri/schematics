@@ -12,6 +12,11 @@ daemon endpoint.
    of `HostPort` entries in `docker inspect`.
 2. **Internal-only attachment.** The proxy attaches only to the compose
    project's internal network (P-5). Consumers reach it by service name.
+   `internal: true` only removes the network's outbound masquerade/default
+   route; the host still gets a routing table entry to the subnet the
+   moment the network is created. This matters for the one sanctioned
+   exception — a `network_mode: host` consumer, which cannot use service-
+   name resolution at all — covered in the host-network-consumers module.
 3. **Single client intent.** If only one container should call the API, do
    not rely on discipline: an internal bridge network already blocks
    everything off-host, but any container ON the network can call the

@@ -1,6 +1,6 @@
 ---
 name: docker-socket-proxy
-version: 0.1.0
+version: 0.2.0
 status: published
 description: Exposes a deny-by-default Docker API to containers over an internal network - an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon.
 ---
@@ -102,13 +102,18 @@ Implementation-specific binding choices:
 | P-4 | ALLOWED_GROUPS | env map | (empty) | Grep consumer configs for the API paths they call; each gets a justification | Endpoint groups enabled, e.g. `IMAGES=1`, `CONTAINERS=1` |
 | P-5 | NETWORK_NAME | string | `docker-proxy` | Compose project conventions | Name of the internal network consumers join |
 | P-6 | PROXY_PORT | port | `2375` | The proxy image's default | In-network HTTP endpoint; never published |
+| P-7 | STATIC_PROXY_IP | IP address | (unset) | Only needed if a consumer runs `network_mode: host`; pick a free address inside P-5's subnet | Fixed address the proxy binds to on the internal network, so a host-network consumer can reach it without service-name resolution |
 
 ## Modules
 
 - **endpoint-scoping**: how the proxy's env vars map to Docker API endpoint
-  groups, and how to derive the minimal set from consumer behavior.
+  groups, and how to derive the minimal set from consumer behavior,
+  including consumers shipped as prebuilt images with no local source.
 - **network-isolation**: how the proxy is fenced so "HTTP on 2375" is not an
   accident waiting for a port publish.
+- **host-network-consumers**: the one sanctioned exception to
+  service-name resolution - a consumer running `network_mode: host`
+  reaches the proxy via P-7's static IP instead.
 
 ## Interfaces and Contracts
 
@@ -153,8 +158,14 @@ Implementation-specific binding choices:
 
 ### Phase 3: Prove the policy
 
-1. Run `scripts/audit-access.sh http://socket-proxy:2375` from a consumer
-   container.
+1. The audit script only produces a real result from a container attached
+   to the internal network (P-5) - running it from the host shell or any
+   off-network process reports the endpoint unreachable, which is a false
+   negative, not a finding. Add `skeleton/compose-audit-runner.yml` to the
+   project (a `profiles: ["debug"]`-gated service that carries the script
+   and sits on the network already) and run `docker compose run --rm
+   audit-runner`, or attach any ad hoc container to P-5's network and run
+   `scripts/audit-access.sh http://socket-proxy:2375` from inside it.
 2. Compare the audit output against the intended allowlist (P-4). Every
    intended-allowed group returns 200/2xx; every other group returns 403.
 3. Verification: audit output matches the allowlist exactly (R-2, R-8).
@@ -162,7 +173,13 @@ Implementation-specific binding choices:
 ### Phase 4: Re-point consumers and remove socket mounts
 
 1. Change each consumer's Docker endpoint from the socket (or
-   `unix:///var/run/docker.sock`) to `http://socket-proxy:2375`.
+   `unix:///var/run/docker.sock`) to `http://socket-proxy:2375` (or
+   `http://<P-7 static IP>:2375` for a `network_mode: host` consumer - see
+   the host-network-consumers module). The mechanism for this varies per
+   consumer and is not always `DOCKER_HOST` - check the consumer's own
+   docs first: it may be a `DOCKER_HOST`-style environment variable, a
+   config-file field naming the daemon endpoint, or a CLI flag. Don't
+   assume; confirm which one before editing.
 2. Remove every `docker.sock` mount from consumer services (R-1).
 3. `docker compose up -d <consumers>`.
 4. Verification: `docker inspect <consumer>` shows no socket mount;
@@ -216,6 +233,15 @@ Decisions:
   tecnativa/docker-socket-proxy with deny-by-default allowlists. The
   schema generalizes the pattern; per-deployment allowlists are
   parameters, not part of the schematic.
+- 2026-09-11: Extended from a third production build (three consumers: a
+  Tailscale reverse proxy, a `docker stats` logger, and a metrics agent).
+  That build surfaced three gaps this version closes: one consumer ran
+  `network_mode: host` and could not resolve the proxy by service name
+  (host-network-consumers module, P-7); two of the three consumers were
+  prebuilt images with no local source to grep for Phase 1 discovery
+  (endpoint-scoping's prebuilt-image fallback); and the audit script had
+  no easy way to run from on-network without ad hoc tooling
+  (compose-audit-runner skeleton).
 
 Open questions:
 

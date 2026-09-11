@@ -1,0 +1,39 @@
+# Schema: compose-audit-runner.yml
+#
+# Documents the throwaway audit-runner service so an agent with no prior
+# docker-socket-proxy knowledge can wire up Phase 3 verification correctly.
+
+## Structure
+
+YAML with a single top-level `services:` key (Docker Compose v2). Intended
+to be merged into the same compose project as compose-socket-proxy.yml
+(via `include:`, or concatenated), not deployed standalone.
+
+## services.audit-runner
+
+| Field | Meaning | Rule |
+|-------|---------|------|
+| image | `curlimages/curl` (small, has `sh` + `curl`) | Any image with both works; this one is the smallest common choice |
+| profiles | `["debug"]` | REQUIRED - without a profile this starts on every `up -d` |
+| networks | The same internal network as `socket-proxy` | Must match P-5's network name; service-name resolution only works from here |
+| volumes | Bind-mounts `scripts/audit-access.sh` read-only | Path is relative to this file's location (`skeleton/`) |
+| entrypoint | Runs the audit script against the proxy's service name | Change the URL only if P-5's service name was renamed |
+
+## Usage
+
+```
+docker compose run --rm audit-runner
+```
+
+Exits after printing the allowed/denied matrix - it is not a long-running
+service. Running it with plain `docker compose up` (no `--rm run`) works
+too but leaves a stopped container behind; prefer `run --rm`.
+
+## Validation checks
+
+1. `grep -c "profiles:" compose-audit-runner.yml` is 1 - the service must
+   never start unprompted.
+2. The `networks:` entry matches the network name used in
+   `compose-socket-proxy.yml` exactly.
+3. `docker compose run --rm audit-runner` exits 0 and prints a line per
+   endpoint group (see scripts/audit-access.sh for the exact set).

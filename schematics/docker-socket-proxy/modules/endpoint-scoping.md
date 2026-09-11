@@ -41,6 +41,30 @@ containers, and cannot start, stop, restart, or exec anything.
    file. An allowlist entry whose justification starts with "might need" is
    a denial waiting to happen - delete it instead.
 
+### When the consumer is a prebuilt image (no local source to grep)
+
+Step 1 assumes you can grep the consumer's own code. Most consumers are
+someone else's prebuilt image - there is nothing local to grep. Use one of
+these instead, in order of preference:
+
+1. **Read the consumer's own docs/source upstream.** Its README or its
+   Docker-client code (search for how it opens the Docker connection) will
+   say what it lists, watches, or writes. This is usually enough on its
+   own to fill in the group table without ever touching the deployment.
+2. **Deploy deny-by-default first, watch what fails.** Start the proxy with
+   every group unset, point the consumer at it, and read its logs/errors.
+   A consumer that needs `CONTAINERS` will fail listing or inspecting
+   containers; one that needs `EVENTS` will fail (or silently never fire)
+   on its event-watch call. Enable one group at a time, redeploy, and
+   confirm the specific failure clears before moving to the next -
+   this doubles as A-2's audit-script cross-check, live.
+
+Either path still ends at step 4: every enabled group gets a written
+justification. "The upstream docs say it calls `GET /containers/json`" and
+"enabling `CONTAINERS` cleared the `dial unix docker.sock: no such file`
+error in its logs" are both acceptable justifications - an unexplained
+`ALLOWED` in the audit output is still a bug (R-3).
+
 ## Worked example
 
 A pull worker that runs `POST /images/create?fromImage=X&tag=Y` and reads
