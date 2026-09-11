@@ -1,0 +1,19 @@
+# Skeleton: compose-audit-runner.yml
+#
+# A throwaway service that puts scripts/audit-access.sh on the proxy's own
+# network, so Phase 3 is `docker compose run --rm audit-runner` instead of
+# an ad hoc `docker run --network ...`. Never starts with `up -d` - it's
+# gated behind a profile so it stays out of the normal service set.
+
+services:
+  audit-runner:
+    # Digest-pinned (R-4) like every other image in this package — a
+    # skeleton file is the worst place to model the "just use :latest"
+    # habit the rest of the spec forbids.
+    image: curlimages/curl:8.11.1@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+    profiles: ["debug"]
+    networks:
+      - docker-proxy
+    volumes:
+      - ../scripts/audit-access.sh:/audit.sh:ro
+    entrypoint: ["sh", "/audit.sh", "http://socket-proxy:2375"]

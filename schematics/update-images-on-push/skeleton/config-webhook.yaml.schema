@@ -1,0 +1,30 @@
+# Schema: config-webhook.yaml
+#
+# Documents the redpanda-connect receiver config so an agent with zero
+# prior knowledge of the BunnyFoo/Redpanda Connect YAML format can audit
+# and modify it.
+
+## What it is
+
+A single-input pipeline for an HTTP server: receive a GitHub webhook,
+validate it, enqueue a pull request, and ack fast. One file, three
+concerns in order.
+
+## Blocks, in file order
+
+| Block | Purpose | Constraints |
+|-------|---------|-------------|
+| `http:` | Listener `0.0.0.0:4195` | Address matches the tunnel's public hostname origin rule |
+| `input.http_server` | `path: /webhook/${WEBHOOK_TOKEN}`, POST only | The path token IS the auth (R-2); `${...}` interpolates from .env |
+| `cache_resources` | `delivery_dedup`, in-memory | Backs the dedup (R-4); no persistence by design |
+| `pipeline.processors` | (1) cache add keyed on `X-Github-Delivery`; (2) bloblang mapping that throws on non-push or unwatched ref | Throw = drop from the pull path while sync_response still answers 200 |
+| `output.switch` | errored() -> sync_response (200, no enqueue); valid -> fan_out(sync_response, redis_list RPUSH) | The fan_out MUST contain sync_response first; the redis output MUST be the only other child (see modules/ack-vs-pull.md) |
+
+## Invariants
+
+1. The redis_list output points at `redis://pull-queue:6379`, key
+   `${QUEUE_NAME:-pull-requests}` equivalent.
+2. No output in this file touches the Docker API.
+3. Every validation failure path still answers 200 via sync_response
+   (except path misses -> 404); the pull path is reached only by a valid,
+   non-duplicate push to the watched ref.

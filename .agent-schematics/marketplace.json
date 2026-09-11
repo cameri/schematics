@@ -1,0 +1,336 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cameri-schematics",
+  "description": "Agentic schematics — published build specifications that any LLM, team, or org can implement independently, with zero coordination with the author. The spec is the only coordination mechanism.",
+  "owner": {
+    "name": "Ricardo Arturo Cabral Mejía",
+    "email": "me@ricardocabral.io"
+  },
+  "plugins": [
+    {
+      "name": "schematics",
+      "description": "The authoring plugin — authors, reverse-engineers, and maintains agentic schematics: self-contained build specifications anyone can implement independently, without central coordination. Provides the create-schematic and build-schematic skills.",
+      "source": "./skills/schematics",
+      "spec": "skills/create-schematic/SKILL.md",
+      "category": "authoring",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "schematic",
+        "specification",
+        "portability",
+        "decentralized",
+        "authoring"
+      ]
+    },
+    {
+      "name": "authorize-docker-requests",
+      "description": "Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.",
+      "source": "./schematics/authorize-docker-requests",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "docker",
+        "opa",
+        "authorization",
+        "sandbox",
+        "tls",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "encrypt-container-secrets",
+      "description": "Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory: dual-recipient encryption, a per-service key blast radius, docker-secret wiring, and rotation without rebuilds.",
+      "source": "./schematics/encrypt-container-secrets",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sops",
+        "age",
+        "secrets",
+        "docker",
+        "compose",
+        "encryption",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "restrict-docker-api-access",
+      "description": "Exposes a deny-by-default Docker API to containers over an internal network — an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon, with an audit script that proves the allowlist.",
+      "source": "./schematics/restrict-docker-api-access",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "docker",
+        "security",
+        "socket-proxy",
+        "least-privilege",
+        "hardening",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "update-images-on-push",
+      "description": "Self-updating Docker Compose deployments — a GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.",
+      "source": "./schematics/update-images-on-push",
+      "featured": true,
+      "category": "devops",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "github",
+        "webhooks",
+        "cloudflare",
+        "deploy",
+        "docker",
+        "redis",
+        "devops",
+        "automation"
+      ]
+    },
+    {
+      "name": "fetch-books-over-vpn",
+      "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
+      "source": "./schematics/fetch-books-over-vpn",
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "gluetun",
+        "deluge",
+        "chaptarr",
+        "vpn",
+        "kill-switch",
+        "torrent",
+        "media",
+        "books",
+        "audiobooks"
+      ]
+    },
+    {
+      "name": "serve-books-using-containers",
+      "description": "Serving a self-hosted digital library - Audiobookshelf reading the same dataset the fetching stack writes, with the public surface as a first-class choice: Tailscale serve by default, tsdproxy or a Cloudflare tunnel when you want a real hostname. Read-only by posture; the media never moves.",
+      "source": "./schematics/serve-books-using-containers",
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "audiobookshelf",
+        "tailscale",
+        "tsdproxy",
+        "cloudflare",
+        "library",
+        "media",
+        "streaming"
+      ]
+    },
+    {
+      "name": "run-a-book-library",
+      "description": "A composition schematic - assembles fetch-books-over-vpn and serve-books-using-containers into one operating system for a self-hosted digital library, and defines the shared volume contract between them. No images of its own; the glue is the artifact: shared paths, isolation rules, and one grab-to-listen acceptance test.",
+      "source": "./schematics/run-a-book-library",
+      "featured": true,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "composes": [
+        "fetch-books-over-vpn",
+        "serve-books-using-containers"
+      ],
+      "keywords": [
+        "composition",
+        "library",
+        "media",
+        "contract",
+        "integration"
+      ]
+    },
+    {
+      "name": "improve-docker-security",
+      "description": "A composition schematic - hardens a Docker host's three weakest points by wiring together three sibling schematics: restrict raw Docker API access behind a deny-by-default proxy, policy-police what the daemon may do through OPA authorization, and encrypt every container secret at rest with per-service keys. No images of its own; the glue is the threat model, the deployment order, and the cross-verification.",
+      "source": "./schematics/improve-docker-security",
+      "featured": true,
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "composes": [
+        "restrict-docker-api-access",
+        "authorize-docker-requests",
+        "encrypt-container-secrets"
+      ],
+      "keywords": [
+        "docker",
+        "security",
+        "composition",
+        "opa",
+        "secrets",
+        "socket-proxy",
+        "hardening"
+      ]
+    },
+    {
+      "name": "serve-movies-and-series",
+      "description": "Serving a movies-and-series library - Jellyfin reading the same tree the fetching stack imports into, with Jellyseerr as the request front. Exposure as a first-class choice (local, tailnet, or a gated public hostname), read-only by posture over the media.",
+      "source": "./schematics/serve-movies-and-series",
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "jellyfin",
+        "jellyseerr",
+        "media",
+        "movies",
+        "series",
+        "streaming",
+        "server"
+      ]
+    },
+    {
+      "name": "fetch-music-over-usenet",
+      "description": "Privately acquiring music over usenet - Lidarr automating artist and album grabs through the indexer-manager and downloader the movie/series stack already runs. Shares the downloading infrastructure instead of duplicating it; imports in place into the music library the server reads.",
+      "source": "./schematics/fetch-music-over-usenet",
+      "featured": false,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "lidarr",
+        "music",
+        "usenet",
+        "media",
+        "automation"
+      ]
+    },
+    {
+      "name": "run-a-movies-and-series-library",
+      "description": "A composition schematic - runs a complete movies-and-series library by wiring the fetching half (Prowlarr, Sonarr, Radarr, Bazarr, SABnzbd, unpackerr) to the serving half (Jellyfin, Jellyseerr) through the shared media tree, with the request flow closing the loop from 'I want to watch X' to 'X is playing'. Recommended but optional: hardening the Docker host and keeping deployments current. No images of its own; the glue is the loop, the ordering, and the cross-verification.",
+      "source": "./schematics/run-a-movies-and-series-library",
+      "featured": true,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "composes": [
+        "fetch-over-usenet",
+        "fetch-movies-over-usenet",
+        "fetch-series-over-usenet"
+      ],
+      "keywords": [
+        "composition",
+        "media",
+        "movies",
+        "series",
+        "library",
+        "jellyfin",
+        "sonarr",
+        "radarr"
+      ]
+    },
+    {
+      "name": "run-a-music-library",
+      "description": "A composition schematic - runs a complete music library by wiring the music-fetching half (Lidarr over the shared usenet pipeline) to the serving half (the Jellyfin instance from the movies-and-series serving stack, gaining music libraries). Shares infrastructure instead of duplicating it - one downloader, one indexer manager, one server. Recommended but optional: hardening the Docker host and keeping deployments current.",
+      "source": "./schematics/run-a-music-library",
+      "featured": true,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "composes": [
+        "fetch-music-over-usenet",
+        "fetch-over-usenet",
+        "serve-movies-and-series"
+      ],
+      "keywords": [
+        "composition",
+        "music",
+        "library",
+        "lidarr",
+        "jellyfin",
+        "media"
+      ]
+    },
+    {
+      "name": "fetch-over-usenet",
+      "description": "The shared usenet downloading infrastructure every media arr registers with - SABnzbd as the one downloader, Prowlarr as the one indexer authority, unpackerr cleaning archives, and optional Bazarr and flaresolverr as shared services. Deploys once per host; media kinds join by category, never by second instance.",
+      "source": "./schematics/fetch-over-usenet",
+      "featured": false,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sabnzbd",
+        "prowlarr",
+        "unpackerr",
+        "bazarr",
+        "usenet",
+        "media",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "fetch-movies-over-usenet",
+      "description": "Privately acquiring movies over usenet - Radarr automating grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the movies library the server reads.",
+      "source": "./schematics/fetch-movies-over-usenet",
+      "featured": false,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "radarr",
+        "movies",
+        "usenet",
+        "media",
+        "automation"
+      ]
+    },
+    {
+      "name": "fetch-series-over-usenet",
+      "description": "Privately acquiring series over usenet - Sonarr automating episode and season grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the series library the server reads.",
+      "source": "./schematics/fetch-series-over-usenet",
+      "featured": false,
+      "category": "media",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sonarr",
+        "series",
+        "tv",
+        "usenet",
+        "media",
+        "automation"
+      ]
+    }
+  ]
+}

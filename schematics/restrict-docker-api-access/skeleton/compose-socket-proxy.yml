@@ -1,0 +1,47 @@
+# Skeleton: compose-socket-proxy.yml
+#
+# The proxy service plus its internal network, ready to drop into an
+# existing compose project. Deny-by-default: enable groups only with a
+# written justification (R-3).
+
+services:
+  socket-proxy:
+    # Digest-pinned (R-4). Update by replacing the digest after review.
+    image: tecnativa/restrict-docker-api-access:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: socket-proxy
+    restart: unless-stopped
+    environment:
+      # Enable groups ONLY as consumers require them, each with a
+      # justification (see modules/endpoint-scoping.md). Example of a
+      # pull-only pipeline:
+      # IMAGES: 1      # POST /images/create (pull), GET /images (exists?)
+      # CONTAINERS: 1  # GET /containers/json (status)
+      # POST: 1        # the POST verb; start/stop/restart stay off
+    volumes:
+      # Read-only mount (R-6). P-2 if the socket lives elsewhere.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
+      # Only if a consumer needs P-7 (network_mode: host can't resolve
+      # this service by name — see the host-network-consumers module),
+      # replace the line above with the mapping form so the proxy gets
+      # a fixed address inside the subnet below:
+      # docker-proxy:
+      #   ipv4_address: 172.30.0.2
+    # No ports: block (R-5). Nothing may be published for this service.
+
+networks:
+  docker-proxy:
+    driver: bridge
+    # internal: true additionally blocks outbound masquerading if the
+    # proxy never needs egress; drop it if a consumer network requires
+    # routed egress on the same network.
+    internal: true
+    # Only needed alongside P-7 above: ipv4_address requires the network
+    # to have a fixed subnet — Docker rejects a static address on an
+    # auto-assigned one. Pick a subnet that doesn't collide with any
+    # existing network on the host before uncommenting:
+    # `docker network inspect $(docker network ls -q) | grep Subnet`
+    # ipam:
+    #   config:
+    #     - subnet: 172.30.0.0/24

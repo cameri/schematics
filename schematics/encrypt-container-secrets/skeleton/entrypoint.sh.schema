@@ -1,0 +1,53 @@
+# Shell Script, `.sh` Schema
+#
+# This file is a POSIX `sh` script (not bash): it must run in busybox (alpine)
+# and dash (debian), so it avoids bashisms entirely.
+
+## Constraints
+
+- Shebang `#!/bin/sh`, no `bash` features: no `[[ ]]`, no arrays, no
+  `local`, no `${var^^}`/`${var,}`, no process substitution.
+- `set -e`: exit on the first failing command. The script deliberately has no
+  `-u`: it references optional environment variables with `${VAR:-default}`.
+- `exec` for the final command so the application replaces the shell and
+  receives signals (`docker stop` → SIGTERM) directly.
+
+## Variables
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SECRET_TARGET_PATH` | `/run/secrets/secrets.env` | In-container path of the encrypted dotenv store (`P-5`, `P-10`). The name MUST end in `.env`. |
+| `SOPS_AGE_KEY_FILE` | `/run/secrets/age-keys` | Path of the mounted dedicated age key (`P-9`); sops reads it automatically. |
+| `APP_CMD` | (required) | Application command line (`P-6`). Taken from the container's argv when arguments are present, else from the environment. |
+
+## Control Flow
+
+1. Resolve and export `SOPS_AGE_KEY_FILE`.
+2. Verify the encrypted file exists: exit 1 with a message on stderr if not
+   (never start the application without secrets).
+3. Resolve `APP_CMD` from argv or the environment: exit 1 if empty.
+4. `exec sops exec-env "$SECRET_TARGET_PATH" "$APP_CMD"`: sops decrypts the file
+   into the environment it passes to the command and replaces itself with it.
+
+## Why Not a `--` Separator
+
+`sops exec-env <file> <cmd> [args...]` takes the command immediately after the
+file. Passing `--` inserts a literal argument and makes sops treat it as the
+command, which fails. This is the single most common wiring mistake with this
+pattern.
+
+## Optional Binary Secret Block
+
+The commented block shows the decrypt-to-path variant for non-env secrets
+(`modules/binary-secrets.md`). Uncomment only when the service actually needs
+a file-shaped secret; each block adds a plaintext copy inside the container's
+writable layer, which is the accepted cost of that variant.
+
+## Testing the Script
+
+```
+docker run --rm -e APP_CMD='env' -v .../secrets.env:/run/secrets/secrets.env:ro \
+  -v .../svc-keys.txt:/run/secrets/age-keys:ro <image> /entrypoint.sh
+```
+
+A working setup prints the environment with the decrypted values present.

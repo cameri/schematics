@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic Schematics — Buildable specs for AI agents</title>
+  <meta name="description" content="Agentic Schematics: published build specifications that anyone — any LLM, any team — can implement independently, with zero coordination with the author. The spec is the only coordination mechanism.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23000'/><text x='50' y='70' font-size='56' text-anchor='middle' fill='oklch(70%25 .24 340)' font-family='monospace'>S</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="nav-brand" href="/">agentic schematics</a>
+    <nav class="nav-links">
+      <a href="#what">What</a>
+      <a href="#how">How</a>
+      <a href="#differences">vs Skills</a>
+      <a href="#faq">FAQ</a>
+      <a href="#catalog">Catalog</a>
+      <a href="#spec">The Spec</a>
+    </nav>
+    <a class="nav-cta" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">GitHub ↗</a>
+  </header>
+
+  <main>
+    <!-- ─── Hero ─────────────────────────────────────────── -->
+    <section class="hero">
+      <p class="hero-kicker">THE AGENTIC SCHEMATIC SPEC</p>
+      <h1 class="hero-title">Publish a <em>schematic</em>.<br>Anyone builds it. No coordination.</h1>
+      <p class="hero-sub">
+        A schematic is a self-contained build specification — every requirement, parameter,
+        dependency, phase, and acceptance test for a capability — implementable by
+        <em>any LLM, team, or org</em>, in <em>any runtime</em>, without ever contacting the
+        author. The spec is the only coordination mechanism.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#catalog">Browse schematics</a>
+        <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub ↗</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-num" id="stat-count">0</span><span class="stat-label">schematics</span></div>
+        <div class="stat"><span class="stat-num">10</span><span class="stat-label">binding principles</span></div>
+        <div class="stat"><span class="stat-num">0</span><span class="stat-label">coordination required</span></div>
+      </div>
+    </section>
+
+    <!-- ─── What ─────────────────────────────────────────── -->
+    <section class="section" id="what">
+      <h2 class="section-title">What is an agentic schematic?</h2>
+      <p class="section-lede">
+        In Daniel Suarez's <em>Daemon</em>, the Darknet spreads through shared schematics: publish the
+        spec, and independent teams build the network — no central authority, no coordination.
+        Agentic schematics apply the same pattern to software capabilities. The schematic
+        <strong>replaces the author</strong>: no meetings, no shared history, no access to the original
+        conversation. If a fact matters, it lives in the package — or it doesn't exist.
+      </p>
+      <div class="plain-words">
+        <p><strong>In plain words:</strong> an agentic schematic is like a complete set of assembly
+        instructions — the kind that come in a flat-pack box, except the box is a folder and the
+        builder is an AI assistant. The instructions list every part, every step, and every check
+        to confirm the result works. They're written so that anyone — you, a teammate, an AI on
+        another continent — can build the exact same thing from the instructions alone, without
+        ever asking the author a question. No meetings, no "just ask me", no missing piece that
+        only the author knows.</p>
+      </div>
+      <div class="grid-3">
+        <div class="feature">
+          <h3>Self-contained</h3>
+          <p>Every requirement, parameter, dependency, phase, and test lives inside the package. No "see the original repo", no "ask the author".</p>
+        </div>
+        <div class="feature">
+          <h3>Vendor-agnostic</h3>
+          <p>Plain Markdown and portable shell. Any LLM with a shell and a text editor can execute it.</p>
+        </div>
+        <div class="feature">
+          <h3>Idempotent</h3>
+          <p>Every phase is safe to re-run. Verification gives the same verdict every time.</p>
+        </div>
+        <div class="feature">
+          <h3>Modular</h3>
+          <p>Every separable concern is a module with an explicit contract. No hidden coupling.</p>
+        </div>
+        <div class="feature">
+          <h3>Parameterized</h3>
+          <p>Every environment-specific value is a named parameter with a discovery method. Behavior differences are configuration, never code edits.</p>
+        </div>
+        <div class="feature">
+          <h3>Pluggable</h3>
+          <p>Clean seams with a stated removal procedure. Detach the capability and the host keeps working.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── How ──────────────────────────────────────────── -->
+    <section class="section" id="how">
+      <h2 class="section-title">How it works</h2>
+      <div class="flow">
+        <div class="flow-step">
+          <span class="flow-num">01</span>
+          <h3>Author or reverse-engineer</h3>
+          <p>Write a schematic from an idea, or distill one from a working implementation. Install the <code>schematics</code> plugin and its <code>create-schematic</code> skill walks any agent through it.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">02</span>
+          <h3>Publish once</h3>
+          <p>One Markdown file is the entire coordination. Push it to a repo, paste it into a session, hand it to a stranger — the package carries everything.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">03</span>
+          <h3>Anyone builds, independently</h3>
+          <p>Any LLM in any runtime follows the phases, discovers local parameters, and proves the result against the acceptance tests. The author is never consulted. Or build one from any GitHub repo: <code>build &lt;name&gt;@&lt;user&gt;/&lt;repo&gt;</code>.</p>
+        </div>
+      </div>
+      <div class="code-window">
+        <div class="code-head">
+          <span class="code-title">SCHEMATIC.md (skeleton)</span>
+        </div>
+        <pre class="code-body"><code>---
+name: my-schematic
+version: 0.1.0
+status: draft
+description: One-line summary copied to the marketplace
+---
+
+# Schematic: &lt;Capability&gt;
+
+## Applicable Context
+- **Must discover locally:** &lt;commands&gt;
+- **May assume:** &lt;with risk&gt;
+- **Must not change:** &lt;host constraints&gt;
+
+## Requirements       → R-1, R-2, ... (testable)
+## Dependencies       → D-1, D-2, ... (with failure behavior)
+## Parameters         → P-1, P-2, ... (with discovery methods)
+## Modules            → one contract per module
+## Implementation     → idempotent phases with verification
+## Acceptance         → A-1, A-2, ... (one per requirement)
+## Removal            → stated, safe uninstall procedure</code></pre>
+      </div>
+    </section>
+
+    <!-- ─── Getting Started ─────────────────────────────── -->
+    <section class="section" id="getting-started">
+      <h2 class="section-title">Getting started</h2>
+      <p class="section-lede">Four steps from this page to a hardened Docker host. Everything runs on your machine; the schematic is just Markdown.</p>
+      <div class="flow">
+        <div class="flow-step">
+          <span class="flow-num">01</span>
+          <h3>Install the plugin</h3>
+          <p>Add the schematics marketplace and install the authoring plugin — it gives your agent the <code>build-schematic</code> and <code>create-schematic</code> skills:</p>
+          <div class="code-window"><div class="code-head"><span class="code-title">terminal</span></div><pre class="code-body"><code># oh-my-pi (omp)
+omp plugin marketplace add cameri/schematics
+omp plugin install schematics@cameri-schematics
+
+# claude
+claude plugin marketplace add cameri/schematics
+claude plugin install schematics@cameri-schematics
+
+# cursor, opencode, and everything else
+# no marketplace needed - the schematic IS the package. Copy any
+# SCHEMATIC.md into the session and say "build this":
+build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</code></pre></div>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">02</span>
+          <h3>Pick a schematic</h3>
+          <p>Start with <a href="https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md">improve-docker-security</a> — a composition that wires three sibling schematics: a deny-by-default Docker API proxy, OPA authorization on the daemon, and per-service encrypted secrets.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">03</span>
+          <h3>Build it with your agent</h3>
+          <p>Tell your agent: <code>build improve-docker-security</code>. It reads the spec, discovers your host's parameters (Docker socket path, existing containers, secrets layout), and executes the phases — each phase verifies before the next starts.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">04</span>
+          <h3>Verify against acceptance</h3>
+          <p>The schematic's acceptance tests are the contract: the socket is no longer reachable raw, unauthorized daemon requests are denied, and <code>docker inspect</code> shows secrets encrypted at rest. If a check fails, the phase loops — not your Saturday.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Differences ──────────────────────────────────── -->
+    <section class="section" id="differences">
+      <h2 class="section-title">Schematics vs skills and plugins</h2>
+      <div class="grid-3">
+        <div class="feature">
+          <h3>Skill</h3>
+          <p>Teaches one agent a procedure in that agent's own format. Tied to the harness that loads it; its instructions assume the agent's tools and context.</p>
+        </div>
+        <div class="feature">
+          <h3>Plugin</h3>
+          <p>A distribution wrapper: packages skills, commands, and agents for one harness's marketplace and installer.</p>
+        </div>
+        <div class="feature">
+          <h3>Schematic</h3>
+          <p>None of these. A vendor-agnostic build specification — plain Markdown and portable shell. It doesn't extend an agent; it instructs how to build a capability, and any builder can execute it with zero coordination with the author.</p>
+        </div>
+      </div>
+      <p class="section-lede">
+        The relationship is complementary: this repo ships the authoring skills as a plugin because that
+        is a convenient way to distribute them, but the schematics those skills produce depend on nothing
+        but a shell and a text editor. Skills and plugins are how one agent gets an ability; schematics
+        are how everyone gets the ability rebuilt, anywhere.
+      </p>
+    </section>
+
+
+    <!-- ─── FAQ ──────────────────────────────────────────── -->
+    <section class="section" id="faq">
+      <h2 class="section-title">Hard questions, answered plainly</h2>
+      <div class="grid-2">
+        <div class="feature">
+          <h3>Why rebuild from a spec when you could fork the code?</h3>
+          <p>Most of the time you shouldn't — code is copy-once, and forking is the right default. A schematic wins where forking loses: the source can't be shared, the target environment diverges enough that adaptation costs more than a parameterized rebuild, or you don't want to run a stranger's artifact and prefer that your agent builds from something fully readable. If none of those apply, fork.</p>
+        </div>
+        <div class="feature">
+          <h3>Isn't a malicious schematic just prompt injection with shell steps?</h3>
+          <p>It would be, if implementation were automatic. It isn't: building only places files, and the hard gate requires a human to review the spec — including every shell command the phases will run — before any implementation starts. Threat model, plainly: safer than pulling an opaque image (every line is readable), weaker than writing the capability yourself.</p>
+        </div>
+        <div class="feature">
+          <h3>Isn't this just a README with a numbering scheme?</h3>
+          <p>A README rarely answers "could an agent that never spoke to the author succeed?" That is the test a schematic is written to pass, and the numbering is what makes it auditable: every acceptance test maps to a requirement, so verification is checkable rather than vibes. The convention does cost more than a README; we think the audit trail is the part worth paying for.</p>
+        </div>
+        <div class="feature">
+          <h3>Don't Terraform, Helm, and Ansible already do this?</h3>
+          <p>For infrastructure with a runtime, yes — use them. A schematic is what you reach for when no runtime expresses the work: cross-domain capabilities that mix config, policy, certificates, and procedure, executed by an agent with a shell and a text editor instead of a toolchain.</p>
+        </div>
+        <div class="feature">
+          <h3>Isn't this just a well-written prompt?</h3>
+          <p>A prompt is advice to one model in one session; a schematic is a contract about the world. The difference is enforceable structure: requirements map to acceptance tests you can run, parameters declare how each is discovered on YOUR host, dependencies pin exact commits with content hashes, and removal is a stated, safe procedure. A great prompt describes the outcome and hopes; a schematic makes every claim checkable by a builder who never talks to the author — and fails loudly when a check doesn't hold.</p>
+        </div>
+        <div class="feature">
+          <h3>Won't better models make this obsolete?</h3>
+          <p>Parts of it, and we trim those parts as they do. What ages well: verification literals, parameter discovery, explicit failure behavior. What ages badly: hand-holding. The format is maintained as a living spec precisely so the dumb-builder scaffolding can be cut as builders get smarter.</p>
+        </div>
+        <div class="feature">
+          <h3>Who has actually built anything from one?</h3>
+          <p>The format is new and independent adoption is the honest gap. The first schematic was reverse-engineered from a production fleet and re-implemented from the spec; the next milestone is an independent build by someone with no connection to the author, logged publicly.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Catalog (schematics only) ────────────────────── -->
+    <section class="section" id="catalog">
+      <h2 class="section-title">The schematics</h2>
+      <p class="section-lede">
+        Published build specifications. Copy one and hand it to any agent session, or
+        build it from here: <code>build &lt;name&gt;@cameri/schematics</code>. No plugin
+        required — the spec is the whole package. Live from
+        <code>.agent-schematics/marketplace.json</code>.
+      </p>
+      <div class="catalog" id="catalog-list"><!-- rendered by site.js --></div>
+    </section>
+
+    <!-- ─── The plugin ───────────────────────────────────── -->
+    <section class="section" id="plugin">
+      <h2 class="section-title">The plugin</h2>
+      <p class="section-lede">
+        Not a schematic — a harness plugin that installs the authoring skills
+        (<code>create-schematic</code>, <code>build-schematic</code>) into coding agents that
+        support plugins. The schematics above don't need it; it just makes writing and
+        building them easier.
+      </p>
+      <div class="catalog" id="plugin-list"><!-- rendered by site.js --></div>
+    </section>
+
+    <!-- ─── Spec ─────────────────────────────────────────── -->
+    <section class="section" id="spec">
+      <h2 class="section-title">The spec</h2>
+      <div class="grid-2">
+        <div>
+          <h3>The ten binding principles</h3>
+          <ol class="principles">
+            <li><strong>Vendor-agnostic</strong> — no agent-specific tools or formats</li>
+            <li><strong>Portable</strong> — no absolute paths or machine-specific literals</li>
+            <li><strong>Self-contained</strong> — the package is the complete world</li>
+            <li><strong>Predictable</strong> — identical layout, sections in the same order</li>
+            <li><strong>Idempotent</strong> — re-runnable without damage</li>
+            <li><strong>Parameterized</strong> — every tunable in one table; behavior differences are config, never code edits</li>
+            <li><strong>Dependencies called out</strong> — with discovery and failure behavior</li>
+            <li><strong>Composable</strong> — a schematic may depend on another schematic; a composition owns no services, only the contracts between them</li>
+            <li><strong>Applicable context stated</strong> — discover vs assume vs don't-change</li>
+            <li><strong>Configuration flexibility</strong> — behavior is config, never code edits</li>
+            <li><strong>Pluggable</strong> — clean seams and a stated removal procedure</li>
+          </ol>
+        </div>
+        <div>
+          <h3>File formats, self-describing</h3>
+          <p>Whatever file types a schematic uses, the package must explain them. Any file format a
+          builder can't be assumed to know ships with its own schema companion documenting the syntax,
+          so an agent with zero prior knowledge of it can still work with the file:</p>
+          <p class="code-inline"><code>&lt;name&gt;.&lt;ext&gt;</code> + <code>&lt;name&gt;.&lt;ext&gt;.schema</code></p>
+          <p>The convention is format-agnostic: config files, policy files, manifests, whatever the
+          capability needs. If a reader would have to look the syntax up elsewhere, the package carries
+          the syntax.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>© 2026 agentic schematics</span>
+      <a href="https://github.com/cameri/schematics" target="_blank" rel="noopener">github.com/cameri/schematics</a>
+      <span>Inspired by the shared schematics of Daniel Suarez's <em>Daemon</em></span>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="assets/site.js"></script>
+</body>
+</html>

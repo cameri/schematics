@@ -1,0 +1,40 @@
+# Agentic Schematics
+
+> Published build specifications ("schematics") that any LLM, team, or organization can implement independently with zero coordination with the author. The spec is the only coordination mechanism: a schematic is a self-contained Markdown package listing every requirement, parameter, dependency, phase, and acceptance test for a capability. Hosted at schemaformat.ai; source at github.com/cameri/schematics.
+
+## Schematics
+
+Build a schematic from any public GitHub repo with the `schematics` plugin's build-schematic skill: `build <name>@<user>/<repo>`. Nothing executes at build time; fetched specs are treated as untrusted data.
+
+- [authorize-docker-requests](https://schemaformat.ai/schematics/authorize-docker-requests/SCHEMATIC.md): Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent. Certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
+- [encrypt-container-secrets](https://schemaformat.ai/schematics/encrypt-container-secrets/SCHEMATIC.md): Encrypt service secrets with SOPS and age and inject them into container processes as environment variables at boot, in memory. Dual-recipient encryption, per-service key blast radius, rotation without rebuilds.
+- [restrict-docker-api-access](https://schemaformat.ai/schematics/restrict-docker-api-access/SCHEMATIC.md): Exposes a deny-by-default Docker API to containers over an internal network; endpoint allowlist proxy in front of docker.sock, with an audit script that proves the allowlist.
+- [update-images-on-push](https://schemaformat.ai/schematics/update-images-on-push/SCHEMATIC.md): Self-updating Docker Compose deployments: GitHub push webhook via Cloudflare tunnel and path-token receiver into an in-memory queue; a worker pulls the new image through a scoped Docker API proxy. Ack in milliseconds, pull in the background.
+- [fetch-books-over-vpn](https://schemaformat.ai/schematics/fetch-books-over-vpn/SCHEMATIC.md): Privately fetching books and audiobooks: gluetun as a structural VPN kill switch, Deluge sharing its netns, Chaptarr automation, IP-sync for single-IP indexers; tailnet-only UIs.
+- [serve-books-using-containers](https://schemaformat.ai/schematics/serve-books-using-containers/SCHEMATIC.md): Audiobookshelf reading the same dataset the fetcher writes; exposure as a first-class parameter (Tailscale by default, tsdproxy or Cloudflare for a hostname).
+- [run-a-book-library](https://schemaformat.ai/schematics/run-a-book-library/SCHEMATIC.md): Composition schematic wiring fetch-books-over-vpn and serve-books-using-containers together through a shared volume contract; establishes the schematic-to-schematic dependency convention.
+- [improve-docker-security](https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md): Composition schematic hardening a Docker host on three surfaces at once: scoped API access (restrict-docker-api-access), OPA-policed daemon control (authorize-docker-requests), and encrypted secrets (encrypt-container-secrets). Dependency links are commit-pinned with content SHA-256.
+- [fetch-over-usenet](https://schemaformat.ai/schematics/fetch-over-usenet/SCHEMATIC.md): The shared usenet infrastructure (SABnzbd, Prowlarr, unpackerr; optional Bazarr/flaresolverr) every media arr registers with by category.
+- [fetch-movies-over-usenet](https://schemaformat.ai/schematics/fetch-movies-over-usenet/SCHEMATIC.md): Radarr registering with the shared infrastructure; the movies half of the fetching pipeline.
+- [fetch-series-over-usenet](https://schemaformat.ai/schematics/fetch-series-over-usenet/SCHEMATIC.md): Sonarr registering with the shared infrastructure; the series half, with season-pack handling.
+- [serve-movies-and-series](https://schemaformat.ai/schematics/serve-movies-and-series/SCHEMATIC.md): Jellyfin reading the same tree the fetcher imports into, Jellyseerr as the request front, exposure as a first-class choice.
+- [fetch-music-over-usenet](https://schemaformat.ai/schematics/fetch-music-over-usenet/SCHEMATIC.md): Lidarr registering with the shared Prowlarr/SABnzbd under audio categories; one downloader, one indexer manager.
+- [run-a-movies-and-series-library](https://schemaformat.ai/schematics/run-a-movies-and-series-library/SCHEMATIC.md): Composition wiring the request-to-watch loop end to end; Recommended (optional, commit-pinned): improve-docker-security, update-images-on-push.
+- [run-a-music-library](https://schemaformat.ai/schematics/run-a-music-library/SCHEMATIC.md): Composition running music over SHARED infrastructure - one downloader, one indexer manager, one Jellyfin; Recommended: the Docker hardening, image updates, and the movies-and-series composition.
+
+## The spec
+
+- [The ten binding principles](https://schemaformat.ai/#spec): vendor-agnostic, portable, self-contained, predictable, idempotent, parameterized, dependencies called out, composable, applicable context stated, pluggable.
+- [SCHEMATIC.md format schema](https://schemaformat.ai/schematics/encrypt-container-secrets/SCHEMATIC.md.schema): the format's own self-describing schema. Uncommon file types in a package always ship with a `<name>.<ext>.schema` companion documenting their syntax.
+- [Schematic skeleton](https://schemaformat.ai/index.html): the canonical SCHEMATIC.md skeleton (frontmatter, Applicable Context, Requirements R-n, Dependencies D-n, Parameters P-n, Modules, Implementation phases, Acceptance A-n, Removal).
+
+## Authoring and tooling
+
+- [create-schematic skill](https://schemaformat.ai/skills/schematics/skills/create-schematic/SKILL.md): interview-driven authoring and reverse-engineering of schematics from working implementations.
+- [build-schematic skill](https://schemaformat.ai/skills/schematics/skills/build-schematic/SKILL.md): fetch, validate, and stage a schematic package from any public GitHub repo (`<name>@<user>/<repo>`).
+- [Catalog source](https://schemaformat.ai/.agent-schematics/marketplace.json): machine-readable marketplace catalog listing every package (also consumed by Claude Code and omp as a plugin marketplace).
+- [Contributing](https://schemaformat.ai/CONTRIBUTING.md): contribution rules. Every PR must reference an open issue opened first; outside PRs without one are rejected automatically.
+
+## Schematics vs skills and plugins
+
+A skill teaches one agent a procedure in that agent's own format. A plugin is a distribution wrapper for one harness's marketplace. A schematic is neither: a vendor-agnostic build specification, plain Markdown and portable shell, executable by any builder in any runtime. Skills and plugins give one agent an ability; schematics let everyone rebuild the ability anywhere.

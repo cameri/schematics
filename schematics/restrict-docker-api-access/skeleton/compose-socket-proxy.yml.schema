@@ -1,0 +1,39 @@
+# Schema: compose-socket-proxy.yml
+#
+# Documents the compose wiring for the socket proxy so an agent with no
+# prior restrict-docker-api-access knowledge can work with the file.
+
+## Structure
+
+YAML with `services:` and `networks:` top-level keys (Docker Compose v2).
+
+## services.socket-proxy
+
+| Field | Meaning | Rule |
+|-------|---------|------|
+| image | tecnativa/restrict-docker-api-access, pinned `@sha256:` | Digest REQUIRED (R-4) |
+| environment | One var per enabled endpoint group, value `1` | Deny-by-default (R-2); each entry needs a comment justification (R-3) |
+| volumes | Exactly `/var/run/docker.sock:/var/run/docker.sock:ro` | Read-only REQUIRED (R-6) |
+| networks | The internal network only | No `ports:` key may exist (R-5) |
+| networks (P-7 variant) | Mapping form with `ipv4_address:` instead of a plain list entry | Only when a `network_mode: host` consumer needs P-7 (see host-network-consumers module); commented out by default |
+| restart | `unless-stopped` | Proxy is infrastructure; restart is always safe |
+
+## networks.<name>
+
+- `driver: bridge`
+- `internal: true` preferred: blocks outbound masquerading. Drop only if
+  the same network must carry routed egress for another service.
+- `ipam.config[].subnet` — commented out by default; required only to
+  support P-7's static `ipv4_address` (a fixed subnet is a prerequisite
+  for a static address — Docker rejects one on an auto-assigned subnet).
+  Pick a subnet that doesn't collide with any existing network on the
+  host before uncommenting.
+
+## Validation checks
+
+1. `grep -c "ports:" compose-socket-proxy.yml` is 0.
+2. Every `environment:` entry has a trailing comment with a justification.
+3. The image reference contains `@sha256:`.
+4. If any consumer needs P-7: `ipam.config` and the proxy's
+   `ipv4_address` are both present, uncommented, and the address falls
+   inside the declared subnet.

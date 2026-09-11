@@ -1,0 +1,27 @@
+# Schema: config-pull.yaml
+#
+# Documents the redpanda-connect pull-worker config so an agent with zero
+# prior knowledge of the format can audit and modify it.
+
+## What it is
+
+A queue consumer: BLPOP pull requests off redis and POST the image pull
+through the scoped socket proxy. No HTTP server; this container is not
+internet-facing.
+
+## Blocks, in file order
+
+| Block | Purpose | Constraints |
+|-------|---------|-------------|
+| `input.redis_list` | `redis://pull-queue:6379`, key `pull-requests`, `auto_replay_nacks: true` | auto_replay_nacks implements R-8: a failed pull is re-queued, not lost |
+| `pipeline.processors` | mapping: `root = ""` (empty the body) | The pull request body carries no data; the Docker API reads image/tag from the query string |
+| `output.http_client` | `POST ${SOCKET_PROXY_URL}/images/create?fromImage=${TARGET_IMAGE}&tag=${TARGET_TAG}` | timeout 10m, retries 3, retry_period 1m, max_retry_backoff 5m |
+
+## Invariants
+
+1. The URL host is the socket proxy service name (P-8), never the Docker
+   socket or an unscoped daemon.
+2. The timeout/retry numbers are recorded production decisions (see
+   modules/ack-vs-pull.md); do not tighten them.
+3. The only HTTP this config emits is the single POST to
+   `/images/create` - no container lifecycle calls (R-5).

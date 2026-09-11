@@ -1,0 +1,90 @@
+# Skeleton: compose.yml - the five-service webhook deploy pipeline.
+#
+# All images digest-pinned (R-6). No published ports anywhere (R-1): the
+# only ingress is the Cloudflare tunnel. Secrets come from .env (R-9).
+
+services:
+  cloudflared:
+    # Tunnel connector - outbound-only; token from .env (P-1).
+    image: cloudflare/cloudflared:2026.8.2@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38
+    container_name: webhook-cloudflared
+    restart: unless-stopped
+    # --edge-ip-version 6 when the host has IPv6 egress (the edge has AAAA).
+    command: ["tunnel", "--edge-ip-version", "6", "run", "--token", "${TUNNEL_TOKEN}"]
+    environment:
+      TZ: ${TZ}
+    depends_on:
+      - connect
+    networks:
+      - webhook-internal
+
+  # Webhook receiver: path token (R-2), push filter, dedup (R-4), fast
+  # ack (R-3), enqueue.
+  connect:
+    image: redpandadata/connect:4.105.0@sha256:b30c9ba188cb014c6490c1fe7facba2a6ba7c4ecb9c2fea0d8ee0d5b015cfbe6
+    container_name: webhook-connect
+    restart: unless-stopped
+    command: ["run", "/config.yaml"]
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ./config-webhook.yaml:/config.yaml:ro
+    depends_on:
+      - pull-queue
+    networks:
+      - webhook-internal
+
+  # Pull worker: consumes the queue, pulls through the scoped proxy (R-5).
+  puller:
+    image: redpandadata/connect:4.105.0@sha256:b30c9ba188cb014c6490c1fe7facba2a6ba7c4ecb9c2fea0d8ee0d5b015cfbe6
+    container_name: webhook-puller
+    restart: unless-stopped
+    command: ["run", "/config.yaml"]
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ./config-pull.yaml:/config.yaml:ro
+    depends_on:
+      - pull-queue
+      - socket-proxy
+    networks:
+      - webhook-internal
+
+  # In-memory queue (R-7): a lost entry just means the next push re-pulls.
+  pull-queue:
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    container_name: webhook-pull-queue
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    environment:
+      TZ: ${TZ}
+    networks:
+      - webhook-internal
+
+  # Docker API gate. Implemented by the restrict-docker-api-access schematic;
+  # repeated here in full so this compose file is self-contained.
+  socket-proxy:
+    image: tecnativa/restrict-docker-api-access:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: webhook-socket-proxy
+    restart: unless-stopped
+    environment:
+      IMAGES: 1      # POST /images/create (the pull), GET /images/... (exists?)
+      CONTAINERS: 1  # GET /containers/json (running-version status)
+      POST: 1        # the POST verb; start/stop/restart stay off
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - webhook-internal
+
+networks:
+  webhook-internal:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        # private ULA subnet; docker 27+ NAT66s this to the host's IPv6 egress
+        - subnet: fd00:6465:706c:6f79::/64

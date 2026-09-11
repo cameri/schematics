@@ -1,0 +1,70 @@
+# Agentic Schematics Marketplace — `marketplace.json` Schema
+#
+# This file documents the format of `marketplace.json`, which lists
+# all schematics in this repository for discovery by AI coding agents.
+# The format follows the Claude Code marketplace plugin discovery spec.
+
+## File Extension
+`.json` — standard JSON, stored at `<repo-root>/.agent-schematics/marketplace.json`.
+
+## Structure
+
+```jsonc
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cameri-schematics",             // Marketplace identifier
+  "description": "Agentic schematics —...",  // One-line description
+  "owner": {
+    "name": "Ricardo Arturo Cabral Mejía",  // Author name
+    "url": "https://example.com"            // Optional URL
+  },
+  "plugins": [                               // List of schematic entries
+    {
+      "name": "opa-docker-authz",            // Schematic directory name
+      "description": "Grants a...",          // From SCHEMATIC.md frontmatter
+      "source": "./opa-docker-authz",        // Relative path to schematic dir
+      "spec": "SCHEMATIC.md",                // Optional: copyable spec file (default SCHEMATIC.md)
+      "category": "infrastructure",          // Classification tag
+      "featured": true,                      // Optional: featured on the site, rotated over time
+      "composes": ["book-fetching"],        // Optional: composition schematics list siblings they wire together
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "url": "https://schemaformat.ai"
+      },
+      "keywords": ["docker", "opa", "tls"]  // Search keywords
+    }
+  ]
+}
+```
+
+## Fields
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `$schema` | yes | string | Validation schema URL |
+| `name` | yes | string | Marketplace identifier (`cameri-schematics`) |
+| `description` | yes | string | Brief description of the repo |
+| `owner.name` | yes | string | Author's full name |
+| `owner.email` | no | string | Contact email |
+| `owner.url` | no | string | Author website |
+| `plugins[].name` | yes | string | Schematic name (matches directory) |
+| `plugins[].description` | yes | string | From SCHEMATIC.md `description:` frontmatter |
+| `plugins[].source` | yes | string | Relative path to schematic directory |
+| `plugins[].spec` | no | string | File the site's "Copy as Markdown" button fetches, relative to `source`. Default: `SCHEMATIC.md`. Use for plugins whose copyable artifact lives elsewhere (e.g. `skills/create-schematic/SKILL.md`). |
+| `plugins[].composes` | no | string[] | Names of sibling schematics this composition schematic wires together; the site renders the edges on the card. |
+| `plugins[].category` | yes | string | `infrastructure`, `authoring`, `engineering`, `devops`, etc. |
+| `plugins[].keywords` | no | string[] | Search keywords |
+| `plugins[].author.name` | no | string | Per-schematic author override |
+| `plugins[].author.email` | no | string | Per-schematic author email |
+| `plugins[].author.url` | no | string | Per-schematic author URL |
+
+## Adding a New Schematic
+
+1. Create `<name>/SCHEMATIC.md` with `description:` in frontmatter.
+2. Add an entry to `plugins[]` in marketplace.json.
+3. Commit and push.
+
+## See Also
+
+- `SCHEMATIC.md` — the full schematic document for a single capability
+- `.agent-schematics/marketplace.json` — the actual file
