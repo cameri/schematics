@@ -108,7 +108,6 @@
       "name": "media-fetching",
       "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
       "source": "./schematics/media-fetching",
-      "featured": true,
       "category": "media",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
@@ -130,7 +129,6 @@
       "name": "media-serving",
       "description": "Serving a self-hosted digital library - Audiobookshelf reading the same dataset the fetching stack writes, with the public surface as a first-class choice: Tailscale serve by default, tsdproxy or a Cloudflare tunnel when you want a real hostname. Read-only by posture; the media never moves.",
       "source": "./schematics/media-serving",
-      "featured": true,
       "category": "media",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",

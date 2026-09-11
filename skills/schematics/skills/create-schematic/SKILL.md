@@ -31,7 +31,8 @@ schematic must satisfy, not a style preference:
    damage; verification steps produce the same result on every run; the spec never
    depends on "do it like last time".
 6. **Parameterized and modular** — every environment-specific value is a parameter
-   in one table; every separable concern is a module with an explicit contract.
+   in one table; every separable concern is a module with an explicit contract;
+   behavior differences between deployments are configuration, never code edits.
 7. **Dependencies called out** — every external dependency (runtime, library,
    service, credential, network path) is declared with its purpose, a discovery
    method, and a fallback or failure behavior.
@@ -43,10 +44,7 @@ schematic must satisfy, not a style preference:
 9. **Applicable context stated** — what the implementer must know about the target
    environment, and explicitly what it must discover locally versus what it may
    assume.
-10. **Configuration flexibility** — behavior differences between deployments are
-   configuration, never code edits. The schematic names every configurable knob,
-   its type, default, and effect.
-11. **Pluggable** — the capability defines clean seams: where it attaches to its
+10. **Pluggable** — the capability defines clean seams: where it attaches to its
     host, what interfaces it exposes, and how to remove or replace it without
     collateral damage.
 
