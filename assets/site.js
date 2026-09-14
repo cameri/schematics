@@ -1,8 +1,8 @@
-/* ─── Agentic Schematics — site logic ────────────────────────── */
-//
-// Renders the schematic catalog from .agent-schematics/marketplace.json
-// and implements one-click "copy as Markdown" (fetches SCHEMATIC.md).
-// Dependency-free vanilla JS — no build step, everything cached by GH Pages.
+/* Agentic Schematics — site logic. Renders .agent-schematics/marketplace.json
+   and implements one-click "copy build command": no spec text is embedded or
+   fetched; the copied artifact is `build <name>@cameri/schematics` (agent
+   fetches the spec itself), plus the authoring plugin's per-harness install
+   commands. Vanilla JS, no build step, cached by GH Pages. */
 
 (function () {
   "use strict";
@@ -61,6 +61,24 @@
       }
     });
   }
+
+  // The copyable artifact is a command, never the spec text. The build literal
+  // works in any agent; the spec URL is the pluginless fallback, so the page
+  // never embeds or fetches a spec.
+  function buildCommand(plugin) {
+    return "build " + plugin.name + "@cameri/schematics\n\n" +
+      "# No plugin? Paste this and let the agent fetch the spec:\n" +
+      "# https://schemaformat.ai/schematics/" + plugin.name + "/SCHEMATIC.md";
+  }
+
+  var INSTALL_COMMAND = [
+    "# Claude Code",
+    "claude plugin marketplace add cameri/schematics",
+    "claude plugin install schematics@cameri-schematics",
+    "# Pi / omp",
+    "omp plugin marketplace add cameri/schematics",
+    "omp plugin install schematics@cameri-schematics",
+  ].join("\n");
 
   // ─── Catalog rendering ─────────────────────────────────────
   function renderCatalog(plugins) {
@@ -128,30 +146,19 @@
       card.appendChild(meta);
       var actions = el("div", "cat-actions");
 
-      // The copyable artifact: the schematic spec (SCHEMATIC.md) for
-      // capability plugins; the skill definition for the authoring plugin.
+      // Copy the build command, never the spec text. Authoring card copies
+      // the harness install commands.
       var copyBtn = el("button", "cat-btn primary",
-        isAuthoring ? "Copy skill definition" : "Copy schematic");
+        isAuthoring ? "Copy install command" : "Copy build command");
       copyBtn.type = "button";
       copyBtn.addEventListener("click", function () {
-        var specUrl = plugin.source + "/" + (plugin.spec || "SCHEMATIC.md");
-        var busyLabel = "Fetching…";
-        var doneLabel = isAuthoring ? "Copy skill definition" : "Copy schematic";
-        copyBtn.disabled = true;
-        copyBtn.textContent = busyLabel;
-        fetchText(specUrl)
-          .then(function (md) {
-            return copyText(md).then(function () {
-              toast("Copied " + plugin.name + " (" + md.length + " chars)");
-            });
-          })
-          .catch(function (err) {
-            toast("Failed to copy: " + err.message, true);
-          })
-          .finally(function () {
-            copyBtn.disabled = false;
-            copyBtn.textContent = doneLabel;
-          });
+        var text = isAuthoring ? INSTALL_COMMAND : buildCommand(plugin);
+        var what = isAuthoring ? "install command" : "build command for " + plugin.name;
+        copyText(text).then(function () {
+          toast("Copied " + what);
+        }).catch(function (err) {
+          toast("Failed to copy: " + err.message, true);
+        });
       });
       actions.appendChild(copyBtn);
 

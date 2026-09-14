@@ -159,9 +159,8 @@ omp plugin install schematics@cameri-schematics
 claude plugin marketplace add cameri/schematics
 claude plugin install schematics@cameri-schematics
 
-# cursor, opencode, and everything else
-# no marketplace needed - the schematic IS the package. Copy any
-# SCHEMATIC.md into the session and say "build this":
+# cursor, opencode, codex, and everything else
+# no marketplace needed - point the agent at the spec URL and say "build this":
 build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</code></pre></div>
         </div>
         <div class="flow-step">
@@ -247,9 +246,12 @@ build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</c
     <section class="section" id="catalog">
       <h2 class="section-title">The schematics</h2>
       <p class="section-lede">
-        Published build specifications. Copy one and hand it to any agent session, or
-        build it from here: <code>build &lt;name&gt;@cameri/schematics</code>. No plugin
-        required — the spec is the whole package. Live from
+        Published build specifications. Copy a build command and paste it into
+        any agent session — Claude Code, Cursor, Pi, OpenCode, Codex:
+        <code>build &lt;name&gt;@cameri/schematics</code>. The agent fetches the spec
+        itself; no plugin required to build. Where your harness has a
+        marketplace, the authoring plugin adds the
+        <code>create-schematic</code> / <code>build-schematic</code> skills. Live from
         <code>.agent-schematics/marketplace.json</code>.
       </p>
       <div class="catalog" id="catalog-list"><!-- rendered by site.js --></div>
