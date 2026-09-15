@@ -66,6 +66,16 @@ is the only pin that resolves correctly on both platforms.
 ```
 docker build -f Containerfile.layer --build-arg AGENT_DEV_BASE=<ref> \
   --build-arg AGENT_DEV_BASE_DIGEST=<digest> -t <tag> .          # exits 0
-docker image inspect <tag> --format '{{.Config.User}} {{json .Config.Entrypoint}}'   # the base's account and entrypoint
-docker run --rm <tag>                                            # the harness starts, as PID 1, in the workspace
+docker image inspect <tag> \
+  --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
+                                                # the base's account, workspace, and entrypoint
+docker run --rm <tag>                           # the harness starts, as PID 1, in the workspace
 ```
+
+Both inspections also pass for a layer that restates nothing about the
+contract — no `USER`, no `WORKDIR`, no `ENTRYPOINT` — because a `COPY` into a
+root-owned directory is performed by the builder, so a layer needs a
+`USER root` section only when it installs with a package manager. What no
+layer may do is restate a *different* value: `USER ${AGENT_USER}` at the end
+of a root section is the switch back to the inherited account, not a second
+declaration of it.

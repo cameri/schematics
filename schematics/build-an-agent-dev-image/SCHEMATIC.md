@@ -245,9 +245,11 @@ digest it pins, not the luck of last week's build.
   `unzip`, `zip`, `xz`, `tar`, `rsync`, `openssh-client`). Nothing else is
   promised; a consumer needing more installs it in its layer.
 - **R-9**: The image MUST contain no secret-shaped content — no credential
-  file, no key, no `.env`, no `.netrc`, no `.git-credentials`, no daemon config
-  — and no harness. Secrets reach a deployment at run time or through the
-  published hardening schematics; never through this image.
+  file anywhere on its filesystem (no `.env`, no `.netrc`, no
+  `.git-credentials`, no daemon config, no cloud credential file), no private
+  key material in the account's home — and no harness (no harness binary, no
+  harness configuration). Secrets reach a deployment at run time or through
+  the published hardening schematics; never through this image.
 - **R-10**: The image MUST be built only from a digest-pinned distribution base
   and that distribution's (or the Docker CLI's own) package repositories. No
   `curl … | sh`, no unversioned installer, no language-package install from the
@@ -453,6 +455,7 @@ any of them.
 docker buildx build --builder <P-13> --platform <P-12> \
   --build-arg BASE_DISTRO_DIGEST=<P-2> \
   --build-arg IMAGE_VERSION=<P-10> --build-arg GIT_COMMIT=<P-11> \
+  --build-arg IMAGE_SOURCE=<the package's own repository URL> \
   -f Containerfile -t <P-7>/<P-8>/<P-9>:<P-10>-<P-11> --push .
 
 docker buildx imagetools inspect <P-7>/<P-8>/<P-9>:<P-10>-<P-11>
@@ -513,13 +516,15 @@ Goal: every acceptance check that does not need a registry passes.
 
 Steps:
 1. Run `scripts/verify-base-image.sh` with `BUILD=1` (it builds the image
-   itself, then checks it) or point it at an image already built.
+   itself, then checks it) or point it at an image already built. The run to
+   cite as evidence adds `NO_CACHE=1`, so the package installation and the
+   repository key check execute rather than being reused from the build cache.
 2. Read the failure lines, not just the summary: each one names the requirement
    it covers.
 
-Skip condition: the script is read-only apart from building a throwaway layer
-image and one named volume, both removed on exit; re-running is the normal way
-to verify a change.
+Skip condition: the script is read-only apart from building two throwaway
+layer images, one named volume, and one short-lived probe container, all
+removed on exit; re-running is the normal way to verify a change.
 Verify: `0 failed` in the script's summary.
 
 ### Phase 4: Publish the two-platform manifest
@@ -577,13 +582,24 @@ Verify: the specific checks named above pass for the changed image.
 ## Verification and Acceptance
 
 One test per requirement minimum. Every test is runnable by the implementer
-after the phases. `scripts/verify-base-image.sh` implements A-1 through A-11
-and A-13 through A-16 mechanically (A-16 only when the script also does the
-build, with `BUILD=1`); A-12 needs a published reference.
+after the phases. `scripts/verify-base-image.sh` implements A-1 through A-16
+mechanically, except A-12, which needs a published reference. A-16 tests the
+build itself, so it runs with `BUILD=1`; add `NO_CACHE=1` to the run that is
+cited as evidence, because a build served from the local build cache does not
+re-execute the package installation or the key fetch that A-16 guards. The
+label values the build is given (`IMAGE_VERSION`, `GIT_COMMIT`, `IMAGE_SOURCE`)
+default to deliberately non-release values; a verification build passes the
+real ones.
 
 ```
-# build and verify in one step
-BUILD=1 IMAGE=<local tag> scripts/verify-base-image.sh
+# build and verify in one step, bypassing the build cache so every step runs
+NO_CACHE=1 BUILD=1 IMAGE=<local tag> scripts/verify-base-image.sh
+
+# the same, carrying the values a publish would use
+NO_CACHE=1 BUILD=1 IMAGE=<local tag> IMAGE_VERSION=<P-10> \
+  GIT_COMMIT=$(git rev-parse --short HEAD) \
+  IMAGE_SOURCE=<the package's own repository URL> \
+  scripts/verify-base-image.sh
 
 # verify an image that already exists, and the published manifest
 IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
@@ -604,10 +620,14 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   is exactly the one path in exec form, and `Config.Cmd`,
   `Config.ExposedPorts`, `Config.Volumes`, `Config.Healthcheck` are all unset.
   expected: exactly that configuration.
-- **A-5** (covers R-9): no `.env`, `.netrc`, `.git-credentials`, daemon config,
-  `.ssh` directory, `.pem`, or private key exists anywhere under the account's
-  home, and the home contains only the distribution's account skeleton plus
-  `~/.local`. expected: no secret-shaped path.
+- **A-5** (covers R-9): a scan finds no credential-shaped file anywhere in the
+  image (`.env`, `.netrc`, `.git-credentials`, `id_rsa*`, `id_ed25519*`,
+  `authorized_keys`, `credentials.json`, `.docker/config.json`,
+  `.aws/credentials`) and no private key material (`*.pem`, `*.key`) under the
+  account's home, and the home contains only the distribution's account
+  skeleton plus `~/.local`. expected: no secret-shaped path. The scan runs as
+  the account, so root-only directories are out of its reach; R-9's
+  build-time half — no build step writes such a file — is covered by A-15.
 - **A-6** (covers R-2, R-3, R-5, R-6): through a throwaway layer image that
   adds a stub CLI: with no `AGENT_ID` the stub sees the container's hostname;
   with `AGENT_ID` set it sees that value; its working directory is `P-6` (or
@@ -621,10 +641,16 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   start an agent, because it ships no harness.
 - **A-9** (covers R-2): a stub harness that exits `7` makes the container exit
   `7`. expected: the harness's status, unchanged.
-- **A-10** (covers R-13): the throwaway layer image, built `FROM` the base by
-  digest and adding only a CLI plus `AGENT_HARNESS`, has the same
-  `Config.User` and the same `Config.Entrypoint` as the base. expected:
-  identical on both, with no restatement in the layer.
+- **A-10** (covers R-13): two throwaway layers, both built `FROM` the base by
+  digest and adding only a CLI plus `AGENT_HARNESS`. The first restates
+  nothing — no `USER`, no `WORKDIR`, no `ENTRYPOINT` — and must have the
+  base's `Config.User`, `Config.WorkingDir`, and `Config.Entrypoint`, and a
+  run of it must start the harness as PID 1 and exit 0. The second is the form
+  the layer template teaches (install as root, then switch back with
+  `USER ${AGENT_USER}`), and must land on the base's account with the base's
+  entrypoint: the switch-back works, and no layer ever redeclares the account
+  or the entrypoint's value. expected: identical account, working directory,
+  and entrypoint, in both forms.
 - **A-11** (covers R-5): with a directory mounted at `P-6` the harness starts
   there; with `AGENT_WORKSPACE_DIR` pointing at a path that does not exist yet
   under a writable parent, it is created and entered; with the mount read-only,
@@ -635,21 +661,35 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   top-level digest. expected: both platforms and a list digest; the digest is
   recorded. (Skipped without `PUBLISHED_IMAGE`.)
 - **A-13** (covers R-10, R-12): the image's labels carry version, revision,
-  source, and the base digest, and that base digest equals the `P-2` value the
-  image was built from. expected: four labels present, base digest matching.
-- **A-14** (covers R-14): the running container has no listening TCP socket,
-  and the image declares no exposed port, volume, or health check. expected:
-  nothing listening, nothing declared.
+  source, and the base digest; none of the four is empty, and when the test
+  did the build each of the first three equals the value the build was given —
+  a build that was not given them carries the `Containerfile`'s placeholders
+  (`0.0.0`, `unknown`, an empty source) and fails here; and the base-digest
+  label equals the `P-2` digest the image was built from. expected: four real
+  values and a matching base digest. The digest comparison is skipped — never
+  passed — when no expected digest is available (pass
+  `EXPECTED_BASE_DIGEST`, or `BUILD=1`, which resolves it).
+- **A-14** (covers R-14): a container whose agent process is alive (the stub
+  harness, holding PID 1) has no socket in the LISTEN state in
+  `/proc/net/tcp` or `/proc/net/tcp6`, and a positive control proves the probe
+  can see one: a listener started inside that same container is detected by
+  the same probe. The image also declares no exposed port, volume, or health
+  check. expected: nothing listening, a probe that demonstrably detects a
+  listener, and nothing declared.
 - **A-15** (covers R-10): `docker history --no-trunc <image>` contains no
-  pipe-to-shell (`| sh`, `| bash`) and no URL downloading an archive or
-  installer (`.sh`, `.tar.gz`, `.zip`, `.deb`, `.whl`, …). expected: the build
+  pipe-to-shell (`| sh`, `| bash`), no URL downloading an archive or installer
+  (`.sh`, `.tar.gz`, `.zip`, `.deb`, `.whl`, …), and no `curl`/`wget` command
+  reaching a URL other than the one fetch this package allows — the package
+  repository's signing key into `/etc/apt/keyrings`. expected: the build
   installs only through the distribution's and the Docker CLI's package
-  repositories.
+  repositories. Stated limits: a fetch whose URL is built at run time
+  (`curl "$URL"`) is not seen by these rules — they are a net, not a proof.
 - **A-16** (covers R-10): a build whose repository key fingerprint argument is
-  set to a wrong value fails, with the expected and observed fingerprints in
-  its output. expected: the build stops before installing anything from that
-  repository. (Run with `BUILD=1`; skipped otherwise, because the check needs
-  the build.)
+  set to a wrong value fails, and its output names the fingerprint the key
+  actually has alongside the one that was expected. expected: the build stops
+  before installing anything from that repository, and the failure is
+  identifiably this failure. (Run with `BUILD=1`; skipped otherwise, because
+  the check needs the build.)
 
 ## Failure Modes and Rollback
 

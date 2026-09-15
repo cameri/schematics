@@ -2,9 +2,11 @@
 # Acceptance checks for the agent dev base image.
 #
 # Implements the mechanical checks of SCHEMATIC.md's Verification and
-# Acceptance section (A-1 … A-11, A-13 … A-16) against a built image. It touches nothing
-# outside Docker: it builds one throwaway "harness layer" image, creates one
-# named volume, and removes both when it is done. Safe to re-run.
+# Acceptance section (A-1 … A-16; A-12 only when PUBLISHED_IMAGE names a
+# published ref) against a built image. It touches nothing outside Docker: it
+# builds two throwaway layer images, creates one named volume, runs one
+# short-lived probe container, and removes all of it when it is done. Safe to
+# re-run.
 #
 # It never contacts a remote registry except to resolve the base image digest
 # when BUILD=1, and it never pushes anything.
@@ -12,14 +14,30 @@
 # Inputs (environment; none of these is written anywhere):
 #   IMAGE             image ref to test            (default: agent-dev-base:dev)
 #   BUILD             1 = build IMAGE from ../skeleton/Containerfile first
+#   NO_CACHE          1 = build with --no-cache. A cached build does not
+#                     re-execute the package installation or the repository key
+#                     fetch, so a run that must exercise those steps (and A-16)
+#                     uses this. Pair it with BUILD=1.
 #   BASE_DISTRO_IMAGE distro image for that build  (default: debian:13-slim)
+#   BASE_DISTRO_DIGEST  the base's manifest list digest; resolved from the
+#                     registry when unset. Supply it when the registry is
+#                     rate-limiting the resolution request.
+#   IMAGE_VERSION, GIT_COMMIT, IMAGE_SOURCE
+#                     label values passed to a BUILD=1 build. Defaults are
+#                     deliberately non-release values (0.0.0-verify, the current
+#                     commit, a reserved .invalid URL) so a verification build
+#                     cannot be mistaken for a published one.
+#   EXPECTED_BASE_DIGEST  the digest the image was built from; compared against
+#                     the base-digest label. Resolved automatically when
+#                     BUILD=1; when neither is available that single sub-check
+#                     is skipped rather than passed.
 #   EXPECTED_USER     runtime account name         (default: user)
 #   EXPECTED_UID      runtime uid                  (default: 1000)
 #   EXPECTED_ENTRYPOINT  entrypoint path           (default: /usr/local/bin/agent-entrypoint)
 #   EXPECTED_WORKDIR  default workspace path       (default: /workspace)
 #   PUBLISHED_IMAGE   a pushed ref to check for the two-platform manifest
-#                     (A-14; skipped when unset)
-#   KEEP              1 = keep the throwaway layer image and volume
+#                     (A-12; skipped when unset)
+#   KEEP              1 = keep the throwaway layer images and volume
 #
 # Exit status: 0 when every executed check passed; 1 when any failed; 2 on a
 # usage or precondition error.
@@ -35,7 +53,13 @@ EXPECTED_ENTRYPOINT="${EXPECTED_ENTRYPOINT:-/usr/local/bin/agent-entrypoint}"
 EXPECTED_WORKDIR="${EXPECTED_WORKDIR:-/workspace}"
 PUBLISHED_IMAGE="${PUBLISHED_IMAGE:-}"
 BUILD="${BUILD:-0}"
+NO_CACHE="${NO_CACHE:-0}"
 KEEP="${KEEP:-0}"
+IMAGE_VERSION="${IMAGE_VERSION:-0.0.0-verify}"
+GIT_COMMIT="${GIT_COMMIT:-}"
+IMAGE_SOURCE="${IMAGE_SOURCE:-https://example.invalid/verification-build}"
+EXPECTED_BASE_DIGEST="${EXPECTED_BASE_DIGEST:-}"
+PROBE_CID=""
 
 CHECKS=0
 FAILURES=0
@@ -53,9 +77,13 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/verify-base-image.XXXXXX")"
 VOLUME="verify-base-image-vol-$$"
 
 cleanup() {
+    if [ -n "$PROBE_CID" ]; then
+        docker rm -f "$PROBE_CID" >/dev/null 2>&1 || true
+    fi
     docker volume rm "$VOLUME" >/dev/null 2>&1 || true
     if [ "$KEEP" != "1" ]; then
         docker image rm "$LAYER_TAG" >/dev/null 2>&1 || true
+        docker image rm "$LAYER_TAG-plain" >/dev/null 2>&1 || true
         docker image rm "$LAYER_TAG-bad-key" >/dev/null 2>&1 || true
     fi
     rm -rf "$WORK"
@@ -77,14 +105,28 @@ run() {
 if [ "$BUILD" = "1" ]; then
     [ -f "$SELF_DIR/../skeleton/Containerfile" ] \
         || usage_error "BUILD=1 but $SELF_DIR/../skeleton/Containerfile is missing"
-    digest="$(docker buildx imagetools inspect "$BASE_DISTRO_IMAGE" --format '{{.Manifest.Digest}}' 2>/dev/null)" \
-        || usage_error "cannot resolve the manifest digest of $BASE_DISTRO_IMAGE"
-    printf 'building %s from %s\n' "$IMAGE" "$BASE_DISTRO_IMAGE@$digest"
-    if ! docker build -f "$SELF_DIR/../skeleton/Containerfile" \
+    if [ -n "${BASE_DISTRO_DIGEST:-}" ]; then
+        digest="$BASE_DISTRO_DIGEST"
+    else
+        digest="$(docker buildx imagetools inspect "$BASE_DISTRO_IMAGE" --format '{{.Manifest.Digest}}' 2>/dev/null)" \
+            || usage_error "cannot resolve the manifest digest of $BASE_DISTRO_IMAGE (pass BASE_DISTRO_DIGEST)"
+    fi
+    EXPECTED_BASE_DIGEST="${EXPECTED_BASE_DIGEST:-$digest}"
+    [ -n "$GIT_COMMIT" ] \
+        || GIT_COMMIT="$(git -C "$SELF_DIR/.." rev-parse --short HEAD 2>/dev/null || echo verify)"
+    cache_arg=""
+    [ "$NO_CACHE" = "1" ] && cache_arg="--no-cache"
+    printf 'building %s from %s%s\n' "$IMAGE" "$BASE_DISTRO_IMAGE@$digest" \
+        "$([ -n "$cache_arg" ] && echo ' (no cache)')"
+    # The unquoted $cache_arg is intentional: it is empty or one flag.
+    if ! docker build $cache_arg -f "$SELF_DIR/../skeleton/Containerfile" \
         --build-arg "BASE_DISTRO_IMAGE=$BASE_DISTRO_IMAGE" \
         --build-arg "BASE_DISTRO_DIGEST=$digest" \
         --build-arg "AGENT_USER=$EXPECTED_USER" \
         --build-arg "AGENT_UID=$EXPECTED_UID" \
+        --build-arg "IMAGE_VERSION=$IMAGE_VERSION" \
+        --build-arg "GIT_COMMIT=$GIT_COMMIT" \
+        --build-arg "IMAGE_SOURCE=$IMAGE_SOURCE" \
         -t "$IMAGE" "$SELF_DIR/../skeleton" >"$WORK/build.log" 2>&1
     then
         tail -20 "$WORK/build.log" >&2
@@ -176,17 +218,27 @@ run --entrypoint /bin/sh "$IMAGE" -c 'python3 -m venv "$HOME/.venv-probe" && "$H
 # ---------------------------------------------------------------------------
 # A-5: nothing secret-shaped, nothing harness-shaped
 # ---------------------------------------------------------------------------
+# Two scopes: the whole filesystem (credential-shaped *file names* anywhere —
+# the distribution ships none of them, so a hit is a defect) and the account's
+# home (*key material*: anything else in the image may legitimately carry a
+# public certificate, e.g. the CA bundle under /etc/ssl/certs, but a private
+# key in the account's home is never legitimate).
+#
+# Scope limit, stated: the scan runs as the runtime account, so paths that
+# account cannot read (root-only directories) are out of its reach. R-9 is
+# therefore also a build-time property — the Containerfile creates no such
+# file — and that half is checked by A-15's history rules.
 
 run --entrypoint /bin/sh "$IMAGE" -c '
-for p in "$HOME/.env" "$HOME/.netrc" "$HOME/.git-credentials" \
-         "$HOME/.docker/config.json" "$HOME/.aws/credentials" \
-         "$HOME/.ssh" "/root/.ssh"; do
-    [ -e "$p" ] && echo "present:$p"
-done
-find "$HOME" -xdev \( -name "*.pem" -o -name "id_rsa*" -o -name "id_ed25519*" -o -name "*.key" \) 2>/dev/null
+find / -xdev \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
+    -type f \( -name ".env" -o -name ".netrc" -o -name ".git-credentials" \
+               -o -name "id_rsa*" -o -name "id_ed25519*" -o -name "authorized_keys" \
+               -o -name "credentials.json" -o -path "*/.docker/config.json" \
+               -o -path "*/.aws/credentials" \) -print 2>/dev/null
+find "$HOME" -xdev \( -name "*.pem" -o -name "*.key" \) -print 2>/dev/null
 '
 [ -z "$OUT" ] \
-    && pass "A-5 no credential file, key, or .env anywhere in the image user's home" \
+    && pass "A-5 no credential-shaped file anywhere in the image, and no key material in the account's home" \
     || fail "A-5 secret-shaped paths present: $OUT"
 
 run --entrypoint /bin/sh "$IMAGE" -c 'ls -A "$HOME"'
@@ -215,8 +267,12 @@ fi
 cat > "$WORK/stub-harness" <<'STUB'
 #!/bin/sh
 # A stand-in harness: it reports what the contract promises, so the checks can
-# compare observed behaviour against it.
+# compare observed behaviour against it. With STUB_SLEEP set it stays alive
+# (as PID 1) so the socket probe has a running agent process to inspect.
 printf 'harness id=%s pid=%s cwd=%s argv=[%s]\n' "$AGENT_ID" "$$" "$(pwd)" "$*"
+if [ -n "${STUB_SLEEP:-}" ]; then
+    exec sleep "$STUB_SLEEP"
+fi
 STUB
 cat > "$WORK/failing-harness" <<'STUB'
 #!/bin/sh
@@ -237,12 +293,43 @@ LAYER
 docker build -f "$WORK/Containerfile" --build-arg "BASE_IMAGE=$IMAGE" -t "$LAYER_TAG" "$WORK" >/dev/null 2>&1 \
     || usage_error "could not build the throwaway harness layer from $IMAGE"
 
+# The same layer in its minimal form: it restates nothing at all about the
+# contract — no USER, no WORKDIR, no ENTRYPOINT — and is the shape A-10 claims.
+cat > "$WORK/Containerfile.plain" <<'PLAIN'
+ARG BASE_IMAGE=none
+FROM ${BASE_IMAGE}
+COPY stub-harness /usr/local/bin/stub-harness
+ENV AGENT_HARNESS=stub-harness
+PLAIN
+
+docker build -f "$WORK/Containerfile.plain" --build-arg "BASE_IMAGE=$IMAGE" -t "$LAYER_TAG-plain" "$WORK" >/dev/null 2>&1 \
+    || usage_error "could not build the no-restatement layer from $IMAGE"
+
+plain_config="$(docker image inspect "$LAYER_TAG-plain" \
+    --format '{{.Config.User}}|{{.Config.WorkingDir}}|{{json .Config.Entrypoint}}')"
+if [ "$plain_config" = "$EXPECTED_USER|$EXPECTED_WORKDIR|[\"$EXPECTED_ENTRYPOINT\"]" ]; then
+    pass "A-10 a layer that restates nothing inherits the base's account, working directory, and entrypoint"
+else
+    fail "A-10 no-restatement layer config is '$plain_config', expected '$EXPECTED_USER|$EXPECTED_WORKDIR|[\"$EXPECTED_ENTRYPOINT\"]'"
+fi
+
+run "$LAYER_TAG-plain"
+plain_pid="$(printf '%s' "$OUT" | sed -n 's/^harness id=[^ ]* pid=\([^ ]*\) .*/\1/p')"
+if [ "$RC" = "0" ] && [ "$plain_pid" = "1" ]; then
+    pass "A-10 the no-restatement layer runs: the harness is PID 1 and the container exits 0"
+else
+    fail "A-10 the no-restatement layer run gave (exit $RC, pid ${plain_pid:-none}): $OUT"
+fi
+
+# The layer form the template teaches — install as root, switch back — must
+# land on the same account: this proves the switch-back, not the inheritance
+# (that is the check above).
 [ "$(docker image inspect "$LAYER_TAG" --format '{{.Config.User}}')" = "$EXPECTED_USER" ] \
-    && pass "A-10 a layer keeps the base's runtime account without redeclaring it" \
+    && pass "A-10 the root-install form ends on the base's account (USER \${AGENT_USER} switch-back)" \
     || fail "A-10 layer user is $(docker image inspect "$LAYER_TAG" --format '{{.Config.User}}')"
 
 [ "$(docker image inspect "$LAYER_TAG" --format '{{json .Config.Entrypoint}}')" = "[\"$EXPECTED_ENTRYPOINT\"]" ] \
-    && pass "A-10 a layer inherits the standard entrypoint untouched" \
+    && pass "A-10 a layer never has to redeclare the entrypoint" \
     || fail "A-10 layer entrypoint is $(docker image inspect "$LAYER_TAG" --format '{{json .Config.Entrypoint}}')"
 
 # A-6: the happy path — default id, explicit id, argument pass-through, cwd,
@@ -314,27 +401,88 @@ else
     fail "A-11 read-only workspace run exited $RC with: $OUT"
 fi
 
-# A-14: no listening socket in the container, with the harness running.
-run --entrypoint /bin/sh "$LAYER_TAG" -c '
-grep -q ": 0A" /proc/net/tcp /proc/net/tcp6 2>/dev/null && echo listening || echo none
-'
-[ "$OUT" = "none" ] \
-    && pass "A-14 no listening TCP socket in the container" \
-    || fail "A-14 a listening socket exists: $OUT"
+# A-14: nothing listening while an agent process runs, with a positive control.
+# The probe greps /proc/net/tcp{,6} for the LISTEN state, which is the field
+# after the local and remote addresses (a bare ": 0A" never matches — the
+# character before the state is the end of the remote address).
+PROBE='if grep -q " 0A " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then echo listening; else echo none; fi'
+
+PROBE_CID="$(docker run -d -e STUB_SLEEP=30 "$LAYER_TAG" 2>/dev/null)"
+if [ -n "$PROBE_CID" ]; then
+    sleep 1
+    # The probe runs against a container whose agent process (the stub harness,
+    # holding PID 1) is alive — not against a shell that replaced the entrypoint.
+    sockets="$(docker exec "$PROBE_CID" /bin/sh -c "$PROBE" 2>&1)"
+    [ "$sockets" = "none" ] \
+        && pass "A-14 nothing is listening in a container whose agent process is running" \
+        || fail "A-14 a listening socket exists: $sockets"
+
+    # Positive control: start a real listener inside the same container and
+    # require the probe to see it. Without this, a probe that can never match
+    # would pass the check above forever.
+    docker exec -d "$PROBE_CID" /usr/bin/python3 -c 'import socket,time
+s = socket.socket(); s.bind(("0.0.0.0", 9999)); s.listen(1); time.sleep(20)'
+    sleep 1
+    control="$(docker exec "$PROBE_CID" /bin/sh -c "$PROBE" 2>&1)"
+    [ "$control" = "listening" ] \
+        && pass "A-14 positive control: the probe detects a listener started inside the container" \
+        || fail "A-14 the probe did not detect a real listener (positive control): $control"
+    docker rm -f "$PROBE_CID" >/dev/null 2>&1
+    PROBE_CID=""
+else
+    fail "A-14 could not start the probe container"
+fi
 
 # ---------------------------------------------------------------------------
-# A-13: provenance labels
+# A-13: provenance labels carry the real values, and the base digest matches
 # ---------------------------------------------------------------------------
+# Passing presence is not enough: an image built without the label arguments
+# carries the Containerfile's defaults (0.0.0 / unknown / an empty source) and
+# would otherwise look fine.
 
 labels="$(img '{{json .Config.Labels}}')"
-missing=""
-for key in org.opencontainers.image.version org.opencontainers.image.revision \
-           org.opencontainers.image.source org.opencontainers.image.base.digest; do
-    printf '%s' "$labels" | grep -q "\"$key\"" || missing="$missing $key"
+label_value() { printf '%s' "$labels" | grep -o "\"$1\":\"[^\"]*\"" | sed 's/^"[^"]*":"//; s/"$//'; }
+
+label_missing=""
+for key in version revision source base.digest; do
+    value="$(label_value "org.opencontainers.image.$key")"
+    [ -n "$value" ] || label_missing="$label_missing org.opencontainers.image.$key"
 done
-[ -z "$missing" ] \
-    && pass "A-13 provenance labels present (version, revision, source, base digest)" \
-    || fail "A-13 missing labels:$missing"
+[ -z "$label_missing" ] \
+    && pass "A-13 provenance labels present and non-empty (version, revision, source, base digest)" \
+    || fail "A-13 missing or empty labels:$label_missing"
+
+if [ "$BUILD" = "1" ]; then
+    # The strongest form: the labels are exactly the values this build was given.
+    for pair in "version:$IMAGE_VERSION" "revision:$GIT_COMMIT" "source:$IMAGE_SOURCE"; do
+        key="${pair%%:*}"; want="${pair#*:}"
+        got="$(label_value "org.opencontainers.image.$key")"
+        [ "$got" = "$want" ] \
+            && pass "A-13 $key label equals the value the build was given ($got)" \
+            || fail "A-13 $key label is '$got', expected '$want'"
+    done
+else
+    # Verifying an image this script did not build: the values are not known
+    # here, so the check is that none of them is still the Containerfile's
+    # placeholder (which is what a build without the arguments produces).
+    [ "$(label_value org.opencontainers.image.version)" != "0.0.0" ] \
+        && pass "A-13 version label is not the Containerfile default: $(label_value org.opencontainers.image.version)" \
+        || fail "A-13 the version label is still the Containerfile default (0.0.0)"
+    [ "$(label_value org.opencontainers.image.revision)" != "unknown" ] \
+        && pass "A-13 revision label is not the Containerfile default: $(label_value org.opencontainers.image.revision)" \
+        || fail "A-13 the revision label is still the Containerfile default (unknown)"
+    [ -n "$(label_value org.opencontainers.image.source)" ] \
+        && pass "A-13 source label is set: $(label_value org.opencontainers.image.source)" \
+        || fail "A-13 the source label is empty"
+fi
+
+if [ -n "$EXPECTED_BASE_DIGEST" ]; then
+    [ "$(label_value org.opencontainers.image.base.digest)" = "$EXPECTED_BASE_DIGEST" ] \
+        && pass "A-13 base digest label equals the digest the image was built from ($EXPECTED_BASE_DIGEST)" \
+        || fail "A-13 base digest label is '$(label_value org.opencontainers.image.base.digest)', expected '$EXPECTED_BASE_DIGEST'"
+else
+    skip "A-13 base digest equality (pass EXPECTED_BASE_DIGEST, or BUILD=1 to resolve it)"
+fi
 
 # ---------------------------------------------------------------------------
 # A-15: the build history holds no unverified installer
@@ -352,6 +500,36 @@ downloaded="$(printf '%s' "$history_text" | grep -Eo 'https?://[^ "]+' \
     && pass "A-15 no archive or installer is downloaded from a URL during the build" \
     || fail "A-15 the build downloads: $(printf '%s' "$downloaded" | tr '\n' ' ')"
 
+# Every curl/wget command in the history that reaches out to a URL, except the
+# one fetch this package allows: the package repository's signing key into
+# /etc/apt/keyrings (R-10). This catches the extension-less forms the URL
+# filter above misses, e.g.
+#   curl -o /usr/local/bin/tool https://host/binary
+# Two things keep it from flagging the package names in an install list: the
+# command must be a separate command (the history is split on &&, ;, |) and it
+# must contain a URL. Residual hole, stated: a fetch whose URL is built at run
+# time (``curl "$URL"``) is not seen by this rule; the archive/URL rule and the
+# pipe-to-shell rule above are the other nets.
+fetches="$(printf '%s\n' "$history_text" | awk '
+{
+    line = $0
+    cont = (line ~ /\\[ \t]*$/)
+    sub(/\\[ \t]*$/, "", line)
+    buf = (buf == "" ? line : buf " " line)
+    if (cont) next
+    gsub(/&&|\|\||[;&|]/, "\n", buf)
+    n = split(buf, cmds, "\n")
+    for (i = 1; i <= n; i++) {
+        c = cmds[i]
+        if (c ~ /(^|[^[:alnum:]_-])(curl|wget)([^[:alnum:]_-]|$)/ \
+            && c ~ /:\/\// && c !~ /\/etc\/apt\/keyrings\//) print c
+    }
+    buf = ""
+}')"
+[ -z "$fetches" ] \
+    && pass "A-15 the only URL a curl/wget command fetches is the package repository signing key" \
+    || fail "A-15 the build fetches from other URLs: $(printf '%s' "$fetches" | tr '\n' ';')"
+
 # ---------------------------------------------------------------------------
 # A-16: a package repository key that does not match its recorded fingerprint
 # stops the build, instead of the build trusting whatever the URL served
@@ -359,15 +537,31 @@ downloaded="$(printf '%s' "$history_text" | grep -Eo 'https?://[^ "]+' \
 # ---------------------------------------------------------------------------
 
 if [ "$BUILD" = "1" ]; then
-    if docker build -f "$SELF_DIR/../skeleton/Containerfile" \
+    bogus_fpr="0000000000000000000000000000000000000000"
+    if docker build $cache_arg -f "$SELF_DIR/../skeleton/Containerfile" \
         --build-arg "BASE_DISTRO_IMAGE=$BASE_DISTRO_IMAGE" \
         --build-arg "BASE_DISTRO_DIGEST=$digest" \
-        --build-arg "DOCKER_REPO_KEY_FPR=0000000000000000000000000000000000000000" \
+        --build-arg "AGENT_USER=$EXPECTED_USER" \
+        --build-arg "AGENT_UID=$EXPECTED_UID" \
+        --build-arg "IMAGE_VERSION=$IMAGE_VERSION" \
+        --build-arg "GIT_COMMIT=$GIT_COMMIT" \
+        --build-arg "IMAGE_SOURCE=$IMAGE_SOURCE" \
+        --build-arg "DOCKER_REPO_KEY_FPR=$bogus_fpr" \
         -t "$LAYER_TAG-bad-key" "$SELF_DIR/../skeleton" >"$WORK/negative-build.log" 2>&1
     then
         fail "A-16 a build with a mismatched repository key fingerprint succeeded"
     else
-        pass "A-16 a build with a mismatched repository key fingerprint fails"
+        # The failure has to be this failure: the log must name the fingerprint
+        # the key actually has and the one that was expected.
+        observed_fpr="$(grep -o 'key fingerprint is [0-9A-Fa-f]\{40\}' "$WORK/negative-build.log" \
+            | head -1 | sed 's/.* //')"
+        if [ -n "$observed_fpr" ] && [ "$observed_fpr" != "$bogus_fpr" ] \
+            && grep -q "expected $bogus_fpr" "$WORK/negative-build.log"
+        then
+            pass "A-16 a mismatched fingerprint stops the build, reporting observed $observed_fpr against expected $bogus_fpr"
+        else
+            fail "A-16 the negative build failed without reporting the fingerprints (observed '${observed_fpr:-none}'): $(tail -3 "$WORK/negative-build.log" | tr '\n' ' ')"
+        fi
     fi
 else
     skip "A-16 repository key fingerprint enforcement (run with BUILD=1)"
