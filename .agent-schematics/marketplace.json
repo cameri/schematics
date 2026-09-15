@@ -102,6 +102,27 @@
       ]
     },
     {
+      "name": "build-an-agent-dev-image",
+      "description": "The dev base image of a sandboxed coding agent: a digest-pinned distribution image that boots one agent in one workspace from an environment contract, runs as a fixed non-root account, and carries the Docker CLI, git, and build tooling — harness-free and secret-free, so a per-harness layer pins it by digest and adds only its CLI.",
+      "source": "./schematics/build-an-agent-dev-image",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sandbox",
+        "agent",
+        "container-image",
+        "dev-container",
+        "entrypoint",
+        "multi-arch",
+        "non-root",
+        "digest-pinning",
+        "infrastructure"
+      ]
+    },
+    {
       "name": "fetch-books-over-vpn",
       "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
       "source": "./schematics/fetch-books-over-vpn",

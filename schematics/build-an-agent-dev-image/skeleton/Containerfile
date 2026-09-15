@@ -1,0 +1,126 @@
+# syntax=docker/dockerfile:1
+#
+# Agent dev base image — the standard base for a sandboxed coding agent.
+#
+# What this image guarantees (the contract every layer above it relies on):
+#   * a fixed, unprivileged runtime account (uid/gid 1000, name from AGENT_USER)
+#   * the standard entrypoint at /usr/local/bin/agent-entrypoint
+#   * the Docker CLI, git, and a build toolchain
+#   * no harness CLI, no credential, no secret, no listener, no daemon
+#
+# Build it for the host platform, pinned to the base image's manifest digest:
+#
+#   docker build \
+#     --build-arg BASE_DISTRO_DIGEST="$(docker buildx imagetools inspect \
+#         debian:13-slim --format '{{.Manifest.Digest}}')" \
+#     --build-arg IMAGE_VERSION=0.1.0 \
+#     --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+#     --build-arg IMAGE_SOURCE="https://example.invalid/repository" \
+#     -t agent-dev-base:dev .
+#
+# Publishing both platforms as one manifest list is the schematic's
+# publishing-and-pinning module, not this file's comments.
+
+ARG BASE_DISTRO_IMAGE=debian:13-slim
+ARG BASE_DISTRO_DIGEST
+
+FROM ${BASE_DISTRO_IMAGE}@${BASE_DISTRO_DIGEST}
+
+# Re-declared after FROM: an ARG consumed by FROM is not in scope for later
+# instructions unless it is declared again — without this, the provenance
+# labels below expand to empty strings.
+ARG BASE_DISTRO_IMAGE=debian:13-slim
+ARG BASE_DISTRO_DIGEST
+
+# TARGETARCH is supplied by BuildKit. Validating it here is what keeps "one
+# Containerfile, two platforms" honest: a classic-builder build, or a platform
+# this schematic does not support, fails at the first instruction instead of
+# producing an image that quietly works on exactly one architecture.
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64|arm64) ;; \
+      *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}'; this image is built for amd64 and arm64 with BuildKit." >&2; exit 1 ;; \
+    esac
+
+ARG AGENT_USER=user
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+ARG WORKSPACE_DIR=/workspace
+ARG IMAGE_VERSION=0.0.0
+ARG GIT_COMMIT=unknown
+ARG IMAGE_SOURCE=
+
+LABEL org.opencontainers.image.title="Agent dev base image" \
+      org.opencontainers.image.description="Unprivileged Debian base for a sandboxed coding agent: standard entrypoint, Docker CLI, git, build toolchain. Harness-free and secret-free." \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.opencontainers.image.base.name="${BASE_DISTRO_IMAGE}" \
+      org.opencontainers.image.base.digest="${BASE_DISTRO_DIGEST}"
+
+# 1. Toolchain. One layer, one apt transaction: git and the build essentials the
+#    layers above expect to find, plus the client side of the Docker API (the
+#    daemon side is not this image's business — see R-7 in SCHEMATIC.md).
+#    Every apt cache mount carries an explicit id so unrelated builds on the
+#    same host cannot poison each other's package indexes.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-agent-base-archives \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked,id=apt-agent-base-lists \
+    set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl wget gnupg jq less procps rsync \
+      unzip zip xz-utils tar openssh-client \
+      git build-essential cmake pkg-config \
+      python3 python3-dev python3-venv python3-pip; \
+    install -m 0755 -d /etc/apt/keyrings; \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc; \
+    chmod a+r /etc/apt/keyrings/docker.asc; \
+    printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+      "$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
+      > /etc/apt/sources.list.d/docker.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      docker-ce-cli docker-compose-plugin docker-buildx-plugin
+
+# 2. The runtime account. Never root, never a path back to root: no sudo, no
+#    privileged group membership, no setuid helper added here. The uid/gid are
+#    the caller's bind-mount parity anchor, so a collision with a uid the base
+#    image already uses is a hard build failure rather than a silent remap.
+RUN set -eux; \
+    if getent passwd "${AGENT_UID}" >/dev/null || getent group "${AGENT_GID}" >/dev/null; then \
+      echo "ERROR: uid/gid ${AGENT_UID}/${AGENT_GID} already exists in ${BASE_DISTRO_IMAGE}; choose free ids or a different base." >&2; \
+      exit 1; \
+    fi; \
+    groupadd --gid "${AGENT_GID}" "${AGENT_USER}"; \
+    useradd --uid "${AGENT_UID}" --gid "${AGENT_GID}" \
+            --create-home --home-dir "/home/${AGENT_USER}" \
+            --shell /bin/bash "${AGENT_USER}"; \
+    passwd --lock "${AGENT_USER}"; \
+    mkdir -p "${WORKSPACE_DIR}" "/home/${AGENT_USER}/.local/bin"; \
+    chown "${AGENT_UID}:${AGENT_GID}" "${WORKSPACE_DIR}" "/home/${AGENT_USER}/.local/bin"
+
+# 3. The standard entrypoint. Root-owned and world-readable, so a layer that
+#    replaces nothing inherits it untouched.
+COPY entrypoint.sh /usr/local/bin/agent-entrypoint
+RUN chmod 0755 /usr/local/bin/agent-entrypoint
+
+ENV HOME="/home/${AGENT_USER}" \
+    AGENT_USER="${AGENT_USER}" \
+    AGENT_WORKSPACE_DIR="${WORKSPACE_DIR}" \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    SHELL=/bin/bash \
+    DEVCONTAINER=true \
+    PATH="/home/${AGENT_USER}/.local/bin:${PATH}"
+
+WORKDIR ${WORKSPACE_DIR}
+
+# No EXPOSE: this image opens no port and starts no listener (R-14).
+# No VOLUME: the caller mounts explicitly; a VOLUME here would hide the
+# image's own /workspace and make the default run path a surprise.
+# No HEALTHCHECK: with no harness in the image there is nothing meaningful to
+# probe; the harness layer declares its own.
+
+USER ${AGENT_USER}
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]

@@ -1,0 +1,69 @@
+# Containerfile (Dockerfile) Schema
+#
+# `Containerfile` and `Dockerfile` are the same format; this package uses the
+# `Containerfile` name. The file is a list of instructions executed
+# top-to-bottom, each producing an image layer. Build it with:
+#
+#   docker build -f Containerfile \
+#     --build-arg BASE_DISTRO_DIGEST="$(docker buildx imagetools inspect \
+#         debian:13-slim --format '{{.Manifest.Digest}}')" \
+#     -t <your-tag> .
+#
+# This companion documents the format for a reader who has not written a
+# Containerfile before; `Containerfile.layer.schema` documents the layer
+# template that sits beside it.
+
+## Instructions Used
+
+| Instruction | Meaning |
+|-------------|---------|
+| `ARG <name>[=<default>]` | Declares a build argument — a value supplied at build time with `--build-arg`, not an environment variable of the running container. An `ARG` declared *before* `FROM` is available to `FROM` itself; to use the same name later it must be declared again after `FROM`. |
+| `FROM <image>@<digest>` | Starts the image from an exact base: the tag names the distribution, the digest fixes the bytes. A tag alone would drift under the image (R-10). |
+| `RUN <cmd>` | Runs a build-time command in a new layer. |
+| `RUN --mount=type=cache,…` | Runs a command with a persistent build cache mounted at a path. Used for package indexes so a rebuild does not re-download them. The cache is not part of the image. |
+| `LABEL key=value` | Attaches metadata to the image, readable with `docker image inspect`. |
+| `COPY <src> <dst>` | Copies a file from the build context into the image. |
+| `ENV <name>=<value>` | Sets an environment variable in the image, inherited by every container and every layer built from it. |
+| `WORKDIR <path>` | Sets the default working directory. |
+| `USER <name>` | Sets the account the container runs as, and the account later build steps run as. |
+| `ENTRYPOINT ["…"]` | The program the container starts. `exec` form (JSON array) is required: the shell form would wrap it in `sh -c` and break signal delivery. |
+| `HEALTHCHECK` | A periodic check the runtime runs inside the container. Deliberately absent here — see below. |
+| `EXPOSE`, `VOLUME` | Metadata about ports and volumes. Deliberately absent here — see below. |
+
+## Why This Shape
+
+- **The digest is required, not defaulted.** `BASE_DISTRO_DIGEST` has no
+  default, so the `FROM` line cannot be satisfied by accident. The build emits
+  one static lint warning about that empty default (`InvalidDefaultArgInFrom`);
+  it is the pin doing its job, and it is expected.
+- **`TARGETARCH` is validated first.** BuildKit supplies it for every build;
+  a build that does not (a classic-builder build) or that targets an
+  unsupported architecture fails at instruction two, naming the value, instead
+  of producing an image that works on one architecture by luck.
+- **One `RUN` for the toolchain.** Package installations in separate layers
+  leave the indexes and half-configured packages in between; one transaction is
+  both smaller and reproducible.
+- **The account is created at build time, then `USER` switches to it.** The
+  account has to be created by root (that is what image builds do); the
+  entrypoint is copied root-owned and world-readable so the runtime account
+  cannot rewrite its own contract, and everything after `USER` runs as the
+  account. No instruction returns to root, and the image's default runtime
+  identity is the account (R-1).
+- **No `EXPOSE`.** The image opens no port; a deployment that needs one adds it
+  at run time, visibly (R-14).
+- **No `VOLUME`.** A `VOLUME` instruction hides the image's own directory at
+  that path and makes an unmounted run behave differently from a mounted one.
+  The caller mounts explicitly.
+- **No `HEALTHCHECK`.** There is no harness in this image, so any check would
+  probe something incidental. The harness layer declares the check that means
+  something (`Containerfile.layer.schema`).
+- **No `created` label.** A timestamp would make two builds of the same commit
+  differ for no reason; the version and revision labels carry the provenance.
+
+## Validation
+
+```
+docker build -f Containerfile --build-arg BASE_DISTRO_DIGEST=<digest> -t <tag> .   # exits 0
+docker image inspect <tag> --format '{{.Config.User}} {{.Config.Entrypoint}}'      # user ["/usr/local/bin/agent-entrypoint"]
+scripts/verify-base-image.sh                                                       # all checks pass
+```

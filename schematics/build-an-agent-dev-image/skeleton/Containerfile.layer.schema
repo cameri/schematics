@@ -1,0 +1,71 @@
+# Containerfile Layer Template Schema
+#
+# `Containerfile.layer` is not an image of its own — it is the template for an
+# image that adds one harness CLI to the dev base image. The base image is the
+# first part of a set; this file is how every later part attaches to it, so the
+# rules it encodes are a contract between two artifacts rather than a build
+# recipe.
+#
+# Build it with:
+#
+#   docker build -f Containerfile.layer \
+#     --build-arg AGENT_DEV_BASE=<registry>/<namespace>/<name> \
+#     --build-arg AGENT_DEV_BASE_DIGEST=sha256:<manifest list digest> \
+#     -t <your-tag> .
+
+## The Two Build Arguments
+
+| Argument | Value |
+|----------|-------|
+| `AGENT_DEV_BASE` | The published base reference without a tag: `<registry>/<namespace>/<name>`. |
+| `AGENT_DEV_BASE_DIGEST` | The base's **manifest list digest** — the `Digest:` line that `docker buildx imagetools inspect` prints for the published reference. |
+
+Pin the manifest list digest, never a tag and never a per-platform digest. A
+tag moves; a per-platform digest pins one architecture and makes the other
+architecture's build fail with `no matching manifest`. The manifest list digest
+is the only pin that resolves correctly on both platforms.
+
+## What a Layer May Change
+
+- the packages it installs, in its own `RUN` steps;
+- the harness CLI: its installation, its version, its configuration defaults;
+- `AGENT_HARNESS`, which is how the inherited entrypoint finds the CLI;
+- optionally `CMD`, and optionally a `HEALTHCHECK`;
+- optionally a wrapper script, when the harness needs default arguments (the
+  base forwards only the container's own arguments — see
+  `entrypoint.sh.schema`).
+
+## What a Layer Must Not Change
+
+| Do not | Why |
+|--------|-----|
+| Re-declare or rename the runtime account | The account, its ids, and its home are the base's contract (R-13); a consumer pinning two layers of the same set would get two different identities. |
+| Replace or wrap the entrypoint | The run contract — env names, refusal codes, `exec` semantics — is what makes the parts composable; a wrapper that swallows signals or masks exit status breaks supervision. |
+| Change the workspace default path | Consumers mount the workspace at the base's default unless they override it deliberately. |
+| Install the harness as the runtime account into a root-owned directory | The install step belongs to a `USER root` section that ends with a switch back to `${AGENT_USER}`; a half-switched layer installs fine and fails at run time. |
+| Bake credentials, tokens, or a `.env` into the layer | The set is secret-free by construction; credentials arrive at run time (R-9). |
+| Leave the harness unpinned | A layer whose CLI version floats makes a rebuild a different image; the layer's own tag scheme (version plus commit) is what makes it auditable. |
+
+## Why This Shape
+
+- **`FROM` by digest, not by tag.** The base image is versioned by a digest a
+  reviewer can see and re-resolve; the dependency is visible in one line rather
+  than implied by a build that happened to pull the right tag.
+- **`USER root` for the install, then `USER ${AGENT_USER}`.** Installing needs
+  root; running never does. Using the inherited `AGENT_USER` rather than the
+  literal name means a deployment that renames the account edits one build
+  argument instead of every layer.
+- **The install step fails on purpose when unfilled.** A layer image with no
+  harness would build, publish, and then refuse to start an agent — a failure
+  that belongs in the build, not in production.
+- **An optional `HEALTHCHECK`.** The base declares none (nothing to probe
+  without a harness); the layer is the first place a meaningful check exists.
+
+## Validation
+
+```
+docker build -f Containerfile.layer --build-arg AGENT_DEV_BASE=<ref> \
+  --build-arg AGENT_DEV_BASE_DIGEST=<digest> -t <tag> .          # exits 0
+docker image inspect <tag> --format '{{.Config.User}} {{json .Config.Entrypoint}}'   # the base's account and entrypoint
+docker run --rm <tag>                                            # the harness starts, as PID 1, in the workspace
+```
