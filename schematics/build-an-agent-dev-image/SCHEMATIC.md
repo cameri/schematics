@@ -252,7 +252,9 @@ digest it pins, not the luck of last week's build.
   and that distribution's (or the Docker CLI's own) package repositories. No
   `curl … | sh`, no unversioned installer, no language-package install from the
   network at build time. The pinned base digest MUST be recorded in the image's
-  labels.
+  labels. Any package-repository signing key fetched at build time MUST be
+  checked against a recorded fingerprint before the repository is trusted, and
+  a mismatch MUST fail the build.
 - **R-11**: One `Containerfile` MUST produce both `linux/amd64` and
   `linux/arm64`, validating the target architecture at build time and failing
   loudly for anything else. The two platforms MUST be publishable as one
@@ -287,7 +289,7 @@ this schematic was reverse-engineered from):
 | R-7 | The reference installs Docker CLI, Compose, and Buildx from the vendor's package repository and mounts the daemon socket at run time *(observed)*. The image itself carries no daemon configuration |
 | R-8 | The reference's package list includes the C toolchain, `make`, `pkg-config`, Python with development headers, and the archive tools — the subset this schematic keeps *(observed)*. The rest of that list (editors, media tooling, browser libraries, language runtimes) is the part layering exists to remove |
 | R-9 | The reference's image holds no credential: secrets arrive as orchestration secrets and are materialized inside the running container at boot *(observed)*. Its image also carries two harnesses and a multiplexer — the coupling this schematic removes by keeping the base harness-free |
-| R-10 | The reference builds from a **tag-only** base image (no digest) and its resulting image carries no registry tag at all, so nothing downstream can pin it *(observed)*. The digest pin and the labels are this schematic's answer |
+| R-10 | The reference builds from a **tag-only** base image (no digest) and its resulting image carries no registry tag at all, so nothing downstream can pin it *(observed)*. It also fetches its vendor package repository's signing key over TLS and trusts it without checking a fingerprint *(observed)*. The digest pin, the labels, and the fingerprint check are this schematic's answer |
 | R-11 | The reference builds for one architecture on whichever host runs the build *(observed)*; the same stack exists on more than one host, each rebuilding for its own architecture. Publishing one manifest list is this schematic's answer — `inferred:` the reference has no multi-platform artifact to copy |
 | R-12 | The reference's image has no version, no registry entry, and no provenance labels: `docker inspect` shows a locally-generated name and the base's inherited labels *(observed)*. Two hosts' images are therefore indistinguishable artifacts of the same source |
 | R-13 | The reference is a monolith: one build file installs the harness, the multiplexer, every CLI, and the browser stack, with no harness axis at all — changing the harness means editing the boot command text *(observed)* |
@@ -575,8 +577,9 @@ Verify: the specific checks named above pass for the changed image.
 ## Verification and Acceptance
 
 One test per requirement minimum. Every test is runnable by the implementer
-after the phases. `scripts/verify-base-image.sh` implements A-1 through A-11,
-A-13, A-14, and A-15 mechanically; A-12 needs a published reference.
+after the phases. `scripts/verify-base-image.sh` implements A-1 through A-11
+and A-13 through A-16 mechanically (A-16 only when the script also does the
+build, with `BUILD=1`); A-12 needs a published reference.
 
 ```
 # build and verify in one step
@@ -642,6 +645,11 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   installer (`.sh`, `.tar.gz`, `.zip`, `.deb`, `.whl`, …). expected: the build
   installs only through the distribution's and the Docker CLI's package
   repositories.
+- **A-16** (covers R-10): a build whose repository key fingerprint argument is
+  set to a wrong value fails, with the expected and observed fingerprints in
+  its output. expected: the build stops before installing anything from that
+  repository. (Run with `BUILD=1`; skipped otherwise, because the check needs
+  the build.)
 
 ## Failure Modes and Rollback
 
@@ -650,6 +658,7 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
 | 1 | The digest resolves to a per-platform manifest rather than the list | The second platform's build fails with `no matching manifest` | Re-resolve with the discovery command in `P-2`; never hand-edit the digest |
 | 1 | The requested uid or gid is already used in the base image | The build fails at account creation, naming the ids | Pick ids that match the caller's bind mounts, or change distribution base. Do not remap silently |
 | 2 | A package repository is unreachable or a package was renamed upstream | The build fails during package installation | Fix the network or the package name and rebuild. Never replace the repository with an unversioned installer (R-10) |
+| 2 | The vendor rotates its package-repository signing key, or the key URL serves something else | The build fails with `the package repository key fingerprint is <observed>, expected <recorded>` (A-16) | Confirm the rotation out of band — the vendor's own announcement, not the fetched file — then update the recorded fingerprint in the `Containerfile` as a deliberate change. Never delete the check to make a build pass |
 | 2 | The build host lacks BuildKit, so `TARGETARCH` is empty | The build fails at the architecture validation step | Enable BuildKit; the guard exists so this cannot pass silently |
 | 3 | A mounted workspace is owned by another uid | A-11's read-only case passes but the real deployment fails on first write | `chown` the host directory to `P-4`, or re-derive `P-4` from the host and rebuild — do both, not one |
 | 3 | The acceptance script's throwaway layer build fails | The script exits 2 with the build's last lines | Fix the local Docker state; the script itself needs no network beyond the local daemon |
@@ -739,6 +748,26 @@ Decisions:
   building is cheap enough to do anywhere; the *verification* of the second
   platform requires running it on that architecture. Publishing an unverified
   platform is allowed; claiming it is verified is not.
+- 2026-09-14 — **The run contract names the harness (`AGENT_HARNESS`), which the
+  decided contract's wording does not.** The decided wording is "the entrypoint
+  execs the harness CLI found in PATH"; a base that ships no harness cannot
+  decide from PATH alone *which* CLI that is, so this schematic takes the CLI
+  name as an input and still resolves it from `PATH` (an absolute path works
+  through the same lookup). Recorded as an explicit extension rather than left
+  for a reader to notice, because it moves one obligation onto every layer: a
+  layer MUST set `AGENT_HARNESS`, which is why the layer template and the layer
+  contract present it as the single line a layer adds. An implementation that
+  bakes one fixed CLI name into the entrypoint is a different base — and a layer
+  could no longer choose its harness.
+- 2026-09-14 — **The package repository's signing key is fingerprint-checked.**
+  Fetching a key over TLS and trusting it through `Signed-By` is the vendor's
+  own documented pattern, so the alternative would not be wrong — but this
+  package pins provenance at every other hop (the base by digest, the layers by
+  digest), and an unchecked key would be the one input trusted on every build.
+  The build therefore compares the fetched key's primary fingerprint against a
+  recorded value and fails on a mismatch (A-16). The cost is stated in the
+  Failure Modes table: a vendor key rotation fails the build until the recorded
+  fingerprint is updated deliberately, which is the intended behaviour.
 
 Open questions:
 

@@ -43,6 +43,11 @@
 - **One `RUN` for the toolchain.** Package installations in separate layers
   leave the indexes and half-configured packages in between; one transaction is
   both smaller and reproducible.
+- **The vendor repository's signing key is fingerprint-checked.** The key file
+  is fetched over TLS and then compared against the recorded fingerprint before
+  apt is allowed to trust that repository: the same "pin the identity, not the
+  location" rule the digest pin applies to the base image, applied to the one
+  other input every build trusts.
 - **The account is created at build time, then `USER` switches to it.** The
   account has to be created by root (that is what image builds do); the
   entrypoint is copied root-owned and world-readable so the runtime account

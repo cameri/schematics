@@ -21,6 +21,11 @@ It is explicitly NOT responsible for the entrypoint's behaviour
 - `P-6` `WORKSPACE_DIR` — the workspace path baked in as the default.
 - `P-10` `IMAGE_VERSION`, `P-11` `GIT_COMMIT` — label values only; they change
   nothing about the image's contents.
+- The package-repository signing key's fingerprint — a build argument of the
+  `Containerfile`, defaulting to the vendor's published fingerprint. It is a
+  vendor constant rather than an environment-specific value, so it lives in the
+  file (with a comment) instead of the parameter table; rotating it is a
+  deliberate edit in response to a vendor rotation.
 - The skeleton file `skeleton/Containerfile`, copied verbatim into the build
   context and then filled (`P-1`…`P-11` are build arguments, not edits).
 
@@ -65,6 +70,7 @@ set.
 | `TARGETARCH` missing or unsupported | The build fails at an explicit validation step, naming the value. A build that does not say which architecture it produced is not a supported build (R-11). |
 | uid/gid already present in the base image | The build fails before creating the account. Never remap silently: silent remapping moves the bind-mount parity problem to the caller (R-1). |
 | A package repository unreachable or a package renamed upstream | The build fails. Installing the Docker CLI from an unversioned download script instead is a violation of R-10, not a fix. |
+| The fetched repository key's fingerprint does not match the recorded one | The build fails before anything is installed from that repository, printing the observed and the expected fingerprint. Confirm a vendor rotation out of band before updating the recorded value; never remove the check to unblock a build. |
 | The base image digest is a per-platform digest rather than the index digest | The build succeeds on one platform and fails on the other, with a "no matching manifest" error. Re-resolve the digest with the discovery method in `P-2` (a manifest *index* digest) — see `publishing-and-pinning.md`. |
 
 ## Idempotency Notes

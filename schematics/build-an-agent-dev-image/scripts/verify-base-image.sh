@@ -2,7 +2,7 @@
 # Acceptance checks for the agent dev base image.
 #
 # Implements the mechanical checks of SCHEMATIC.md's Verification and
-# Acceptance section (A-1 … A-11, A-13 … A-15) against a built image. It touches nothing
+# Acceptance section (A-1 … A-11, A-13 … A-16) against a built image. It touches nothing
 # outside Docker: it builds one throwaway "harness layer" image, creates one
 # named volume, and removes both when it is done. Safe to re-run.
 #
@@ -56,6 +56,7 @@ cleanup() {
     docker volume rm "$VOLUME" >/dev/null 2>&1 || true
     if [ "$KEEP" != "1" ]; then
         docker image rm "$LAYER_TAG" >/dev/null 2>&1 || true
+        docker image rm "$LAYER_TAG-bad-key" >/dev/null 2>&1 || true
     fi
     rm -rf "$WORK"
 }
@@ -350,6 +351,27 @@ downloaded="$(printf '%s' "$history_text" | grep -Eo 'https?://[^ "]+' \
 [ -z "$downloaded" ] \
     && pass "A-15 no archive or installer is downloaded from a URL during the build" \
     || fail "A-15 the build downloads: $(printf '%s' "$downloaded" | tr '\n' ' ')"
+
+# ---------------------------------------------------------------------------
+# A-16: a package repository key that does not match its recorded fingerprint
+# stops the build, instead of the build trusting whatever the URL served
+# (only when this script did the build, so it has the build arguments)
+# ---------------------------------------------------------------------------
+
+if [ "$BUILD" = "1" ]; then
+    if docker build -f "$SELF_DIR/../skeleton/Containerfile" \
+        --build-arg "BASE_DISTRO_IMAGE=$BASE_DISTRO_IMAGE" \
+        --build-arg "BASE_DISTRO_DIGEST=$digest" \
+        --build-arg "DOCKER_REPO_KEY_FPR=0000000000000000000000000000000000000000" \
+        -t "$LAYER_TAG-bad-key" "$SELF_DIR/../skeleton" >"$WORK/negative-build.log" 2>&1
+    then
+        fail "A-16 a build with a mismatched repository key fingerprint succeeded"
+    else
+        pass "A-16 a build with a mismatched repository key fingerprint fails"
+    fi
+else
+    skip "A-16 repository key fingerprint enforcement (run with BUILD=1)"
+fi
 
 # ---------------------------------------------------------------------------
 # A-12: the two-platform manifest (only when a published ref is given)
