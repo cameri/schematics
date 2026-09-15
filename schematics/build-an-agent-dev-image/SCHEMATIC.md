@@ -683,7 +683,11 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   repository's signing key into `/etc/apt/keyrings`. expected: the build
   installs only through the distribution's and the Docker CLI's package
   repositories. Stated limits: a fetch whose URL is built at run time
-  (`curl "$URL"`) is not seen by these rules — they are a net, not a proof.
+  (`curl "$URL"`) is not seen by these rules, and neither is a package manager
+  reaching the network for a source these rules do not name — a
+  `pip install --index-url <host>`, or an apt source added from an arbitrary
+  host, passes all three. R-10 forbids both in its own words; here the rules
+  are a net, not a proof.
 - **A-16** (covers R-10): a build whose repository key fingerprint argument is
   set to a wrong value fails, and its output names the fingerprint the key
   actually has alongside the one that was expected. expected: the build stops

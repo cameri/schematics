@@ -507,9 +507,11 @@ downloaded="$(printf '%s' "$history_text" | grep -Eo 'https?://[^ "]+' \
 #   curl -o /usr/local/bin/tool https://host/binary
 # Two things keep it from flagging the package names in an install list: the
 # command must be a separate command (the history is split on &&, ;, |) and it
-# must contain a URL. Residual hole, stated: a fetch whose URL is built at run
-# time (``curl "$URL"``) is not seen by this rule; the archive/URL rule and the
-# pipe-to-shell rule above are the other nets.
+# must contain a URL. Residual holes, stated: a fetch whose URL is built at run
+# time (``curl "$URL"``) is not seen, and neither are any of the three rules
+# seeing a package manager reaching the network for an unnamed source (a
+# ``pip install --index-url <host>``, an apt source added from an arbitrary
+# host) — R-10 forbids both; these rules are a net, not a proof.
 fetches="$(printf '%s\n' "$history_text" | awk '
 {
     line = $0
