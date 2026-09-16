@@ -92,8 +92,7 @@
     // the curation mechanism that keeps the page from growing indefinitely.
     // Everything else stays in the catalog and on GitHub.
     var schematics = (plugins || [])
-      .filter(function (p) { return p.category !== "authoring" && p.featured; })
-      .sort(function (a, b) { return (b.featured ? 1 : 0) - (a.featured ? 1 : 0); });
+      .filter(function (p) { return p.category !== "authoring" && p.featured; });
     var pluginEntry = (plugins || []).find(function (p) { return p.category === "authoring"; });
 
     // Hero stat: schematic count (the authoring plugin is not a schematic)
