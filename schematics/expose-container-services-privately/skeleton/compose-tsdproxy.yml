@@ -1,0 +1,40 @@
+# Skeleton: compose-tsdproxy.yml
+#
+# The TSDProxy service, ready to drop into an existing compose project
+# (or run standalone). Digest-pinned (R-6). Fill in P-1..P-12 from the
+# Parameters table — especially the PROXY_NETWORK (P-4) attachment, which
+# is what makes P-7's service-name reachability work.
+
+services:
+  tsdproxy:
+    # Digest-pinned (R-6). The tag is the immutable upstream release tag
+    # (v2 line; update deliberately, then replace the digest).
+    image: almeidapaulopt/tsdproxy:2.3.4@sha256:f2285da7d5d792ac348dd2a91f2acf7b92f7e0c8800fc6af3141a557b35ec320
+    container_name: tsdproxy
+    restart: unless-stopped
+    volumes:
+      # Docker socket: required by the docker provider (EXPOSURE_MODE =
+      # labels). A files-only deployment (EXPOSURE_MODE = files) can drop
+      # this mount — see the target-reachability module.
+      - /var/run/docker.sock:/var/run/docker.sock   # P-3 (read-write; upstream default)
+      - ./tsdproxy-data:/data      # P-8: tailscale node state
+      - ./tsdproxy-config:/config  # P-9: tsdproxy.yaml + list files
+      # Auth key file (R-5): the key lives only here, never in a
+      # committed config. Bind-mount or docker secret (P-7).
+      - /path/on/host/to/ts-auth-key:/secrets/ts-auth-key:ro
+    environment:
+      - TZ=UTC                       # host timezone, cosmetic
+    networks:
+      - tsdproxy                     # P-4: the shared exposure network
+    # Dashboard (P-6). Publish ONLY for LAN management (R-3): leave the
+    # ports block off to keep the dashboard in-network only.
+    # ports:
+    #   - "8080:8080"
+
+# The shared network. Define ONCE in the root compose file per repo
+# convention; create it ahead of the first up if it does not exist:
+#   docker network create tsdproxy
+networks:
+  tsdproxy:
+    # leave default driver; no ipam needed unless P-5 requires a
+    # static address for a host-network target
