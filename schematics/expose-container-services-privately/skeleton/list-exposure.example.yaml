@@ -1,0 +1,32 @@
+# Skeleton: list-exposure.example.yaml
+#
+# A list file for the `files` exposure contract (P-10 = files, P-11).
+# Register this file under `lists:` in tsdproxy.yaml, then hot-reload:
+# edits to THIS file apply without a proxy restart; only tsdproxy.yaml
+# edits do.
+#
+# Each top-level key is the hostname on the tailnet
+# (`photos` → `https://photos.<TAILNET>`). The target is any URL the
+# proxy can reach — usually the service DNS name on the shared network.
+
+photos:
+  ports:
+    443/https:
+      targets:
+        - http://photos-app:8080        # service name on P-4's network
+  dashboard:
+    label: Photos
+
+# Non-HTTP target (TCP proxying is a v2 feature):
+# router-ssh:
+#   ports:
+#     22/tcp:
+#       targets:
+#         - tcp://router:22
+
+# External (non-docker) target, reachable from the proxy container:
+# status:
+#   ports:
+#     443/https:
+#       targets:
+#         - http://monitoring.internal:8080

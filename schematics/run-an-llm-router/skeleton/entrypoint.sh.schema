@@ -1,0 +1,49 @@
+# POSIX Shell Script, `.sh` Schema
+#
+# `entrypoint.sh` is the router's bootstrap. It is the command `sops exec-env`
+# wraps, so it runs with the decrypted key store already in its environment
+# and with that environment inherited by whatever it execs.
+
+## File Format
+
+`#!/bin/sh` plus POSIX shell. No bashisms: the base image is not guaranteed to
+ship bash, and `sh -n <file>` is the syntax check.
+
+## Contract
+
+| Aspect | Value |
+|--------|-------|
+| Invocation | `sops exec-env <store> /opt/llm-router/entrypoint.sh` (from compose) |
+| Inputs (environment) | `ROUTER_MASTER_KEY_ENV` (name of the router's own credential in the store, default `ROUTER_MASTER_KEY`), `ROUTER_PORT` (default `4000`), every provider key name listed in `P-8`, all injected by `sops exec-env` |
+| Inputs (files) | `/opt/llm-router/config.yaml` (the mounted alias → provider map) |
+| Output | The router process, listening on `0.0.0.0:$ROUTER_PORT`, holding the decrypted values in its own environment (it runs as the child of the `sops` process that holds PID 1 — see `compose.yml.schema`) |
+| Exit codes | `0` only while the router runs; non-zero on a missing credential (with the variable name in the message) or on any router start failure |
+| Side effects | None on disk or network beyond the router's own operation |
+
+## Patterns Used, and Why
+
+- **`set -e`** — every unhandled failure aborts the boot. A router that starts
+  half-configured is worse than one that does not start: clients would get
+  confusing upstream errors instead of a clear "the router is down".
+- **`${VAR:?message}`** — fails the boot with a named cause when the credential
+  is absent from the store. This is the difference between "the router has no
+  credential" and "every request from every client is unauthorized" (R-2).
+- **Indirection through `eval`** — the credential's *name* in the store is
+  itself a parameter (`P-7`); POSIX `sh` has no `${!var}`. The alternative
+  (hardcoding the name) couples the store's key names to this script.
+- **`exec`** — replaces *this script* with the router binary, so no shell is
+  left between `sops` and the router: the process environment holding the
+  decrypted values is the router's own, and signals are not absorbed by an
+  intermediate shell inside the wrapper.
+- **No secret echoing** — the script prints which *variable name* it read the
+  credential from, never a value, and `set -x` is never enabled.
+
+## Validation
+
+```
+sh -n entrypoint.sh                     # syntax only, exits 0
+docker run --rm --entrypoint sh <tag> -n /opt/llm-router/entrypoint.sh
+```
+
+Behaviour is proven by the container reaching `healthy` with the store
+mounted, which is acceptance check A-2.

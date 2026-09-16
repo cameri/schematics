@@ -1,0 +1,50 @@
+# LLM Router Config, `.yaml` Schema
+#
+# `config.example.yaml` is the template for the router's model surface: the
+# file the router loads at boot, mounted read-only (parameter `P-4`). It is
+# plain YAML, committed as text, and contains no credential — only the *names*
+# of credentials that the boot environment provides.
+
+## Top-Level Keys
+
+| Key | Meaning |
+|-----|---------|
+| `litellm_settings` | Global router behaviour |
+| `litellm_settings.drop_params` | `true` makes the router drop request parameters the bound provider does not support instead of rejecting the request with a 400 (R-9). Clients may therefore send a superset of parameters to every alias |
+| `model_list` | The model surface: one entry per alias, in order. This list is exactly what `GET /v1/models` returns and exactly what a client may request |
+
+## A `model_list` Entry
+
+```yaml
+- model_name: <alias>                     # the id clients send
+  litellm_params:
+    model: <provider>/<upstream-model-id> # the binding behind the alias
+    api_base: <provider-api-base>         # where the request actually goes
+    api_key: os.environ/<ENV-NAME>        # never a literal key
+```
+
+| Field | Rule |
+|-------|------|
+| `model_name` | The alias. It is the client-facing contract; changing it is a breaking change for every client (R-8). One alias = one provider target, never a list, never a retry chain (R-3) |
+| `litellm_params.model` | Provider family and upstream id. The family selects the router's adapter and (if mapped) cost/limit metadata; the upstream id is what the provider receives |
+| `api_base` | Pin it whenever the provider's default path differs from the account's provisioning, or when the router's built-in default is a different API version. An unpinned base can silently move traffic to another API version |
+| `api_key` | Always `os.environ/<NAME>`, where `<NAME>` is a key in the encrypted store (`P-8`). A literal key here would be committed plaintext |
+| `max_input_tokens` / `max_output_tokens` (optional) | Needed only when the router's registry does not know the upstream model; token-limit metadata is a client concern too (see `modules/client-wiring.md`) |
+
+## Adding or Removing an Alias
+
+1. Edit the entry in `P-4` (`config.yaml`).
+2. Restart the container — no rebuild (R-5).
+3. If the alias is new, add the matching credential name to `P-8` and set its
+   value in the store; if it is removed, the credential may be left in place
+   (it is simply unused) or rotated out at the provider.
+4. Re-run `scripts/router-verify.sh` (A-1, A-4).
+
+## Validation
+
+- YAML parses: `python3 -c "import yaml,sys; yaml.safe_load(open('config.yaml'))"`
+  (or any YAML parser).
+- No credential literal: every `api_key` value starts with `os.environ/`.
+- The alias set matches what clients are configured to send (A-1).
+- A real completion through each alias (A-4) — the only check that proves the
+  binding, the base URL, and the credential together.

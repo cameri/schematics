@@ -1,0 +1,78 @@
+# LLM router — one OpenAI-compatible /v1 endpoint in front of BYOK provider
+# models.
+#
+# Copy this file next to the router's Containerfile, set the values marked
+# ${...} (in the shell environment or a sibling .env file; each one is a
+# parameter listed in SCHEMATIC.md). None of those values is a secret: the
+# two credentials this service needs live in the encrypted store (P-5) and
+# are decrypted in memory at boot.
+
+services:
+  llm-router:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: ${ROUTER_SERVICE_NAME:-llm-router}
+    labels:
+      # The router image is version-pinned (see Containerfile). An auto-updater
+      # MUST NOT float it: an unplanned router upgrade changes the model
+      # surface for every client at once (R-10).
+      - com.centurylinklabs.watchtower.enable=false
+    entrypoint:
+      - sh
+      - -c
+      - |
+        # Decrypt the key store in memory (sops exec-env) and boot the router
+        # with those values in its process environment. The store and the age
+        # key are mounted read-only; nothing cleartext is ever written to disk
+        # (R-4).
+        exec sops exec-env /run/secrets/router-secrets.env /opt/llm-router/entrypoint.sh
+    environment:
+      - TZ=${TZ:-UTC}
+      - SOPS_AGE_KEY_FILE=/run/secrets/age-keys
+      # Name of this router's OWN credential inside the decrypted store
+      # (P-7). entrypoint.sh exports it as the proxy's master key. It is the
+      # only credential a client ever holds (R-1, R-2).
+      - ROUTER_MASTER_KEY_ENV=${ROUTER_MASTER_KEY_ENV:-ROUTER_MASTER_KEY}
+      - ROUTER_PORT=${ROUTER_PORT:-4000}
+    volumes:
+      # The alias -> provider map is mounted, not baked into the image, so an
+      # alias change is a restart rather than a rebuild (R-5).
+      - ${CONFIG_PATH:-./config.yaml}:/opt/llm-router/config.yaml:ro
+    secrets:
+      - source: router-env-encrypted
+        target: router-secrets.env
+      - source: router-age-keys
+        target: age-keys
+    networks:
+      - router
+    # Deliberately no host port mapping: by default the router is reachable
+    # only by containers attached to the router network (R-6). Exposing it is
+    # a separate, deliberate step (SCHEMATIC.md, Phase 8).
+    restart: unless-stopped
+    healthcheck:
+      # No curl in the upstream image; python is guaranteed (the image is a
+      # python application).
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:${ROUTER_PORT:-4000}/health/liveliness', timeout=5)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  router:
+    name: ${ROUTER_NETWORK:-llm-router}
+
+secrets:
+  # Named per-service (never the generic "env-encrypted" / "age-keys"): a
+  # compose project that includes several service files merges them into one
+  # flat secrets namespace, where a generic name silently binds another
+  # service's file. See D-3's module on secret naming.
+  router-env-encrypted:
+    file: ${ROUTER_ENV_FILE:-./.env.encrypted}
+  router-age-keys:
+    file: ${ROUTER_AGE_KEY_FILE:-${HOME}/sops/age/llm-router-keys.txt}

@@ -1,0 +1,102 @@
+# Docker Compose File, `.yml` Schema
+#
+# `compose.yml` in this package is a Compose v2 service fragment, not a whole
+# stack: it has no top-level `version:` key (obsolete in Compose v2) and
+# assumes it is either the router's own compose file or one file included by a
+# larger one.
+
+## Keys Used
+
+| Key | Meaning |
+|-----|---------|
+| `services.<name>` | The router container; `<name>` is `P-1 ROUTER_SERVICE_NAME` |
+| `services.<name>.build` | Builds the image from the sibling `Containerfile` (never a registry tag alone: the image MUST carry the pinned upstream version) |
+| `services.<name>.container_name` | Fixed name: operator runbooks, `docker exec`, and health probes address the container by name |
+| `services.<name>.labels` | The auto-updater opt-out that keeps the version pin from floating (R-10) |
+| `services.<name>.entrypoint` | Replaces the image entrypoint with the decrypt-then-boot wrapper (below) |
+| `services.<name>.environment` | Non-secret runtime inputs: `TZ`, `SOPS_AGE_KEY_FILE`, `ROUTER_MASTER_KEY_ENV`, `ROUTER_PORT` |
+| `services.<name>.volumes` | The alias → provider map, mounted read-only |
+| `services.<name>.secrets` | The ciphertext key store and the router's dedicated age key |
+| `services.<name>.networks` | The private router network clients attach to |
+| `services.<name>.restart` | `unless-stopped`: the router is infrastructure, it comes back on host reboot |
+| `services.<name>.healthcheck` | Readiness probe orchestration gates on (R-7) |
+| `networks.<name>.name` | Pins the network's real name, so a client stack can join it by a stable name |
+| `secrets.<name>.file` | Host path of each file-backed secret |
+
+## Interpolation
+
+Every `${VAR:-default}` is resolved by compose from the shell environment or a
+sibling `.env` file **at parse time**, not inside the container. Consequences:
+
+- A parameter with a default (all of them here) needs no `.env` to start.
+- The resolved values are visible in `docker compose config`, which is the
+  verification surface for A-6.
+- A nested default — a `${...}` inside another variable's default — resolves
+  correctly in current Compose builds and was verified for the age-key path in
+  this file. If your Compose build does not support nesting, set the outer
+  variable explicitly instead of relying on the default.
+
+## Secret Mounting
+
+```yaml
+secrets:
+  - source: <declared-secret-name>   # must exist under top-level `secrets:`
+    target: router-secrets.env       # file NAME inside /run/secrets/
+```
+
+- The store mount target MUST keep the `.env` extension: `sops exec-env`
+  infers the store format from the file extension, and a target named
+  `secrets` (no extension) fails to parse at boot.
+- Secret **names** are prefixed with the router's service name, never generic
+  (`router-age-keys`, not `age-keys`): a host that includes several service
+  files merges them into one flat `secrets:` namespace, and a generic name
+  silently binds another service's key file. The failure then surfaces as a
+  decrypt error inside the container rather than as a compose error, which is
+  why the naming rule matters more than it looks.
+- The age key file path is the **router's dedicated key** (`P-6`), never a
+  host-wide master key: the container decrypts only what belongs to it.
+
+## The Boot Command
+
+```yaml
+entrypoint:
+  - sh
+  - -c
+  - |
+    exec sops exec-env /run/secrets/router-secrets.env /opt/llm-router/entrypoint.sh
+```
+
+Why each part:
+
+- `sh -c`: `sops exec-env` needs a shell to spawn the wrapped command.
+- `exec`: replaces that shell with `sops`, so no extra shell is left between
+  the container and the process holding the container's lifetime.
+  `sops exec-env` then **forks** the wrapped command rather than exec'ing it:
+  observed in a production deployment, `sops` stays PID 1 for the container's
+  lifetime and the router runs as its **child**, with the decrypted values in
+  the child's own environment. Two consequences: a `docker exec` into the
+  container does *not* see the decrypted environment (docker exec builds its
+  environment from the container config, not from PID 1), and graceful
+  shutdown depends on `sops` forwarding `SIGTERM` to the child — see
+  SCHEMATIC.md's open items for the check.
+- No `--` separator: `sops exec-env <file> <cmd...>` takes the command
+  directly; a `--` is passed through as an argument and breaks the call.
+- The store path is the mounted ciphertext; the wrapped script is
+  `skeleton/entrypoint.sh`, baked into the image.
+
+## The Healthcheck
+
+The upstream image has no `curl`; `python` is guaranteed (it is a python
+application image), so the probe is a one-line `urllib` request against
+`/health/liveliness`. `start_period` must exceed the time the router takes to
+load its config, or orchestration sees a false unhealthy window.
+
+## Validation
+
+```
+docker compose config        # exits 0, prints the fully resolved file
+```
+
+The resolved output is the source of truth: it shows the interpolated secret
+paths, `container_name`, `ROUTER_PORT`, and the healthcheck command as the
+container will actually receive them.

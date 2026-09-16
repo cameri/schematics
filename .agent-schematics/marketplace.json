@@ -81,6 +81,26 @@
       ]
     },
     {
+      "name": "expose-container-services-privately",
+      "description": "Privately exposing local container services on a tailnet - one TSDProxy container joins a Tailscale-compatible network and reverse-proxies selected services to per-service hostnames with automatic HTTPS. The exposure contract is per service (docker labels or list-file entries); services themselves carry no tunnel client, and nothing needs a public port.",
+      "source": "./schematics/expose-container-services-privately",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "tsdproxy",
+        "tailscale",
+        "tailnet",
+        "vpn",
+        "reverse-proxy",
+        "docker",
+        "private",
+        "infrastructure"
+      ]
+    },
+    {
       "name": "update-images-on-push",
       "description": "Self-updating Docker Compose deployments — a GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.",
       "source": "./schematics/update-images-on-push",
@@ -119,6 +139,27 @@
         "multi-arch",
         "non-root",
         "digest-pinning",
+        "infrastructure"
+      ]
+    },
+    {
+      "name": "run-an-llm-router",
+      "description": "A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.",
+      "source": "./schematics/run-an-llm-router",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "llm",
+        "gateway",
+        "router",
+        "openai-compatible",
+        "byok",
+        "litellm",
+        "inference",
+        "secrets",
         "infrastructure"
       ]
     },

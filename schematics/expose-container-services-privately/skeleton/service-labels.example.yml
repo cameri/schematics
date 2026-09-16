@@ -1,0 +1,22 @@
+# Skeleton: service-labels.example.yml
+#
+# The `labels` exposure contract (P-10 = labels): add these labels and the
+# P-4 network attachment to a target service's compose entry. After
+# `docker compose up -d <service>`, restart the proxy once:
+#   docker compose restart tsdproxy
+#
+# The service becomes `https://<name>.<TAILNET>` (P-2 auto).
+
+services:
+  myapp:
+    image: myapp:tag
+    networks:
+      - tsdproxy            # P-4 — required so the docker provider can
+                            # reach the target (target-reachability module)
+    labels:
+      tsdproxy.enable: "true"
+      tsdproxy.name: "myapp"     # the tailnet hostname
+      # optional: explicit port mapping when auto-detection is not right:
+      # tsdproxy.port.1: "443/https:8080/http"
+      # optional: quiet this container's access log:
+      # tsdproxy.containeraccesslog: "false"

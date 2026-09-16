@@ -1,0 +1,41 @@
+# Schema: verify-exposure.sh
+#
+# Documents the verification script so an agent unfamiliar with it can run
+# and interpret it.
+
+## Purpose
+
+Proves A-2 (and the per-hostname half of Phase 3/4 verification): every
+exposed hostname actually resolves on the tailnet and answers over the
+configured protocol. It turns "I think the services are exposed" into a
+pass/fail per hostname.
+
+## Interface
+
+- Invocation: `verify-exposure.sh [--http] <TAILNET> <name>...` or
+  `verify-exposure.sh --from-list <TAILNET> <list-file>...`
+- Must run from a tailnet-connected device (the only vantage where
+  `<name>.<TAILNET>` resolves per D-7).
+- `--from-list` extracts the top-level keys of each list file — the keys
+  ARE the exposed hostnames under the files contract, so the check can't
+  drift from the config.
+- `--http` switches the probe to `http://<name>` for P-2 = off
+  deployments (R-2 degrades to plain HTTP on the tailnet).
+- Exit 0: every hostname answered. Exit 1: at least one failed. Exit 2:
+  usage error.
+
+## Interpretation
+
+| Output | Meaning |
+|--------|---------|
+| `OK https://<name>.<TAILNET>` | TLS handshake + HTTP(S) HEAD succeeded — the proxy is up and reachable for that hostname |
+| `FAIL https://<name>.<TAILNET>` | resolution, TLS, or connect failure — proxy down, hostname not registered, name not resolving, or P-2/protocol mismatch |
+
+## Rules the script follows
+
+- POSIX sh + curl only; no hardcoded hostnames, keys, or paths — the
+  script is fully argument-driven and contains no deployment data.
+- Read-only: it only probes; it never mutates the proxy, tailnet, or
+  config.
+- The HEAD request (`-I`) is deliberate: it exercises the full path
+  (TLS → proxy → target) without transferring service bodies.

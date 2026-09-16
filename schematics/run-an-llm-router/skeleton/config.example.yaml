@@ -1,0 +1,62 @@
+# LLM router configuration — the source of truth for the model surface
+# clients see, and the host-path default of parameter P-4 (CONFIG_PATH).
+#
+# One "model_name" entry per alias. The alias is the id a client sends; the
+# provider binding behind it is an implementation detail of this file (R-8).
+# Every alias MUST name exactly one provider/model target — never a chain,
+# never a fallback (R-3).
+#
+# Placeholders to replace (Parameters P-8, P-9, P-10):
+#   <alias-N>                 the id clients send, e.g. a short model nickname
+#   <provider-N>/<model-id>   the provider family and its upstream model id
+#   <provider-N-base-url>     that provider's API base, as your account is
+#                             provisioned on it
+#   PROVIDER<N>_API_KEY       the environment name of the key in the
+#                             encrypted store (P-8)
+#
+# Provider keys are referenced as os.environ/<NAME> so no credential ever
+# appears in this file, which stays committed as plain text.
+
+litellm_settings:
+  # Unsupported client parameters are dropped instead of rejected with a 400
+  # (R-9): a client sending a superset of parameters (e.g. a provider-specific
+  # field another provider ignores) still works against every alias.
+  drop_params: true
+
+model_list:
+  # --- Provider family 1: OpenAI-compatible provider, explicit API base -----
+  # Pin api_base whenever the provider's default path differs from the one
+  # your account is provisioned on, or whenever the router software's built-in
+  # default is a different API version: an unpinned base silently moves traffic
+  # (see modules/model-aliases.md).
+  - model_name: <alias-1>
+    litellm_params:
+      model: <provider-1>/<upstream-model-id-1>
+      api_base: <provider-1-base-url>
+      api_key: os.environ/PROVIDER1_API_KEY
+
+  - model_name: <alias-2>
+    litellm_params:
+      model: <provider-1>/<upstream-model-id-2>
+      api_base: <provider-1-base-url>
+      api_key: os.environ/PROVIDER1_API_KEY
+
+  # --- Provider family 2: a second provider, its own key and base ----------
+  - model_name: <alias-3>
+    litellm_params:
+      model: <provider-2>/<upstream-model-id-3>
+      api_base: <provider-2-base-url>
+      api_key: os.environ/PROVIDER2_API_KEY
+
+  # --- Provider family 3: OpenAI-compatible endpoint with no router adapter
+  # Some providers are reached through the router software's generic
+  # OpenAI-compatible adapter: the upstream id is forwarded as-is and the
+  # provider's own model ids are the ones that must be listed here. Cost and
+  # token-limit metadata for such models may be absent in the router's
+  # built-in registry — declare the limits client-side (see
+  # modules/client-wiring.md).
+  - model_name: <alias-4>
+    litellm_params:
+      model: openai/<upstream-model-id-4>
+      api_base: <provider-3-base-url>
+      api_key: os.environ/PROVIDER3_API_KEY

@@ -1,0 +1,44 @@
+# Skeleton: tsdproxy.example.yaml
+#
+# v2 syntax (config-schema module). Copy to <CONFIG_DIR>/tsdproxy.yaml
+# (P-9) and fill in the Parameters. The config file is read at proxy
+# startup — edits require `docker compose restart tsdproxy`. List-file
+# edits (the files under `lists:`) hot-reload on their own.
+
+defaultProxyProvider: default
+
+# Docker provider: enables the labels exposure contract (P-10 = labels).
+docker:
+  local:
+    host: unix:///var/run/docker.sock          # P-3
+    targetHostname: 172.31.0.1                 # P-5: docker bridge gateway
+                                               # (discover: docker network
+                                               #  inspect bridge -f
+                                               #  '{{(index .IPAM.Config 0).Gateway}}')
+
+# File provider: enables the config-entries exposure contract (P-10 = files).
+# One `name:` per list file, exactly as in the source deployment's split
+# (applications / admin-tools / infrastructure … by category).
+lists:
+  applications:
+    filename: /config/applications.yaml        # P-11: path inside CONFIG_DIR
+    defaultProxyAccessLog: false               # P-12
+
+# Tailscale provider: the tailnet identity. Managed SaaS (default) or a
+# self-hosted control server via controlUrl (tailscale-auth module).
+tailscale:
+  providers:
+    default:
+      authKeyFile: /secrets/ts-auth-key        # P-7 (R-5: file, never inline)
+      # controlUrl: https://controlplane.tailscale.com   # default; override for Headscale
+  dataDir: /data/                              # P-8
+
+# Management dashboard/API (P-6). 0.0.0.0 inside the container; publish
+# to the host only when LAN management is wanted (R-3).
+http:
+  hostname: 0.0.0.0
+  port: 8080
+
+log:
+  level: info
+  json: false
