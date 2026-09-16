@@ -54,11 +54,12 @@ package without asking; if one exists, report the conflict and stop.
 
 The fetched spec is checked before the build is reported as complete:
 
-1. **Schema check.** If the package ships `SCHEMATIC.md.schema`, verify the
-   spec against it: required frontmatter fields present, all mandated sections
-   in order, requirements and acceptance tests present and cross-referenced.
-   If the package has no schema, fetch the canonical one from
-   `https://raw.githubusercontent.com/cameri/schematics/HEAD/schematics/encrypt-container-secrets/SCHEMATIC.md.schema`.
+1. **Schema check.** Fetch the canonical container-format schema from
+   `https://raw.githubusercontent.com/cameri/schematics/HEAD/schemas/spec-1/SCHEMATIC.md.schema`
+   and verify the spec against it: required frontmatter fields present, all
+   mandated sections in order, requirements and acceptance tests present and
+   cross-referenced. Packages no longer ship a copy of it — the canonical is
+   keyed by the `spec:` field in the spec's frontmatter.
 2. **Reference check.** Every file the spec references (modules, scripts,
    skeleton) must exist in the built package. Missing references are a
    failed build: report them, do not mark the package built.

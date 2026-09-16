@@ -1,0 +1,82 @@
+# Agentic Schematic Document, `SCHEMATIC.md` Format
+#
+# A SCHEMATIC.md is a self-contained build specification for one capability
+# that any LLM, team, or organization can implement without external context.
+# This file documents the format for a reader who has never seen one; any
+# schematic's own SCHEMATIC.md is a concrete instance of it.
+
+## File Extension
+`.md`, standard Markdown with YAML frontmatter between `---` delimiters.
+
+## Frontmatter Fields
+
+```yaml
+---
+name: <kebab-case-name>       # REQUIRED: Unique schematic identifier
+version: 0.1.0                # REQUIRED: Semantic version
+status: draft                 # REQUIRED: draft | stable | superseded
+spec: 1                       # REQUIRED: Blueprint format version (always 1)
+description: "One-line..."    # REQUIRED: Copied to marketplace.json
+created: 2026-09-09           # REQUIRED: ISO date
+updated: 2026-09-09           # REQUIRED: ISO date
+---
+```
+
+## Required Sections
+
+In this order (the skeleton is `skills/schematics/skills/create-schematic/templates/SCHEMATIC.template.md`):
+
+1. **Title**: `# Schematic: <Name>` with optional reverse-engineered note
+2. **Applicable Context**, three lists: Must discover locally, May assume, Must not change
+3. **Scope**: In scope, Out of scope / non-goals, Preservation List (reverse-engineered only)
+4. **Requirements**: numbered R-1, R-2, ... (testable, each maps to an acceptance test)
+5. **Design Principles**: verbatim from template (vendor-agnostic, portable, etc.)
+6. **Dependencies**, a table of: Id, What, Why needed, Discovery, Failure behavior
+7. **Parameters**, a table of: Id, Name, Type, Default, Discovery, Effect
+8. **Modules**: one subsection per module, each linking to `modules/<name>.md`
+9. **Interfaces and Contracts**: exact surfaces (endpoints, file formats, schemas)
+10. **Implementation Phases**: ordered phases with steps, skip conditions, verification
+11. **Verification and Acceptance**: A-1, A-2, ... coverage map to requirements
+12. **Failure Modes and Rollback**: per-phase failure detection and recovery
+13. **Removal**: a stated, safe uninstall procedure.
+14. **Decisions and Open Questions**: judgment calls (newest last) and
+    undecided points, each with the default the implementer may take.
+
+## Authoring Rules
+
+- Every environment-specific value is a parameter with a discovery method —
+  never a hard-coded literal. Local paths, hostnames, and user names do not
+  appear.
+- Secrets, tokens, and credentials never appear at all: the package names where
+  they come from, never what they are.
+- Every phase is idempotent (safe to re-run), and every acceptance test gives
+  the same verdict every time.
+- Every requirement has at least one acceptance test.
+- Address the reader as "the implementer": second person, imperative.
+- No vendor-specific agent tools, harness features, or skill formats: plain
+  Markdown and portable shell only.
+- Inferred content (reverse-engineered schemas) is marked `inferred:`; content
+  verified against a running implementation is marked *(observed)*.
+- A `schematic`-kind dependency is pinned to a specific commit of the remote
+  repository **plus** the SHA-256 of that file's contents at that commit.
+- Paths that are part of the artifact's own contract (a workspace path, an
+  entrypoint's location, an account's home) are legitimate; host paths are not.
+
+## Companion Files
+
+An uncommon file type ships with a `<name>.<ext>.schema` companion that
+documents its syntax, so an implementer with no prior knowledge of the format
+can still work with it.
+
+The container format itself is the one exception: its companion is a single
+canonical copy at `schemas/spec-1/SCHEMATIC.md.schema`, keyed by the `spec:`
+field in a spec's frontmatter and kept once for the whole catalog — never a
+per-package file.
+
+## See Also
+
+- `schemas/spec-1/SCHEMATIC.md.schema` — the canonical copy of this companion,
+  kept once for the whole catalog and resolved by the `spec:` field in any
+  `SCHEMATIC.md` frontmatter (`spec: 1` selects this revision).
+- A schematic's own `SCHEMATIC.md` — a concrete instance of the format described
+  here.

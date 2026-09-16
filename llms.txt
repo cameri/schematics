@@ -27,7 +27,7 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 ## The spec
 
 - [The ten binding principles](https://schemaformat.ai/#spec): vendor-agnostic, portable, self-contained, predictable, idempotent, parameterized, dependencies called out, composable, applicable context stated, pluggable.
-- [SCHEMATIC.md format schema](https://schemaformat.ai/schematics/encrypt-container-secrets/SCHEMATIC.md.schema): the format's own self-describing schema. Uncommon file types in a package always ship with a `<name>.<ext>.schema` companion documenting their syntax.
+- [SCHEMATIC.md format schema](https://schemaformat.ai/schemas/spec-1/SCHEMATIC.md.schema): the format's own self-describing schema, kept once for the whole catalog and keyed by the `spec:` frontmatter field. Uncommon file types in a package always ship with a `<name>.<ext>.schema` companion documenting their syntax.
 - [Schematic skeleton](https://schemaformat.ai/index.html): the canonical SCHEMATIC.md skeleton (frontmatter, Applicable Context, Requirements R-n, Dependencies D-n, Parameters P-n, Modules, Implementation phases, Acceptance A-n, Removal).
 
 ## Authoring and tooling
