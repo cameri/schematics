@@ -1,0 +1,32 @@
+# LLM router image: the router software's OFFICIAL PREBUILT IMAGE, version
+# pinned, plus the static sops binary used for in-memory secret decryption.
+#
+# SECURITY — never install the router software from a package registry
+# (pip/npm) inside this image. The reference implementation uses LiteLLM, and
+# LiteLLM's PyPI credentials were stolen in a supply-chain attack
+# (2026-03-24) after which backdoored packages were published to PyPI. Only
+# the official prebuilt image is used, and the pin is bumped deliberately:
+# edit the FROM pin, rebuild, restart (R-10). Auto-updaters are disabled for
+# this container in compose.yml.
+#
+# sops is copied from its own official image rather than installed, for the
+# same reason: no package manager in this image's build.
+FROM ghcr.io/getsops/sops:v3.11.0-alpine AS sops
+
+FROM litellm/litellm:v1.100.0
+
+# sops decrypts the key store in memory at boot (exec-env): no sidecar, no
+# cleartext secrets volume. The binary is static, so it can be copied across
+# base images.
+COPY --from=sops /usr/local/bin/sops /usr/local/bin/sops
+RUN sops --version >/dev/null
+
+WORKDIR /opt/llm-router
+
+# Only the bootstrap script is baked in. The alias -> provider map
+# (config.yaml) is mounted read-only by compose.yml instead, so changing the
+# model surface never requires an image rebuild (R-5).
+COPY entrypoint.sh /opt/llm-router/entrypoint.sh
+RUN chmod +x /opt/llm-router/entrypoint.sh
+
+EXPOSE 4000

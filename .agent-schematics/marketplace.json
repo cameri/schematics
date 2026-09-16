@@ -122,6 +122,27 @@
       ]
     },
     {
+      "name": "run-an-llm-router",
+      "description": "A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.",
+      "source": "./schematics/run-an-llm-router",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "llm",
+        "gateway",
+        "router",
+        "openai-compatible",
+        "byok",
+        "litellm",
+        "inference",
+        "secrets",
+        "infrastructure"
+      ]
+    },
+    {
       "name": "fetch-books-over-vpn",
       "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
       "source": "./schematics/fetch-books-over-vpn",

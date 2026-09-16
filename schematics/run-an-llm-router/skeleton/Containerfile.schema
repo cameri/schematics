@@ -1,0 +1,56 @@
+# Containerfile (Dockerfile) Schema
+#
+# `Containerfile` and `Dockerfile` are the same format; this package uses the
+# `Containerfile` name. The file is a list of instructions executed
+# top-to-bottom, each producing an image layer. Build with:
+
+```
+docker build -f Containerfile -t <your-tag> .
+```
+
+## Instructions Used
+
+| Instruction | Meaning |
+|-----|---------|
+| `FROM <image> AS <stage>` | Starts a build stage from a base image. A stage that is never the last `FROM` is intermediate: it exists only to be copied *from* |
+| `FROM <image>` | The final stage: the image that gets built. It MUST be the router's official prebuilt image, version-pinned |
+| `COPY --from=<stage> <src> <dst>` | Copies a path out of an earlier build stage into this one, without going through a registry or a package manager |
+| `RUN <cmd>` | Runs a build-time command. Used here only to prove the copied binary works |
+| `WORKDIR <path>` | Working directory for later instructions and for the container's default process |
+| `EXPOSE <port>` | Documents the port the container listens on. It does **not** publish it; publishing is a compose/`-p` decision |
+| `ENTRYPOINT` / `CMD` | Not set here: `compose.yml` supplies the entrypoint, so the image stays usable standalone and the wrapper lives where the secret mounts are declared |
+
+## Why This Shape
+
+- **Two stages, no install step.** The second stage never runs a package
+  manager. The router software arrives as a pinned prebuilt image and `sops`
+  arrives as a copied static binary from its own official image. Both
+  dependencies are then pinned by digest-able tags in one place (R-10).
+- **Never install the router from a package registry.** The reference
+  implementation is LiteLLM; LiteLLM's PyPI credentials were stolen in a
+  supply-chain attack (2026-03-24) and backdoored packages were published
+  under the project's name. Whatever the registry, an install step inside a
+  build is a supply-chain surface that a prebuilt image does not have.
+- **`RUN sops --version`** is the build-time proof that the copied binary is
+  executable in this base image (a static build survives the copy; a
+  dynamically linked one would fail here, not at boot).
+- **No `config.yaml` copy.** The model surface is mounted at runtime instead
+  (see `compose.yml.schema`), so adding or removing an alias is a restart, not
+  a rebuild (R-5). Only the bootstrap script is baked in.
+
+## Bumping the Upstream Pin
+
+1. Edit the `FROM litellm/...` tag in this file.
+2. Rebuild (`docker compose build`), recreate (`docker compose up -d`).
+3. Re-run the acceptance checks: a router upgrade can change which client
+   parameters are accepted and how provider errors are shaped.
+
+Never let an auto-updater do this: a floating router version changes the model
+surface for every client simultaneously.
+
+## Validation
+
+```
+docker build -f Containerfile -t <tag> .        # exits 0
+docker run --rm --entrypoint sops <tag> --version   # prints the sops version
+```
