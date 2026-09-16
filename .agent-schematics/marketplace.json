@@ -122,6 +122,27 @@
       ]
     },
     {
+      "name": "build-an-agent-dev-image",
+      "description": "The dev base image of a sandboxed coding agent: a digest-pinned distribution image that boots one agent in one workspace from an environment contract, runs as a fixed non-root account, and carries the Docker CLI, git, and build tooling — harness-free and secret-free, so a per-harness layer pins it by digest and adds only its CLI.",
+      "source": "./schematics/build-an-agent-dev-image",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sandbox",
+        "agent",
+        "container-image",
+        "dev-container",
+        "entrypoint",
+        "multi-arch",
+        "non-root",
+        "digest-pinning",
+        "infrastructure"
+      ]
+    },
+    {
       "name": "run-an-llm-router",
       "description": "A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.",
       "source": "./schematics/run-an-llm-router",

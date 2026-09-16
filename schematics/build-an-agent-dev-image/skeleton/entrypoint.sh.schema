@@ -1,0 +1,67 @@
+# POSIX Shell Script, `.sh` Schema
+#
+# `entrypoint.sh` is the standard entrypoint of the dev base image: the program
+# the container starts, and the program every image layered on the base
+# inherits. It is deliberately small — it validates the run contract, prepares
+# the workspace, and hands control to the harness.
+#
+# It is installed as `/usr/local/bin/agent-entrypoint` (see
+# `Containerfile.schema`), root-owned and mode 0755.
+
+## File Format
+
+`#!/bin/sh` plus POSIX shell. No bashisms: the script must run on the smallest
+shell the base image ships, because it is the one file every layer depends on.
+`sh -n <file>` is the syntax check.
+
+## Contract
+
+| Aspect | Value |
+|--------|-------|
+| Invocation | Container start: `ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]`. A layer inherits this and changes only `AGENT_HARNESS`. |
+| Inputs (environment) | `AGENT_HARNESS` (required; name or absolute path of the harness CLI), `AGENT_WORKSPACE_DIR` (default `/workspace`), `AGENT_ID` (default the container's hostname). |
+| Inputs (arguments) | Every argument passed to the container, forwarded to the harness unchanged. |
+| Inputs (filesystem) | `AGENT_WORKSPACE_DIR` — created if absent, required to be writable. |
+| Output | The harness process, with `AGENT_ID` and `AGENT_WORKSPACE_DIR` exported, as PID 1. |
+| Exit codes | `78` on any refusal, before anything starts; otherwise the harness's own exit status, unchanged. |
+| Side effects | Creates the workspace directory if it does not exist. Nothing else — no file, no port, no daemon. |
+
+## Patterns Used, and Why
+
+- **`set -eu`** — an unset variable or an unhandled failure aborts, rather than
+  letting the script fall through with an empty workspace path or an empty
+  harness name.
+- **One `refuse()` function** — every refusal is the same shape: one line on
+  stderr naming the offending variable or path, exit 78. A consumer can test
+  "did it refuse?" with the exit status and "why?" with the message, without
+  parsing.
+- **`case` validation before any action** — the harness name, the workspace
+  path, and the agent id are all checked before a single process is started or
+  directory created, so a bad run leaves nothing behind.
+- **`command -v` for the harness** — the contract is "the CLI found in PATH",
+  so the lookup goes through the shell's own resolution, and an absolute path
+  works through the same call.
+- **`exec`** — the harness replaces this script, so it *is* PID 1: the
+  container runtime's stop signal reaches it directly, the exit status is its
+  own, and there is no wrapper process to confuse a supervisor or a
+  process-tree walk.
+- **`AGENT_ID` is charset-restricted** (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤64
+  characters) — the id is a name in other components (workspace labels, state
+  directories), so path separators, whitespace, and control characters are
+  refused at the one place that can refuse them cheaply.
+- **Deterministic refusal for a read-only workspace** — there is no repair
+  path, because repair needs root, and this image has none (R-1). A clear
+  refusal beats a harness that starts and fails on its first write.
+
+## Validation
+
+```
+sh -n entrypoint.sh                                  # syntax only, exits 0
+scripts/verify-base-image.sh                         # the whole contract, end to end
+```
+
+The end-to-end checks build a throwaway layer image that adds a stub harness,
+then assert: PID 1 is the harness, the working directory is the workspace, the
+agent id defaults to the hostname and is honoured when set, container arguments
+arrive at the harness, the harness's exit status passes through, and each of
+the refusals returns 78 with its message.

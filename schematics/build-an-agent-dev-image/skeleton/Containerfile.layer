@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+#
+# Layer template — an image that adds ONE harness CLI to the dev base image.
+#
+# Copy this file next to your layer's build context, fill the two placeholders
+# (the harness installation step and AGENT_HARNESS), and build. Nothing else
+# about the base changes: the runtime account, the standard entrypoint, the
+# working directory, and the whole run contract are inherited, not restated.
+#
+# Build (the base must be pinned by its MANIFEST LIST digest, which is what the
+# publish step of the base reports as `Digest:`):
+#
+#   docker build -f Containerfile.layer \
+#     --build-arg AGENT_DEV_BASE=<registry>/<namespace>/<name> \
+#     --build-arg AGENT_DEV_BASE_DIGEST=sha256:<manifest list digest> \
+#     -t <registry>/<namespace>/<name>-<harness>:<version>-<commit> .
+#
+# What a layer may change: the packages it installs, the harness CLI, its
+# default configuration, an optional CMD, and an optional HEALTHCHECK.
+# What a layer must not change: Config.User, the ENTRYPOINT, WORKINGDIR, and
+# the AGENT_* variable names — consumers of the base rely on them.
+
+ARG AGENT_DEV_BASE
+ARG AGENT_DEV_BASE_DIGEST
+
+FROM ${AGENT_DEV_BASE}@${AGENT_DEV_BASE_DIGEST}
+
+# Installing the CLI needs root; running it never does. This layer switches to
+# root for the install and back to the base's account before it ends, so the
+# image it produces has exactly the base's runtime identity (R-1, R-13).
+USER root
+
+# Install the harness CLI, pinned. Two common shapes:
+#   * a signed release artifact — download it, verify the publisher's checksum,
+#     install to /usr/local/bin with mode 0755;
+#   * a package — install an exact version from a package registry.
+# Both belong in a single RUN so the layer carries no download cache.
+#
+# The step below fails on purpose: an unfilled layer must not build, because a
+# layer image with no harness in it cannot start an agent anyway (the
+# entrypoint refuses, R-4) and the failure would otherwise appear at run time.
+RUN set -eux; \
+    echo "Containerfile.layer: replace this step with the harness installation (pinned, checksum-verified)." >&2; \
+    exit 1
+
+# Optional, and recommended: a healthcheck that proves the CLI is present and
+# runnable. The base declares none (it has nothing to probe), so this is where
+# a deployment gets one.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
+  CMD <harness-cli> --version >/dev/null 2>&1 || exit 1
+
+# Back to the base's runtime account. Use the inherited AGENT_USER rather than
+# a literal name, so a deployment that renames the account does not have to
+# edit every layer.
+USER ${AGENT_USER}
+
+# The one line that makes the harness reachable: the inherited entrypoint
+# resolves this name from PATH. Use a bare name for a CLI on PATH, or an
+# absolute path.
+ENV AGENT_HARNESS=<harness-cli>
+
+# Optional: default arguments. The base forwards *container* arguments to the
+# harness and nothing else, so a wrapper script is the way to give a harness a
+# default invocation:
+#
+#   COPY harness-wrapper.sh /usr/local/bin/harness-wrapper
+#   ENV AGENT_HARNESS=harness-wrapper
