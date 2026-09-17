@@ -687,7 +687,7 @@ Decisions:
   routing one) and deserve their own schematic.
 - 2026-09-17 — Schematic dependencies are pinned to commit `81721d8` (the full
   sha is in the link) with the SHA-256 of the file at that commit. Verify a
-  pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/encrypt-container-secrets/SCHEMATIC.md | sha256sum`: take the sha and the path from the pin's own link (here `encrypt-container-secrets v0.2.1`)
   and compare the result with the digest in the table.
 
 Open questions:
