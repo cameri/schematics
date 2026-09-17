@@ -12,6 +12,23 @@
 #                                       scripts/, skeleton/, templates/,
 #                                       assets/ path it references exists in
 #                                       the package
+#   schematics/*/SCHEMATIC.md           frontmatter: the seven fields the
+#     frontmatter                       companion's § Frontmatter Fields
+#                                       requires are present and well-formed
+#                                       (kebab-case name equal to the package
+#                                       directory, semantic version, status in
+#                                       the enum, ISO dates with updated >=
+#                                       created, non-empty description), and
+#                                       name/description agree with the
+#                                       package's .agent-schematics entry;
+#                                       unknown fields warn
+#   a pull request's own diff           every schematics/<name>/SCHEMATIC.md it
+#                                       changes carries a bumped `updated`, and
+#                                       a change to any file under
+#                                       skills/schematics/ raises the plugin's
+#                                       version in .claude-plugin/plugin.json
+#                                       (BASE_REF=<base branch>; the workflow
+#                                       sets it for pull requests only)
 #   schematic-kind dependency pins      every link into this repository is a
 #                                       well-formed pin: [<name> v<version>](
 #                                       .../blob/<commit-sha>/schematics/<name>/
@@ -28,7 +45,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 python3 - <<'PY'
-import glob, hashlib, json, os, re, subprocess, sys
+import datetime, glob, hashlib, json, os, re, subprocess, sys
 
 errors = []
 warnings = []
@@ -81,6 +98,95 @@ for spec in specs:
     if not os.path.isfile(companion):
         errors.append(f"{spec}: declares spec: {declared.group(1)}, "
                       f"but {companion} does not exist")
+
+# ─── Specs: frontmatter fields ───────────────────────────────────
+# schemas/spec-<N>/SCHEMATIC.md.schema § Frontmatter Fields declares seven
+# required fields. `spec:` is checked above, because the companion is resolved
+# by it; the rest are checked here, values included: a field nothing enforces
+# drifts, and a catalog entry that disagrees with the frontmatter it is copied
+# from is worse than no entry.
+FIELD = re.compile(r'^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$', re.M)
+KEBAB = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+SEMVER = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
+ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+STATUSES = ('draft', 'published', 'stable', 'superseded')
+FIELDS = ('name', 'version', 'status', 'spec', 'description', 'created', 'updated')
+catalog = {p['name']: p for p in plugins}
+
+def parse_frontmatter(text):
+    """The frontmatter fields of a SCHEMATIC.md, or None without a block."""
+    block = FRONTMATTER.search(text)
+    if not block:
+        return None
+    fields = {}
+    for line in block.group(1).splitlines():
+        m = FIELD.match(line)
+        if not m:
+            continue
+        value = re.sub(r'\s+#.*$', '', m.group(2)).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        fields[m.group(1)] = value
+    return fields
+
+def is_date(value):
+    """YYYY-MM-DD, and a date that exists (2026-02-30 does not)."""
+    if not ISO_DATE.match(value):
+        return False
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+seen_fields = {}
+for spec in specs:
+    fields = parse_frontmatter(open(spec, encoding='utf-8').read())
+    if fields is None:
+        errors.append(f"{spec}: no YAML frontmatter block")
+        continue
+    seen_fields[spec] = fields
+    pkg = os.path.basename(os.path.dirname(spec))
+    for field in FIELDS:
+        if not fields.get(field):
+            errors.append(f"{spec}: frontmatter field {field!r} is missing or empty "
+                          f"(schemas/spec-1/SCHEMATIC.md.schema, frontmatter fields)")
+    undefined = sorted(set(fields) - set(FIELDS))
+    if undefined:
+        warnings.append(f"{spec}: frontmatter field(s) the format does not define: "
+                        f"{', '.join(undefined)}")
+    name, version = fields.get('name', ''), fields.get('version', '')
+    status, created, updated = fields.get('status', ''), fields.get('created', ''), fields.get('updated', '')
+    if name and not KEBAB.match(name):
+        errors.append(f"{spec}: name {name!r} is not kebab-case")
+    if name and name != pkg:
+        errors.append(f"{spec}: name {name!r} does not match its directory {pkg!r}")
+    if version and not SEMVER.match(version):
+        errors.append(f"{spec}: version {version!r} is not a semantic version")
+    if status and status not in STATUSES:
+        errors.append(f"{spec}: status {status!r} is not one of {' | '.join(STATUSES)}")
+    for field, value in (('created', created), ('updated', updated)):
+        if value and not is_date(value):
+            errors.append(f"{spec}: {field} {value!r} is not a YYYY-MM-DD date")
+    if is_date(created) and is_date(updated) and updated < created:
+        errors.append(f"{spec}: updated {updated} is earlier than created {created}")
+    # The schema defines description as "Copied to marketplace.json": the
+    # frontmatter is the source, the catalog entry the copy, and this is what
+    # makes that a fact instead of an intention.
+    entry = catalog.get(name)
+    if entry is None:
+        if name:
+            warnings.append(f"{spec}: the catalog has no {name!r} entry to agree with")
+    else:
+        for field in ('name', 'description'):
+            mine, theirs = fields.get(field, ''), entry.get(field, '')
+            if mine != theirs:
+                errors.append(f"{spec}: {field} differs from the {name!r} entry in "
+                              f".agent-schematics/marketplace.json: frontmatter "
+                              f"{mine[:48]!r}... vs catalog {theirs[:48]!r}...")
+        if entry.get('version') and entry['version'] != version:
+            errors.append(f"{spec}: version {version!r} differs from the {name!r} entry "
+                          f"in .agent-schematics/marketplace.json ({entry['version']!r})")
 
 for spec in specs:
     text = open(spec, encoding='utf-8').read()
@@ -144,6 +250,112 @@ if not in_repo:
 elif shallow:
     warnings.append('shallow clone: dependency pins were found but not verified (fetch the full history)')
 
+# ─── Pull requests: the two diff-aware rules ─────────────────────
+PLUGIN_DIR = 'skills/schematics/'
+MANIFEST = PLUGIN_DIR + '.claude-plugin/plugin.json'
+
+def manifest_version(text):
+    """The plugin manifest's version, or None when it does not parse."""
+    try:
+        return json.loads(text).get('version')
+    except ValueError:
+        return None
+
+def semver_key(value):
+    """A comparable key, or None when the value is not a semantic version.
+    Numeric parts compare as numbers, so 0.10.0 is greater than 0.9.0; a
+    pre-release sorts below its release."""
+    m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?', value or '')
+    if not m:
+        return None
+    pre = m.group(4)
+    if pre is None:
+        pre_key = (1,)
+    else:
+        pre_key = (0,) + tuple((0, int(p)) if p.isdigit() else (1, p)
+                               for p in pre.split('.'))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), pre_key)
+
+# ─── Pull requests: `updated` tracks the change ──────────────────
+# `updated` is defined as the date the spec last changed, and only the diff can
+# enforce that: a spec edited without moving the field drifts silently. The
+# check runs against the pull request's merge base with its base branch
+# (BASE_REF, which the workflow sets for pull requests only), never against a
+# push to main, where no base branch exists.
+base_ref = os.environ.get('BASE_REF', '').strip()
+if not base_ref:
+    warnings.append('BASE_REF unset: the updated-bump rule applies to pull requests '
+                    'and was not checked (set BASE_REF=<base branch> to check it)')
+elif not can_verify:
+    warnings.append('BASE_REF set, but the history is not a full clone: the '
+                    'updated-bump rule was not checked')
+else:
+    remote = base_ref if base_ref.startswith(('origin/', 'refs/')) else 'origin/' + base_ref
+    if git('rev-parse', '--verify', '--quiet', remote + '^{commit}').returncode != 0:
+        errors.append(f"BASE_REF {base_ref!r} does not resolve to a commit ({remote}): "
+                      f"the updated-bump rule cannot be checked")
+    else:
+        merge_base = git('merge-base', remote, 'HEAD').stdout.decode().strip()
+        changed_on = git('show', '-s', '--format=%cs', 'HEAD').stdout.decode().strip()
+        # The working tree, not just HEAD: in CI they are the same commit, and
+        # locally this also catches an edit that has not been committed yet.
+        changed = git('diff', '--name-only', merge_base).stdout.decode().split()
+        for path in changed:
+            if not re.fullmatch(r'schematics/[^/]+/SCHEMATIC\.md', path):
+                continue
+            before = git('show', f'{merge_base}:{path}')
+            if before.returncode != 0:
+                continue                      # a new spec: `updated` is its creation date
+            was = parse_frontmatter(before.stdout.decode('utf-8', 'replace')) or {}
+            now = seen_fields.get(path, {})
+            old, new = was.get('updated', ''), now.get('updated', '')
+            if not is_date(old) or not is_date(new):
+                continue                      # the field check already reported it
+            if new < old:
+                errors.append(f"{path}: updated went backwards, {old} -> {new}")
+            elif new == old and old < changed_on:
+                # The field is the date the spec last changed, so it has to
+                # move when it is older than this change. A spec already
+                # carrying the change's date needs no second bump.
+                errors.append(f"{path}: SCHEMATIC.md changed on {changed_on} but updated "
+                              f"is still {old}; set it to the date of this change")
+
+    # ─── Pull requests: a plugin change carries its version ──────
+    # The plugin's install is keyed by version, so a change that ships without
+    # a bump claims a content set it does not have: the installed copies stay
+    # stale and nothing notices until someone compares them by hand. Same base
+    # ref, same pull-request-only condition as the rule above.
+    changed_plugin = [p for p in changed if p.startswith(PLUGIN_DIR)]
+    if changed_plugin:
+        at_base = git('show', f'{merge_base}:{MANIFEST}')
+        before = (manifest_version(at_base.stdout.decode('utf-8', 'replace'))
+                  if at_base.returncode == 0 else None)
+        after = (manifest_version(open(MANIFEST, encoding='utf-8').read())
+                 if os.path.isfile(MANIFEST) else None)
+        before_key, after_key = semver_key(before), semver_key(after)
+        if after is None:
+            errors.append(f"{MANIFEST}: no version to compare, and {len(changed_plugin)} "
+                          f"file(s) under {PLUGIN_DIR} changed")
+        elif before_key is None or after_key is None:
+            errors.append(f"{MANIFEST}: version {after!r} (base {before!r}) is not a "
+                          f"semantic version, so a bump cannot be checked")
+        elif after_key < before_key:
+            errors.append(f"{MANIFEST}: version went backwards, {before} -> {after}; a "
+                          f"plugin change needs a greater version, not a lower one "
+                          f"(this repository has exactly one version manifest, so this "
+                          f"is a single-file comparison)")
+        elif after_key == before_key:
+            errors.append(f"{MANIFEST}: {len(changed_plugin)} file(s) under {PLUGIN_DIR} "
+                          f"changed but the version is still {after} — bump it. If a "
+                          f"parallel pull request already took the next number, bump "
+                          f"again rather than removing this check; and note this "
+                          f"repository has exactly one version manifest, so this is a "
+                          f"single-file comparison")
+        elif changed_plugin == [MANIFEST]:
+            # A version reserved ahead of its content: odd, but harmless.
+            warnings.append(f"{MANIFEST}: version raised {before} -> {after} with no "
+                            f"other file under {PLUGIN_DIR} changed")
+
 pins_found = 0
 pins_verified = 0
 for spec in specs:
@@ -197,6 +409,8 @@ if errors:
     sys.exit(1)
 pin_status = (f"{pins_verified} pins verified" if can_verify
               else f"{pins_found} pins found, not verified")
+print(f"frontmatter ok: {len(seen_fields)} specs checked against "
+      f"schemas/spec-1/SCHEMATIC.md.schema")
 print(f"catalog ok: {len(plugins)} entries, featured={featured}, "
       f"{len(specs)} specs, {pin_status}")
 PY
