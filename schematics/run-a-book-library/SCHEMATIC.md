@@ -78,6 +78,32 @@ rules this package also establishes.
   one acceptance test; passing both stacks' own tests is necessary but
   not sufficient.
 
+## Design Principles Binding the Implementation
+
+1. **Vendor-agnostic** — implement with plain, portable components; no
+   dependency on any specific agent or harness.
+2. **Portable** — no absolute paths or machine-specific values in the
+   implementation; use the Parameters below.
+3. **Self-contained** — the implementation needs nothing outside this package
+   and the declared Dependencies.
+4. **Predictable, intuitive, ergonomic** — the installed capability behaves
+   exactly as this document describes; no surprise behaviors.
+5. **Idempotent and deterministic** — every phase is safe to re-run; checks
+   give the same verdict every time.
+6. **Parameterized and modular** — all tunables flow from the Parameters
+   table; concerns are separated per the Modules section; behavior
+   differences between deployments are configuration, never code edits.
+7. **Dependencies called out** — implement the declared failure behavior for
+   every Dependency.
+8. **Composable in kind** — a dependency may be another schematic in the
+   catalog, pinned to a commit and a content hash; a composition schematic
+   owns no services, only the shared contracts and the end-to-end
+   acceptance test.
+9. **Applicable context stated** — discover what Must discover locally
+   says; do not silently assume beyond May assume.
+10. **Pluggable** — implement the attach/remove seams defined in Modules and
+    Removal.
+
 ## Dependencies
 
 Dependencies of kind `schematic` point at sibling packages in this

@@ -86,7 +86,29 @@ description: Serving a self-hosted digital library - Audiobookshelf reading the 
 
 ## Design Principles Binding the Implementation
 
-The ten binding principles apply as published in the repository README.
+1. **Vendor-agnostic** — implement with plain, portable components; no
+   dependency on any specific agent or harness.
+2. **Portable** — no absolute paths or machine-specific values in the
+   implementation; use the Parameters below.
+3. **Self-contained** — the implementation needs nothing outside this package
+   and the declared Dependencies.
+4. **Predictable, intuitive, ergonomic** — the installed capability behaves
+   exactly as this document describes; no surprise behaviors.
+5. **Idempotent and deterministic** — every phase is safe to re-run; checks
+   give the same verdict every time.
+6. **Parameterized and modular** — all tunables flow from the Parameters
+   table; concerns are separated per the Modules section; behavior
+   differences between deployments are configuration, never code edits.
+7. **Dependencies called out** — implement the declared failure behavior for
+   every Dependency.
+8. **Composable in kind** — a dependency may be another schematic in the
+   catalog, pinned to a commit and a content hash; a composition schematic
+   owns no services, only the shared contracts and the end-to-end
+   acceptance test.
+9. **Applicable context stated** — discover what Must discover locally
+   says; do not silently assume beyond May assume.
+10. **Pluggable** — implement the attach/remove seams defined in Modules and
+    Removal.
 Implementation-specific binding choices:
 
 - The exposure is one parameter with three options, not three
