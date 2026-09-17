@@ -89,6 +89,40 @@ for spec in specs:
         if not os.path.exists(os.path.join(pkg, ref)):
             errors.append(f"{spec}: references {ref}, which does not exist in the package")
 
+# ─── Specs: required sections ────────────────────────────────────
+# The format companion (schemas/spec-1/SCHEMATIC.md.schema, § Required
+# Sections) lists the sections every SCHEMATIC.md carries, in order, and the
+# title plus the ten binding principles are part of that list. A spec that
+# omits one, or replaces it with a pointer at another file, is not the
+# self-contained package the format promises — and nothing else in this
+# script would notice.
+REQUIRED_SECTIONS = (
+    'applicable context',
+    'scope',
+    'requirements',
+    'design principles',
+    'dependencies',
+    'parameters',
+    'modules',
+    'interfaces and contracts',
+    'implementation phases',
+    'verification and acceptance',
+    'failure modes and rollback',
+    'removal',
+    'decisions and open questions',
+)
+SECTION_HEADING = re.compile(r'^##\s*(?:\d+\.\s*)?(.+?)\s*$', re.M)
+for spec in specs:
+    headings = [h.lower() for h in SECTION_HEADING.findall(open(spec, encoding='utf-8').read())]
+    position = -1
+    for wanted in REQUIRED_SECTIONS:
+        found = next((i for i, h in enumerate(headings) if i > position and wanted in h), None)
+        if found is None:
+            errors.append(f"{spec}: no {wanted!r} section in the required order "
+                          f"(schemas/spec-1/SCHEMATIC.md.schema, required sections)")
+            break
+        position = found
+
 # ─── Specs: schematic-kind dependency pins ───────────────────────
 # Any link into this repository's blob/ tree is a dependency pin and must have
 # exactly this shape; anything else on such a line is a malformed pin.
