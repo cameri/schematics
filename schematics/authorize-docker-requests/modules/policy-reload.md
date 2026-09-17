@@ -41,7 +41,7 @@ rollback, never as a step in a policy update.
 
 ## Pre-flight checks (before touching the running plugin)
 
-1. **No placeholders left**: `grep -nE 'SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL' <source>` must print nothing. A leftover token would be deployed as a literal and silently turn the policy into "allow everything".
+1. **No placeholders left**: `grep -nE 'SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL' <source>` must print nothing. A leftover token would be deployed as a literal and silently turn the policy into "allow everything". (`BUILDKIT_PREFIX` is retired — R-17 removed the BuildKit carve-out — and is kept in this pattern on purpose: the check is a superset of the template's tokens, so a source copied from the pre-0.4.0 template is still caught.)
 2. **It parses**: `opa check <source>` with an `opa` binary at or below the
    plugin's engine version (see `skeleton/agent.rego.schema`).
 3. **It decides correctly**: the `opa eval` probes in

@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: authorize-docker-requests
-version: 0.3.0
+version: 0.4.0
 status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
 created: 2026-09-09
-updated: 2026-09-16
+updated: 2026-09-17
 ---
 
 # Schematic: OPA Authorization for Docker Sandbox Access
@@ -30,6 +30,16 @@ updated: 2026-09-16
 >    directions: the **daemon** fails closed when the plugin is unavailable,
 >    while the **plugin** fails open if it was installed without a policy
 >    argument. Both are stated where they apply.
+>
+> **2026-09-17 — the create path was hardened.** A review pass found that
+> "the sandbox may create containers in its project" had been read as "the
+> sandbox may create *any* container in its project": a project-labelled
+> create could ask for `Privileged`, `CapAdd`, host namespaces, host devices,
+> a bind of `/`, or a volume whose driver options are a bind of `/`, and the
+> policy allowed it. Requirements R-15 to R-18 close that, asserted by a probe
+> table in which 30 of its 71 rows decided wrongly before the change and every
+> row decides as specified after it, on the three OPA engines the package names
+> (see `skeleton/agent.rego.schema`).
 
 Grants a sandbox container (isolated agent, CI runner, or untrusted workload)
 restricted TCP access to the host Docker daemon, policed by Open Policy Agent.
@@ -39,12 +49,17 @@ sandbox container carries a client TLS certificate and environment variables tha
 let it run Docker commands — but only operations the policy permits.
 
 The policy enforces: read-only for most resources, compose project operations
-for a single named project (container, network, and volume *creation*), image
-builds and pulls, and container lifecycle actions (start/stop/restart/kill)
-against an allowlist. Exec and attach are denied. The host's local unix socket
-remains unrestricted for host users — and that is also this capability's
-boundary: any client that can reach the socket, including a container that has
-it mounted, is a host user and is not policed at all (see Limitations).
+for a single named project (container, network, and volume *creation*, and
+network and volume *deletion*), image builds and pulls, and container lifecycle
+actions (start/stop/restart/kill) against an allowlist. Every container create
+that carries the project's own label still has to pass a host-access gate
+(R-15): a privileged container, added capabilities, host devices, a host or
+joined namespace, an added security profile, `VolumesFrom`, or a mount source
+outside the project directory is refused. Exec and attach are denied. The
+host's local unix socket remains unrestricted for host users — and that is also
+this capability's boundary: any client that can reach the socket, including a
+container that has it mounted, is a host user and is not policed at all (see
+Limitations).
 
 ## Applicable Context
 
@@ -143,12 +158,19 @@ it mounted, is a host user and is not policed at all (see Limitations).
 These are boundaries of the mechanism, not defects to be fixed later. A
 deployment that does not accept them is deploying something else.
 
-- **Operations on existing objects cannot be attributed to a project.** A
-  `DELETE`, or a lifecycle call on an existing container, carries no request
-  body and names its target only by id or name. `docker compose down` requires
-  these calls, so the policy allows them for any container, network, or volume
-  the client can name. Scoping applies to *creation* (labels and body name) and
-  to path-named operations — not to deletion.
+- **Container operations on existing objects cannot be attributed to a
+  project.** A `DELETE`, or a lifecycle call on an existing container, carries
+  no request body and names its target only by id or name, so the policy allows
+  them for any container id the client can name. `docker compose down` needs
+  those calls. Scoping applies to *creation* (labels and body name), to
+  path-named operations, and — since 2026-09-17 — to network and volume
+  deletion, whose path does name the resource (R-18). It does not apply to
+  container deletion or lifecycle calls.
+- **A network or volume delete must name the resource.** R-18 matches the
+  project as a whole path segment, so `docker volume rm <P-3>_data` and
+  `docker network rm <P-3>_default` are allowed while `docker volume rm
+  <volume-id>` — the same volume, named by its opaque id — is refused. The
+  refusal is the safe direction: compose deletes by name.
 - **Identity is what the client presents.** Any TLS client whose certificate CN
   is not exactly `P-4`, and any client on the unix socket, is a host user and is
   allowed everything. A second certificate signed by the same CA with another CN
@@ -160,20 +182,38 @@ deployment that does not accept them is deploying something else.
   `/var/run/docker.sock` mounted acts as a host user; a `:ro` mount is no
   protection, because the read-only attribute applies to the socket file and not
   to the API calls over it.
-- **Bind-mount resolution is only as good as the plugin's filesystem view.** The
-  plugin supplies a resolved source path, but a managed-plugin install mounts
-  only the policy directory into the plugin, so host paths are not resolvable
-  there and the check falls back to the raw source strings — and the check is
-  consulted for path-named network and volume operations, not for container
-  creation, which is attributed by the compose label.
+- **Host-access refusal is a deny list, and it is not exhaustive.** R-15
+  refuses the host-reaching fields the policy knows: `Privileged`, `CapAdd`,
+  `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`/`IpcMode`/`NetworkMode`/
+  `CgroupnsMode` naming the host or another container, `UsernsMode`, and mount
+  sources outside `P-15`. **Published host ports are not covered**: a project
+  container may map a host port (compose `ports:`) or ask for
+  `PublishAllPorts`. Binding a port is not root — it cannot read the host
+  filesystem — but a container can occupy a port a host service is not yet
+  using and answer for it. A deployment that needs that closed must close it
+  in the daemon's own configuration or in the firewall, not here.
+- **The mount check is only as good as the path it is given.** R-15 accepts a
+  mount source that is not an absolute path (a volume name) or that is a path
+  inside `P-15` with no `..` segment. That is a *string* test on the source
+  the request carries, so a symlink *inside* `P-15` that points outside it is
+  caught only by the plugin's `Resolved` field: a managed-plugin install
+  mounts only the policy directory into the plugin, cannot read host paths,
+  and leaves `Resolved` empty (the policy then falls back to the raw source
+  string, which the symlink satisfies). Everything the plugin *can* resolve is
+  checked — `Resolved` where the plugin supplies it, `Source` and the raw
+  `HostConfig.Binds`/`HostConfig.Mounts` arrays otherwise, all of them rather
+  than the first that answers — and the raw source is refused outright when it
+  contains a `..` segment. Closing the remainder means a plugin installation
+  that can read the host paths it checks.
 - **A malformed or placeholder-bearing policy is not a security hole but an
   outage or an open door, depending on how it fails**: unresolved placeholders
   make every request allowed (R-13), while a policy that does not compile leaves
   the daemon failing closed.
 - **Verification is a build-time activity.** The policy is only proven by
   running engines and probes as described in `skeleton/agent.rego.schema`; this
-  package's own pass ran a 25-probe table under the engines the two installable
-  plugin releases embed.
+  package's own pass ran its deny-probe table — 71 rows, decision-checked on
+  three OPA engines — under the engines the two installable plugin releases
+  embed (OPA v0.60.0 and v1.3.0) plus a newer one (v1.7.1).
 
 **Preservation List** *(reverse-engineered; corrected 2026-09-16)*:
 
@@ -195,8 +235,22 @@ deployment that does not accept them is deploying something else.
   label and the mount paths, and matched the path by substring, which denied
   `docker compose up` on a project whose network or volume did not exist yet.
 - The lifecycle action allowlist: exactly `{start, stop, restart, kill, pause,
-  unpause, wait, update}`. Exec and attach are structurally excluded.
-- The BuildKit container name prefix pattern: `/buildx_buildkit_`.
+  unpause, wait, update}`.
+- Exec and attach are refused. **Corrected 2026-09-17**: this entry used to say
+  they were "structurally excluded", which was an assumption, not a
+  measurement, and it was wrong in one direction — the daemon forwards a JSON
+  body to the plugin for every endpoint that has one, and the create rule then
+  matched the path by *prefix*, so a `POST` to `/containers/<id>/attach` or
+  `/exec` carrying a create-shaped body was treated as a create (probe rows
+  R15.04, R15.05: allowed before, denied now). The refusal is structural now
+  because the create grant matches `/containers/create` exactly and no
+  carve-out can be reached from another endpoint (R-17).
+- ~~The BuildKit container name prefix pattern: `/buildx_buildkit_`.~~
+  **Superseded 2026-09-17** (R-17): the sandbox can no longer create a BuildKit
+  container at all, so the pattern — and the `BUILDKIT_PREFIX` parameter — has
+  nothing to match. The token is still listed in the Parameters table and still
+  grepped for by the leftover-token check, so deploying a copy of the old
+  template is caught rather than silently missing a substitution.
 - The `com.docker.compose.project` label check must match the exact project name.
 
 *Open to reinterpretation:*
@@ -236,6 +290,17 @@ deployment that does not accept them is deploying something else.
 - **R-6**: The OPA policy MUST deny sandbox `exec` and `attach` operations
   (no shell access to any container).
 - **R-7**: The OPA policy MUST allow image builds and pulls from the sandbox.
+  **Revision 2026-09-17**: "a build" also covers `POST /session`, the
+  endpoint the Docker CLI's BuildKit session uses — the daemon's built-in
+  builder asks the client for build inputs over it, so a build against a
+  BuildKit-enabled daemon (the default) fails without it. The policy grants
+  `/session` for the same reason it grants `/build`: the sandbox runs the build
+  and the session serves data the sandbox already holds.
+  `inferred:` on a host without BuildKit, `POST /session` may not be issued at
+  all; the grant was **not** measured against a live BuildKit daemon here (no
+  such host was available to this pass), it is the documented client/daemon
+  protocol. The probe row asserts the policy's decision, not the daemon's
+  behaviour.
 - **R-8**: The OPA policy MUST allow a closed set of container lifecycle actions:
   start, stop, restart, kill, pause, unpause, wait, update.
 - **R-9**: The sandbox container MUST NOT require Docker configuration changes
@@ -256,8 +321,11 @@ deployment that does not accept them is deploying something else.
   or volume create, and the original policy did not read it — it matched the
   project only against path segments, so `docker compose up` on a project whose
   network and volume did not exist yet was denied. The policy this package ships
-  evaluates the body name; the 25-probe table in the verification section
-  covers both directions.
+  evaluates the body name; the deny-probe table in
+  `skeleton/agent.rego.schema` covers both directions.
+  **Revision 2026-09-17**: path-named operations are matched as a whole path
+  segment (the plugin's `PathArr`) rather than anywhere in the path string, so
+  a query string or a longer name cannot satisfy it.
 - **R-13**: The policy deployed to the host MUST be the *substituted* policy:
   every placeholder token from the Parameters table replaced, and the deployed
   file checked for leftover tokens. A deployed file that still contains tokens
@@ -268,6 +336,43 @@ deployment that does not accept them is deploying something else.
   not — authenticates as a host user, so the policy never sees its requests and
   is decorative for that container. The removal MUST be verified by inspecting
   the container's mounts.
+- **R-15**: The OPA policy MUST refuse a container-create request that would
+  give the container access to the host, **including a request that carries the
+  project's own label or a testcontainers label**. Refused: a privileged
+  container; added capabilities (`CapAdd`); host devices (`Devices`); a relaxed
+  security profile (`SecurityOpt`); another container's volumes (`VolumesFrom`);
+  a host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
+  `CgroupnsMode` naming `host` or `container:<id>`); an explicit `UsernsMode`;
+  and any mount whose source is neither a volume name nor a path inside `P-15`.
+  The same gate MUST apply to every create-equivalent path the policy grants —
+  the compose-label create, the testcontainers create, and volume creation
+  (R-16) — so no grant can be used to reach the host. Host port publishing is
+  deliberately outside this requirement; see Limitations.
+  **Safer direction**: a create that a deployment would have accepted is
+  refused when it asks for one of these fields, even where the field is exotic
+  rather than dangerous (a `DriverOpts`-bearing local volume, a `service:`
+  network mode, a bind by an id-named resource).
+- **R-16**: The OPA policy MUST refuse a volume-create request that turns the
+  volume into a host mount. A project-named volume with the `local` driver (or
+  no driver) and no `DriverOpts` MUST be allowed; a `DriverOpts` object with any
+  entry, or a driver other than `local`, MUST be denied — `DriverOpts: {type:
+  none, o: bind, device: /}` is the host's root filesystem wearing a project
+  name, and R-15 cannot see it at container-create time.
+- **R-17**: The policy MUST grant by exact path, never by path prefix or
+  substring, and MUST NOT contain a carve-out that makes a create grant
+  reachable from another endpoint. Concretely: `POST /build` (not
+  `/build/prune`), `POST /images/create`, and `POST /containers/create` are the
+  granted paths; `/containers/<id>/exec` and `/containers/<id>/attach` MUST be
+  denied whatever body they carry (R-6); and the BuildKit name-prefix carve-out
+  is removed (it was reachable from the attach and exec endpoints, and its
+  grant is no longer needed — see Decisions). A BuildKit *build* is unaffected:
+  it runs through `POST /build` (R-7).
+  **Revision 2026-09-17** (this requirement is new; it supersedes P-11).
+- **R-18**: The OPA policy MUST scope network and volume *deletion* the way
+  creation is scoped: a delete whose path names the project (`P-3`, or
+  `P-3_<suffix>` as a whole path segment) MUST be allowed, and a delete of any
+  other network or volume — a foreign name, or an opaque id — MUST be denied.
+  Container deletion stays unscoped (R-5's revision; see Limitations).
 
 ## Design Principles Binding the Implementation
 
@@ -319,19 +424,20 @@ deployment that does not accept them is deploying something else.
 | P-7  | POLICY_DIR              | path   | /etc/docker/authz                | Must be a subdirectory of P-6                                             | Where the deployed `agent.rego` lives; the plugin's only view of the host filesystem |
 | P-8  | SANDBOX_CONFIG_DIR      | path   | (discovered)                     | The host directory that is bind-mounted into the sandbox as its Docker config home; discovery: the mount source in the sandbox's compose definition | Client certs, config.json, and env file written here                |
 | P-9  | AUTH_HEADER             | string | X-Sandbox-Agent                  | N/A — a policy decision                                                   | HTTP header *name* used as a secondary identity signal; the policy requires its value to be exactly `true` |
-| P-10 | OPA_PLUGIN_IMAGE        | string | ghcr.io/open-policy-agent/opa-docker-authz:v0.10 | The image tag must carry an OPA engine that runs Rego v1: `v0.10` (OPA v1.7.1) and `openpolicyagent/opa-docker-authz-v2:0.9` (OPA v0.60.0) both do; `v0.8` (OPA v0.30) does not | Which plugin image is installed; it decides the policy language version (see `skeleton/agent.rego.schema`) |
-| P-11 | BUILDKIT_PREFIX         | string | /buildx_buildkit_                | N/A — a known BuildKit container naming pattern                           | OPA uses this to identify BuildKit containers                       |
+| P-10 | OPA_PLUGIN_IMAGE        | string | ghcr.io/open-policy-agent/opa-docker-authz:v0.10 | The image tag must carry an OPA engine that runs Rego v1: `v0.10` embeds **OPA v1.3.0** and `openpolicyagent/opa-docker-authz-v2:0.9` embeds **OPA v0.60.0** (measured from each release's own `go.mod`, and this package's policy was evaluated under both); `v0.8` (OPA v0.30) rejects `import rego.v1` | Which plugin image is installed; it decides the policy language version (see `skeleton/agent.rego.schema`) |
+| P-11 | ~~BUILDKIT_PREFIX~~ | string | ~~/buildx_buildkit_~~ | **Superseded 2026-09-17 by R-17** — the BuildKit carve-out is removed, so nothing reads this token | Nothing. The row is kept because the leftover-token check still greps for it, so deploying a copy of the pre-R-17 template is caught |
 | P-12 | TESTCONTAINERS_LABEL    | string | org.testcontainers               | N/A — a known testcontainers-go label key, whose value is `true`           | OPA uses this to identify testcontainers containers                 |
 | P-13 | DAEMON_CONFIG_FILE      | path   | /etc/docker/daemon.json          | A snap-installed daemon uses `/var/snap/docker/current/config/daemon.json` instead; discovery: `systemctl show docker --property=FragmentPath,ExecStart` | The file the daemon actually reads. Writing the other path has no effect (see the daemon-config module) |
 | P-14 | OPA_PLUGIN_NAME         | string | opa-docker-authz                 | The name shown by `docker plugin ls` after install (the `--alias` value)   | The `authorization-plugins` entry, the reload script's target, and the name in denial messages |
-| P-15 | PROJECT_DIR             | path   | (discovered)                     | The host directory of the compose project — `docker inspect <c> --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'` for a container of that project | The policy's bind-mount check: a container create that mounts a path under this directory is treated as belonging to the project |
+| P-15 | PROJECT_DIR             | path   | (discovered)                     | The host directory of the compose project — `docker inspect <c> --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'` for a container of that project | The policy's host-path boundary (R-15): a mount source must be under this directory (or be a volume name) for a create to be allowed. Attribution is unchanged — by label for container creates, by name or path segment for network and volume calls — and the directory is no longer consulted for attribution at all |
 
 ## Modules
 
 - **OPA Policy** (`modules/opa-policy.md`) — the Rego authorization policy file
   that defines sandbox vs host identity, read-only grants, project-scoped
-  creation, lifecycle allowlists, and BuildKit/testcontainers carve-outs, with
-  its engine-version constraints and its limitations.
+  creation and deletion, the host-access gate on every create (R-15, R-16), the
+  exact-path rule (R-17), lifecycle allowlists, and the testcontainers
+  carve-out, with its engine-version constraints and its limitations.
 - **Docker Daemon Config** (`modules/daemon-config.md`) — the live daemon
   configuration file's TLS and plugin entries (including how to find which file
   the daemon actually reads), plus the systemd drop-in for the TCP listener and
@@ -376,43 +482,57 @@ The plugin passes the Docker API request to the Rego evaluation in this shape
   "User": "sandbox-agent",
   "AuthMethod": "TLS",
   "Method": "POST",
-  "Path": "/v1.47/containers/create",
+  "Path": "/v1.47/containers/create?name=backend-services-web-1",
   "PathPlain": "/containers/create",
   "PathArr": ["", "v1.47", "containers", "create"],
   "Headers": { "X-Sandbox-Agent": "true" },
   "Body": {
     "Labels": { "com.docker.compose.project": "backend-services" },
-    "Name": "/buildx_buildkit_default",
     "HostConfig": {
-      "Binds": ["/src:/dst"],
-      "Mounts": [{ "Source": "/src", "Target": "/dst", "ReadOnly": false }]
+      "Binds": ["/srv/compose/backend-services/src:/app/src"],
+      "Mounts": [{ "Type": "volume", "Source": "backend-services_data", "Target": "/data" }]
     }
   },
   "BindMounts": [
-    { "Source": "/src", "Resolved": "/src", "ReadOnly": false }
+    { "Source": "/srv/compose/backend-services/src", "Resolved": "/srv/compose/backend-services/src", "ReadOnly": false }
   ]
 }
 ```
+
+A create request carries no container name in its body: Docker takes it from the
+`name` query parameter, which is why the policy reads the name of a container
+create from the path and the name of a network or volume create from
+`Body.Name` (those two endpoints take it in the body). The example above is the
+compose-labelled create, the one case where a container create is granted.
 
 Fields used by the policy:
 - `input.User` — the TLS client certificate's subject common name; empty for
   unix-socket clients and for TCP clients with no certificate
 - `input.Method` — HTTP method (`GET`, `HEAD`, `POST`, `DELETE`)
-- `input.PathPlain` — request path without the API version prefix or query
+- `input.PathPlain` — request path without the API version prefix or query;
+  the policy matches grants against it by **equality** (R-17)
 - `input.PathArr` — the same path split into elements (a plugin addition); used
   for whole-segment matching of names in the path
 - `input.Headers` — request headers; the `P-9` header is the secondary identity
-  signal
+  signal, and header values are strings (`map[string]string`), never arrays
 - `input.Body` — the decoded request body, or `null` for requests without one
   (every `DELETE`, and most `GET`s)
 - `input.Body.Labels` — container labels (compose project; testcontainers)
-- `input.Body.Name` — container, network, or volume name (`P-3` and `P-3_<suffix>`
-  are the project's own names)
+- `input.Body.Name` — network or volume name (`P-3` and `P-3_<suffix>` are the
+  project's own names)
+- `input.Body.Driver` / `input.Body.DriverOpts` — a volume create's driver and
+  its options; a non-empty `DriverOpts`, or a driver other than `local`, makes
+  the volume a host mount and is refused (R-16)
+- `input.Body.HostConfig` — the create's host-side configuration, and the whole
+  of the R-15 gate: `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`,
+  `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`,
+  `UsernsMode`, `Binds`, `Mounts`
 - `input.BindMounts` — one entry per bind mount of a create request, with
   `Source`, `ReadOnly`, and `Resolved` (a plugin addition; `Resolved` is empty
-  when the plugin cannot read the host path — see the policy module)
-- `input.Body.HostConfig.Binds` / `.Mounts` — the raw forms, checked as a
-  fallback when `BindMounts` is absent
+  when the plugin cannot read the host path — see the policy module). Every
+  witness of a mount is checked, not the first that answers: `Resolved` where
+  the plugin supplies it, `Source`, and the raw `HostConfig.Binds` /
+  `HostConfig.Mounts` arrays.
 
 ### OPA plugin interface (consumed by the daemon)
 
@@ -681,22 +801,29 @@ the sandbox then stops being recognised as a sandbox client at all.
 Root required: yes (writing under P-7).
 
 Steps:
-1. Substitute the seven tokens from `skeleton/agent.rego` with the Phase 1
+1. Substitute the six tokens from `skeleton/agent.rego` with the Phase 1
    values. Any mechanism is fine (editor, `sed`, a deployment script); the check
    in step 2 is what makes it safe:
    ```
-   sed -e 's/SANDBOX_USERNAME/P-4 value/' \
-       -e 's/AUTH_HEADER_NAME/P-9 value/' \
-       -e 's/PROJECT_NAME/P-3 value/' \
-       -e 's/PROJECT_DIR_PATH/P-15 value/' \
-       -e 's/BUILDKIT_PREFIX/P-11 value/' \
-       -e 's/TESTCONTAINERS_LABEL_KEY/P-12 key/' \
-       -e 's/TESTCONTAINERS_LABEL_VALUE/P-12 value/' \
+   sed -e 's#SANDBOX_USERNAME#P-4 value#g' \
+       -e 's#AUTH_HEADER_NAME#P-9 value#g' \
+       -e 's#PROJECT_NAME#P-3 value#g' \
+       -e 's#PROJECT_DIR_PATH#P-15 value#g' \
+       -e 's#TESTCONTAINERS_LABEL_KEY#P-12 key#g' \
+       -e 's#TESTCONTAINERS_LABEL_VALUE#P-12 value#g' \
        skeleton/agent.rego > /tmp/agent.rego
    ```
-   Substitute `PROJECT_NAME` before `PROJECT_DIR_PATH` only if a project name
-   could appear inside a directory path — the tokens are distinct, so the default
-   order is safe; the leftover check is the guarantee.
+   `#` is the delimiter, not `/`: three of these values are paths
+   (`P-15` is `/srv/compose/backend-services` with the defaults) and a `/`
+   delimiter ends the `s` command at the first slash in the value. If a value
+   itself contains `#`, pick another character that appears in none of them. The
+   `g` flag matters for the same reason it always does — a token appears more
+   than once in the file — and the leftover check in step 2 is the guarantee, not
+   the substitution command.
+   (`BUILDKIT_PREFIX` is **not** in this list since 2026-09-17: R-17 removed the
+   BuildKit carve-out, and the token is gone from the template. The leftover
+   check below still greps for it, so substituting a copy of the old template
+   with this command fails the check rather than deploying a stale policy.)
 2. Check the substituted file for leftover tokens **in code lines** (comments
    name the tokens on purpose):
    ```
@@ -833,10 +960,12 @@ Each test names the requirements it covers. `...` stands for
 - **A-10** (covers R-3): the plugin was installed with its policy argument —
   `docker plugin inspect <P-14>` contains `policy-file` (or `config-file`), and
   `docker plugin ls` shows it enabled.
-- **A-11** (covers R-12): project-scoped creation works end to end — from the
-  sandbox, `docker ... compose -p P-3 up -d` on a project whose network and
-  volume do not exist yet exits 0, while `docker ... volume create other_data`
-  is denied. Both directions matter: the original policy denied the first.
+- **A-11** (covers R-12, R-18): project-scoped creation and deletion work end to
+  end — from the sandbox, `docker ... compose -p P-3 up -d` on a project whose
+  network and volume do not exist yet exits 0, while `docker ... volume create
+  other_data` is denied, `docker ... volume rm <a volume id>` is denied, and
+  `docker ... compose -p P-3 down` exits 0 (it deletes by name, which is what
+  R-18 matches). Both directions matter: the original policy denied the first.
 - **A-12** (covers R-14): the sandbox container does not mount the Docker socket
   — `docker inspect <sandbox> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} {{println}}{{end}}'`
   has no `docker.sock` line, and inside the container `docker run --rm alpine
@@ -848,13 +977,30 @@ Each test names the requirements it covers. `...` stands for
   expects — `openssl x509 -in P-8/cert.pem -noout -subject` shows `CN=P-4`, its
   `extendedKeyUsage` is client authentication, and the server certificate's SANs
   cover P-1.
-- **A-15** (covers R-5, R-6, R-7, R-8, R-11, R-12): the policy's decision table
-  — the probes in `skeleton/agent.rego.schema`, run with the plugin image's own
-  engine (P-10) against the deployed file, produce the expected allow/deny for
-  every row, including the BuildKit container name, the testcontainers label,
-  and both directions of the project-scoped create checks. This is the cheapest
-  test to run and the only one that exercises policy branches a live host cannot
-  easily reach.
+- **A-15** (covers R-5, R-6, R-7, R-8, R-11, R-12, R-17): the policy's decision
+  table — the probes in `skeleton/agent.rego.schema`, run with the plugin
+  image's own engine (P-10) against the deployed file, produce the expected
+  allow/deny for **every** row, including the exact-path rows (a smuggled body
+  on `/containers/<id>/attach` and `/exec` must be denied), the `POST /session`
+  grant, the testcontainers label, and both directions of the project-scoped
+  create checks. This is the cheapest test to run and the only one that
+  exercises policy branches a live host cannot easily reach.
+- **A-16** (covers R-15, R-16): the host-access gate holds for a project-labelled
+  client — from the sandbox, each of these is denied by the plugin, and the
+  denial is not a mistake of syntax but the R-15/R-16 decision:
+  ```
+  docker ... run --rm --privileged alpine echo hello          # Privileged
+  docker ... run --rm --cap-add SYS_ADMIN alpine echo hello   # CapAdd
+  docker ... run --rm --pid host alpine echo hello            # host namespace
+  docker ... run --rm -v /:/host alpine echo hello            # bind outside P-15
+  docker ... run --rm -v /var/run/docker.sock:/s alpine echo hello
+  docker ... volume create P-3_evil --opt type=none --opt o=bind --opt device=/
+  ```
+  and the same host with a user who is not the sandbox still succeeds:
+  `docker run --rm --privileged alpine echo hello` on the unix socket exits 0
+  (R-10 — the gate applies to the sandbox identity only). The sandbox's own
+  legitimate work stays allowed: `docker ... compose -p P-3 up -d` (A-11) and a
+  build (A-6) must still exit 0.
 
 ## Failure Modes and Rollback
 
@@ -900,9 +1046,10 @@ its failure mode is a connection error, not an open door.
 
 **Phase 8 (verification):** If the denial test passes but project operations are
 denied, the likely causes are an incorrect P-3 (the exact compose project name),
-an incorrect P-15 (so the bind-mount check does not match), or an unsubstituted
-token. Check A-9 first: a leftover token makes *everything* allowed, so a
-correct-looking denial test rules it out.
+an incorrect P-15 (so R-15's mount check refuses a bind that is legitimate —
+the project's own files then look like they are outside the project), or an
+unsubstituted token. Check A-9 first: a leftover token makes *everything*
+allowed, so a correct-looking denial test rules it out.
 
 **Phase 9 (sandbox recreate):** If the sandbox cannot reach the daemon after the
 recreate, check `DOCKER_HOST`/`DOCKER_CERT_PATH` inside the container and that
@@ -962,12 +1109,13 @@ docker -H tcp://P-1:P-2 ps                    # no listener — fails
 
 Decisions:
 
-- 2026-09-09 — Schematic reverse-engineered from the `containers/claude/`
-  repository at `/workspace/containers/`. The setup includes: a self-hosted
-  Docker TLS certificate infrastructure, the OPA authorization plugin, a Rego
-  policy file, sandbox container provisioning files, and a policy reload
-  script. The original host is running Ubuntu with systemd and the sandbox
-  container uses `agent` as the non-root user.
+- 2026-09-09 — Schematic reverse-engineered from a running implementation on a
+  private host (the implementation itself is not part of this catalogue, and the
+  host is not named here: the package must be self-contained and portable). The
+  setup included: a self-hosted Docker TLS certificate infrastructure, the OPA
+  authorization plugin, a Rego policy file, sandbox container provisioning
+  files, and a policy reload script. The original host runs Ubuntu with systemd,
+  and the sandbox container uses a non-root user.
 - 2026-09-16 — Verified and corrected against the plugin's, Docker's, and
   Open Policy Agent's own documentation, and against the OPA engines the two
   installable plugin releases embed. What changed:
@@ -980,7 +1128,8 @@ Decisions:
     shipped Rego used v0 syntax with `import future.keywords.in`, which the
     engine in v0.8 (OPA v0.30) rejects and the engine in v0.9 (OPA v0.60)
     also rejects. The policy now ships in Rego v1 and was verified to load and
-    decide identically under OPA v0.60.0 and v1.7.1.
+    decide identically under OPA v0.60.0 and v1.7.1. (The 2026-09-17 pass added
+    v1.3.0 — the engine `v0.10` actually embeds, see the correction below.)
   - **Project-scoped network and volume creation was denied.** The original
     policy matched the project only against path segments, so
     `docker compose up` on a project whose network and volume did not exist yet
@@ -1023,28 +1172,118 @@ Decisions:
   during this pass runs a snap-installed Docker, so P-13 is the snap path and
   every daemon-level step is root-only. The restart in Phase 5 is the disruptive
   step, and live-restore decides whether it stops the running containers.
+- 2026-09-17 — **The create path was hardened, and the engine claim corrected.**
+  Every change below is backed by the deny-probe table in
+  `skeleton/agent.rego.schema`, run under the published `openpolicyagent/opa`
+  images for 0.60.0, **1.3.0** and 1.7.1 (the plugin's engine is an OPA release;
+  1.3.0 is what `v0.10` embeds):
+  - **A project-labelled create could ask for anything.** A request carrying the
+    project's own `com.docker.compose.project` label was allowed to request
+    `Privileged`, `CapAdd`, host devices, host namespaces, `SecurityOpt`, or a
+    bind of `/` — the label was treated as sufficient. It is now a gate, not a
+    grant (R-15), and the same gate covers the testcontainers create and volume
+    creation (R-16).
+  - **A create-shaped body on `/containers/<id>/attach` or `/exec` satisfied the
+    create rule.** The grant matched the path with `contains(...)`, so a rule
+    meant for `POST /containers/create` also matched those endpoints — and
+    Docker forwards the JSON body to the plugin for an endpoint whose handler
+    ignores it, so the smuggled body decided the request. Whether the daemon
+    *forwards* such a body is version-dependent, which is the point: the policy
+    must not depend on it. Grants now match by equality (R-17), and the
+    BuildKit name-prefix carve-out — the grant that was reachable that way — is
+    removed. Cost, accepted: `docker buildx create --driver docker-container`
+    from the sandbox no longer works; builds run through `POST /build` and are
+    unaffected.
+  - **A project-named volume could be the host's root filesystem.**
+    `DriverOpts: {type: none, o: bind, device: /}` on a `<P-3>_`-named volume
+    was allowed, and a container mounting that volume reached the host while
+    R-15 — which reads `HostConfig`, not the volume's definition — saw nothing.
+    R-16 refuses any non-empty `DriverOpts` and any driver other than `local`.
+  - **Network and volume deletes were unscoped**: any network or volume the
+    client could name could be deleted, including the host's. R-18 scopes them
+    to the project as a whole path segment. Container deletes stay unscoped —
+    their request carries nothing to attribute (Limitations).
+  - **`POST /session` is now granted** (R-7 revision): the Docker CLI's BuildKit
+    session endpoint, without which a build against a BuildKit-enabled daemon
+    fails. **Not measured against a live BuildKit host** — none was available to
+    this pass — so the source is the client/daemon protocol and the probe row
+    asserts the policy's decision only. A deployment whose daemon is
+    BuildKit-disabled can drop the grant without losing anything.
+  - **The engine version in P-10 was wrong**: `v0.10` embeds OPA **v1.3.0**, not
+    v1.7.1. The error was reading the newest OPA release instead of the plugin's
+    own `go.mod` at its tag. Fixed in P-10, the policy header,
+    `agent.rego.schema`, and the policy module; the probe table now includes
+    v1.3.0 alongside v0.60.0 and v1.7.1.
+  - **The deny list was extended past the review's list**, each addition with a
+    probe row: `CgroupnsMode: host`, a namespace joined by `container:<id>` (a
+    host-networked container's namespace is the host's, one hop away),
+    `VolumesFrom`, a mount source carrying a `..` segment, and a `Mounts` entry
+    with no `Type`. Consequence accepted and stated: a compose
+    `network_mode: service:<name>` is refused.
+  - **A Rego evaluation trap the probe table caught**: `not is_string(field)`
+    over a *missing* field fails the rule instead of succeeding, so the first
+    draft of R-16 refused a volume create that carried no `Driver` at all
+    (row R16.03). Presence tests use `object.get(object, key, default)`.
+  - **Residuals are stated, not hidden**: published host ports are outside the
+    gate; a symlink inside `P-15` survives where the plugin cannot resolve
+    paths; container deletion and lifecycle calls stay unscoped. Each is in
+    Limitations, with what closing it would take.
+  - **Follow-up out of this package's scope**: `improve-docker-security`'s R-2
+    says the OPA policy narrows what the daemon *executes*; nothing in this
+    package enforces that, and it belongs in an issue against that schematic
+    rather than in an edit here.
+  - **Version 0.4.0 (minor)**: R-15 to R-18 are new requirements, so the level
+    is "new capability" per the update workflow. A review comment noted that a
+    *narrowed* contract can read as a major bump; recorded rather than silently
+    disagreed with — what narrowed is the policy's grants, which the
+    requirements never intended to make, while the requirement set grew. A
+    future change that *removes* a requirement is the major bump.
+  - **The in-place `Revision 2026-09-16` notes on R-5 and R-12 were left in
+    place**, with a dated revision note added under each rather than the
+    requirement being rewritten. The review raised whether those revisions
+    should have been a major bump; the decision is that the form stays, because
+    a reader needs the current text and its history in one place.
+  - **Merge order**: `#18` (one canonical container-format companion) was
+    already merged into `main`, and this branch was rebased onto it, so the
+    deletion of the per-package `SCHEMATIC.md.schema` is in the base rather
+    than a conflict here.
 
 Open questions:
 
-- **Q-1** *(answered 2026-09-16)*: `sprintf("/%s", [action])` is valid — the
-  format string and its argument list were verified by evaluation under OPA
-  v0.60.0 and v1.7.1, not assumed. The original default ("keep as written, test
-  with `opa check`") stands, with the engines named.
-- **Q-2** *(answered 2026-09-16)*: the bind-mount project check is retained as a
-  secondary heuristic behind the label and body-name checks, and its path is
-  parameterized (P-15). It is effective only where the plugin can resolve host
-  paths (see the policy module's limitation on `Resolved`).
-- **Q-3** *(answered 2026-09-16)*: the plugin repository in the original text
-  does not exist; P-10 now names the real images. The version constraint is
-  inverting as stated there — `v0.10` (OPA v1.7.1) and `v0.9` (OPA v0.60.0) both
-  run this policy, and the language to avoid is the classic v0 form the original
-  file used, which the older engines reject.
+- **Q-1** *(answered 2026-09-16; re-verified 2026-09-17)*:
+  `sprintf("/%s", [action])` is valid — the format string and its argument list
+  were verified by evaluation under OPA v0.60.0, v1.3.0, and v1.7.1, not
+  assumed. The original default ("keep as written, test with `opa check`")
+  stands, with the engines named.
+- **Q-2** *(answered 2026-09-16; revised 2026-09-17)*: the bind-mount check is
+  not an attribution heuristic. Attribution is the label (creates) and the
+  name or path segment (network and volume calls); the mount check is R-15's
+  host-path boundary, and since 2026-09-17 it gates every container create
+  rather than decorating the path-named operations. Its path is parameterized
+  (P-15), and it is effective only where the plugin can resolve host paths (see
+  the policy module's limitation on `Resolved`).
+- **Q-3** *(answered 2026-09-16; engine corrected 2026-09-17)*: the plugin
+  repository in the original text does not exist; P-10 now names the real
+  images. The version constraint is inverting as stated there — `v0.10` (OPA
+  **v1.3.0**) and `v0.9` (OPA v0.60.0) both run this policy, and the language to
+  avoid is the classic v0 form the original file used, which the older engines
+  reject. The 2026-09-16 pass wrote "v1.7.1" for `v0.10`; that was wrong — the
+  version comes from the plugin release's own `go.mod` at its tag, not from the
+  newest OPA release at the time of writing, which is the mistake to avoid here.
 - **Q-4** *(new)*: whether the daemon **refuses to start** when
   `authorization-plugins` names a plugin that is absent or disabled. The
   request-time behavior is documented (fail closed); the startup behavior is
   `inferred:` and untested here. Decide by testing on a maintenance window with
   a restart, not by assumption — until then, Phase 3's ordering (install first,
   reference second) is the safe procedure.
+- **Q-5** *(new 2026-09-17, raised in review)*: on a snap-installed daemon,
+  whether the confined daemon can bind-mount host `P-6` into the managed plugin
+  at `/opa` at all. The plugin path (`/opa/authz/agent.rego`) and the install
+  argument are documented and consistent on the distribution package; the snap's
+  confinement is `inferred:` and untested here, and if it cannot, the policy
+  file must live somewhere the daemon can already see. Decide by installing the
+  plugin on a snap host and reading `docker plugin inspect <P-14>` — Phase 3
+  succeeds either way; it is the policy load that would fail.
 
 
 
