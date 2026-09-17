@@ -63,7 +63,7 @@ description: Privately acquiring movies over usenet - Radarr automating grabs th
 
 | Id  | What | Why needed | Discovery | Failure behavior |
 |-----|------|------------|-----------|------------------|
-| D-1 | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared downloader, indexer authority, unpackerr | Its phases 1-2 green | Blocker: nothing to register with |
+| D-1 | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared downloader, indexer authority, unpackerr | Its phases 1-2 green | Blocker: nothing to register with |
 | D-2 | Radarr image | Movie automation | Digest-pinned | No movie fetching |
 
 ## Parameters
@@ -142,6 +142,10 @@ Decisions:
   SABnzbd, unpackerr, Bazarr, flaresolverr) moved to
   `fetch-over-usenet`; this package keeps only what is genuinely
   movie-specific.
+- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
+  in this repository's history, to `81721d8`, the commit the pinned hashes
+  were computed from. Contents and hashes are unchanged; only the link was
+  dead (issue #21).
 
 Open questions:
 

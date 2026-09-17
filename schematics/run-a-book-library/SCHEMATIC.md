@@ -87,8 +87,8 @@ marketplace entries as the version pins.
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker + Compose v2 | Runs both stacks | `docker compose version` | Blocker |
-| D-2 | schematic | [fetch-books-over-vpn v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-books-over-vpn/SCHEMATIC.md) `sha256:973e73f65376d1f54353ab94be05975cd60fce4f13f486b61390cd970030b3fa` | Acquires books/audiobooks privately | Its phases 1-4 green | No new content; serving still works |
-| D-3 | schematic | [serve-books-using-containers v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/serve-books-using-containers/SCHEMATIC.md) `sha256:5f09a47942d10f401a09753ead33e8c52bf26b298c26eb0101e189b6793588b7` | Serves the library | Its phases 1-3 green | Library present but silent |
+| D-2 | schematic | [fetch-books-over-vpn v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-books-over-vpn/SCHEMATIC.md) `sha256:973e73f65376d1f54353ab94be05975cd60fce4f13f486b61390cd970030b3fa` | Acquires books/audiobooks privately | Its phases 1-4 green | No new content; serving still works |
+| D-3 | schematic | [serve-books-using-containers v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/serve-books-using-containers/SCHEMATIC.md) `sha256:5f09a47942d10f401a09753ead33e8c52bf26b298c26eb0101e189b6793588b7` | Serves the library | Its phases 1-3 green | Library present but silent |
 | D-4 | system | One shared media root on the host | The R-1 contract | `ls <media root>` | Blocker: no common tree |
 
 ## Parameters
@@ -232,6 +232,10 @@ Decisions:
   content SHA-256 (convention v2; see improve-docker-security's
   composition-convention module). Relative links are gone: the pinned
   URL is the version-of-record for the contract.
+- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
+  in this repository's history, to `81721d8`, the commit the pinned hashes
+  were computed from. Contents and hashes are unchanged; only the link was
+  dead (issue #21).
 
 Open questions:
 

@@ -100,9 +100,9 @@ against. See the composition-convention module for the full rules.
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker Engine + Compose v2 | Runs everything | `docker compose version` | Blocker |
-| D-2 | schematic | [restrict-docker-api-access v0.3.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/restrict-docker-api-access/SCHEMATIC.md) `sha256:29951fd2252a342d2863e960b4eaa8095599227d70d7e36694769af84ccaa50a` | Closes container→daemon access (R-1) | Its phases green | Consumers fall back to socket mounts - forbidden (R-1) |
-| D-3 | schematic | [authorize-docker-requests v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/authorize-docker-requests/SCHEMATIC.md) `sha256:73a1a2423df279ea1c163ae51496ef12b68882b7801cca819126ad4b192af506` | Polices daemon control (R-2) | Its phases green | OPA down → clients blocked by design; rollback line re-opens |
-| D-4 | schematic | [encrypt-container-secrets v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:a776b9b1d34d5fc7883ecee8f7616d39860a9236f5d875dc476013fae413ba45` | Closes secrets at rest (R-3) | Its phases green | Deployment halts rather than falling back to plaintext |
+| D-2 | schematic | [restrict-docker-api-access v0.3.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/restrict-docker-api-access/SCHEMATIC.md) `sha256:29951fd2252a342d2863e960b4eaa8095599227d70d7e36694769af84ccaa50a` | Closes container→daemon access (R-1) | Its phases green | Consumers fall back to socket mounts - forbidden (R-1) |
+| D-3 | schematic | [authorize-docker-requests v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/authorize-docker-requests/SCHEMATIC.md) `sha256:73a1a2423df279ea1c163ae51496ef12b68882b7801cca819126ad4b192af506` | Polices daemon control (R-2) | Its phases green | OPA down → clients blocked by design; rollback line re-opens |
+| D-4 | schematic | [encrypt-container-secrets v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:a776b9b1d34d5fc7883ecee8f7616d39860a9236f5d875dc476013fae413ba45` | Closes secrets at rest (R-3) | Its phases green | Deployment halts rather than falling back to plaintext |
 
 ## Parameters
 
@@ -243,6 +243,10 @@ Decisions:
   (composition-convention): the composition states exactly which contract
   it was built against, and verification is a hash comparison, not a
   trust statement.
+- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
+  in this repository's history, to `81721d8`, the commit the pinned hashes
+  were computed from. Contents and hashes are unchanged; only the link was
+  dead (issue #21).
 
 Open questions:
 

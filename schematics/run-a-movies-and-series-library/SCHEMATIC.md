@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-a-movies-and-series-library
-version: 0.2.1
+version: 0.2.2
 status: published
 description: A composition schematic - runs a complete movies-and-series library by wiring the fetching half (Prowlarr, Sonarr, Radarr, Bazarr, SABnzbd, unpackerr) to the serving half (Jellyfin, Jellyseerr) through the shared media tree, with the request flow closing the loop from "I want to watch X" to "X is playing". Recommended but optional: hardening the Docker host and keeping deployments current. No images of its own; the glue is the loop, the ordering, and the cross-verification.
 ---
@@ -72,10 +72,10 @@ the file's content SHA-256 (composition-convention, rule 2).
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker + Compose v2 | Runs both halves | `docker compose version` | Blocker |
-| D-2 | schematic | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared downloading infrastructure | Its phases 1-3 green | Blocker: nothing to grab with |
-| D-3 | schematic | [fetch-movies-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-movies-over-usenet/SCHEMATIC.md) `sha256:372c9af317196df3ef6a71f42151aaa0076eb47c6cfad7d6123f90e3af55ca64` | Acquires movies | Its phases 1-2 green | Series-only fetching |
-| D-4 | schematic | [fetch-series-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-series-over-usenet/SCHEMATIC.md) `sha256:06b6fc8df40c70568be9323a8a670746e8c1ebbaefa166628b98accaf8c12d28` | Acquires series | Its phases 1-2 green | Movies-only fetching |
-| D-5 | schematic | [serve-movies-and-series v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/serve-movies-and-series/SCHEMATIC.md) `sha256:384ec85884529472943287701cc9912eeceedd4fa53591d77a7fd45a6c3745ce` | Serves content, takes requests | Its phases 1-2 green | Fetching continues; nothing watchable |
+| D-2 | schematic | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared downloading infrastructure | Its phases 1-3 green | Blocker: nothing to grab with |
+| D-3 | schematic | [fetch-movies-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-movies-over-usenet/SCHEMATIC.md) `sha256:0df9912e26f8a2b26fb79f454f044d0b7663829827c5360e12e02a9fb37a2e46` | Acquires movies | Its phases 1-2 green | Series-only fetching |
+| D-4 | schematic | [fetch-series-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-series-over-usenet/SCHEMATIC.md) `sha256:5ec2c9a3ae0160e79d1eeb7618207a9b7ddeacd3a173b09fadcb09107a912b90` | Acquires series | Its phases 1-2 green | Movies-only fetching |
+| D-5 | schematic | [serve-movies-and-series v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/serve-movies-and-series/SCHEMATIC.md) `sha256:384ec85884529472943287701cc9912eeceedd4fa53591d77a7fd45a6c3745ce` | Serves content, takes requests | Its phases 1-2 green | Fetching continues; nothing watchable |
 
 ## Recommended
 
@@ -84,8 +84,8 @@ them leaves every requirement above satisfiable (R-6).
 
 | Id  | Kind | What | Adds | Without it |
 |-----|------|------|------|------------|
-| RD-1 | schematic | [improve-docker-security v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/improve-docker-security/SCHEMATIC.md) `sha256:08b9f072a0a96047fcce8036c519d61e5b76b9fd02c98b1ce85ed43324ff153b` | Hardens the Docker host this stack runs on: scoped API access, OPA-policed control, encrypted secrets (including this stack's many API keys, R-3's rule enforced mechanically) | The stack works, but socket-mounting consumers and plaintext keys remain accepted risk |
-| RD-2 | schematic | [update-images-on-push v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/update-images-on-push/SCHEMATIC.md) `sha256:810129ef2839e77f88b469601e494e6367a9cc5afd1b1c904fb9e1fe37705067` | Keeps the images current from git pushes without cron-based full-socket updaters | Manual or watchtower-style updates |
+| RD-1 | schematic | [improve-docker-security v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/improve-docker-security/SCHEMATIC.md) `sha256:173d89578cb487139584f76efefa013c20ffa070349401db3d7897076838e10d` | Hardens the Docker host this stack runs on: scoped API access, OPA-policed control, encrypted secrets (including this stack's many API keys, R-3's rule enforced mechanically) | The stack works, but socket-mounting consumers and plaintext keys remain accepted risk |
+| RD-2 | schematic | [update-images-on-push v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/update-images-on-push/SCHEMATIC.md) `sha256:810129ef2839e77f88b469601e494e6367a9cc5afd1b1c904fb9e1fe37705067` | Keeps the images current from git pushes without cron-based full-socket updaters | Manual or watchtower-style updates |
 
 ## Parameters
 
@@ -191,6 +191,14 @@ Decisions:
   feature (separate table, same pinning, degraded-mode behavior stated
   per row); canonical text in improve-docker-security's
   composition-convention module.
+- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
+  in this repository's history, to `81721d8`, the commit the surviving hashes
+  were computed from. D-2, D-5, and RD-2 are unchanged in content and hash.
+  D-3 (fetch-movies-over-usenet), D-4 (fetch-series-over-usenet), and RD-1
+  (improve-docker-security) carried hashes that match no content ever
+  published on `main`; they are re-pinned to the published contents at
+  `81721d8`, and the glue is due a re-read against those three contracts
+  (tracked in issue #21). Patch bump for the re-pin.
 
 Open questions:
 

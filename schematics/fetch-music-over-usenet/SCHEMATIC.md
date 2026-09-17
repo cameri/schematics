@@ -64,7 +64,7 @@ description: Privately acquiring music over usenet - Lidarr automating artist an
 
 | Id  | What | Why needed | Discovery | Failure behavior |
 |-----|------|------------|-----------|------------------|
-| D-1 | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared indexer manager and downloader | Its phases 1-2 green | Blocker: deploy it first |
+| D-1 | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | The shared indexer manager and downloader | Its phases 1-2 green | Blocker: deploy it first |
 | D-2 | Lidarr image | Music automation | Digest-pinned | No music fetching |
 
 ## Parameters
@@ -147,6 +147,10 @@ Decisions:
   provider config as the parent stack. If an operator wants the whole
   pipeline behind a VPN, that is `fetch-books-over-vpn`'s pattern
   applied to this stack - a deliberate composition, not a default.
+- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
+  in this repository's history, to `81721d8`, the commit the pinned hashes
+  were computed from. Contents and hashes are unchanged; only the link was
+  dead (issue #21).
 
 Open questions:
 
