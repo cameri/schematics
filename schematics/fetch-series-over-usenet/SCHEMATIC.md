@@ -3,6 +3,7 @@
 name: fetch-series-over-usenet
 version: 0.1.1
 status: published
+spec: 1
 description: Privately acquiring series over usenet - Sonarr automating episode and season grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the series library the server reads.
 ---
 

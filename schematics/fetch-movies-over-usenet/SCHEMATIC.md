@@ -3,6 +3,7 @@
 name: fetch-movies-over-usenet
 version: 0.1.1
 status: published
+spec: 1
 description: Privately acquiring movies over usenet - Radarr automating grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the movies library the server reads.
 ---
 

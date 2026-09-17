@@ -3,6 +3,7 @@
 name: fetch-books-over-vpn
 version: 0.2.1
 status: published
+spec: 1
 description: Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.
 ---
 

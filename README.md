@@ -65,12 +65,17 @@ package directory:
 ```
 <schematic-name>/
 ├── SCHEMATIC.md          # the spec: requirements → acceptance (always)
-├── SCHEMATIC.md.schema   # format companion, for LLMs new to the format
 ├── modules/              # one contract doc per separable component
 ├── scripts/              # reference implementations (setup, verification)
 ├── skeleton/             # starter files to copy verbatim, then fill
 └── templates/            # output structures the capability produces
 ```
+
+The `SCHEMATIC.md` format's own companion is not part of a package: it is
+canonical at [`schemas/spec-1/SCHEMATIC.md.schema`](schemas/spec-1/SCHEMATIC.md.schema),
+keyed by the `spec:` field every spec declares in its frontmatter — one copy for
+the whole catalog, and `scripts/validate-catalog.sh` fails any spec that names a
+revision the catalog has no companion for.
 
 Inside `SCHEMATIC.md`, sections appear in a fixed order:
 
@@ -79,7 +84,10 @@ Inside `SCHEMATIC.md`, sections appear in a fixed order:
 name: my-schematic
 version: 0.1.0
 status: draft
+spec: 1
 description: One-line summary copied to the marketplace
+created: 2026-09-17
+updated: 2026-09-17
 ---
 
 # Schematic: <Capability>
@@ -94,10 +102,16 @@ description: One-line summary copied to the marketplace
 ## Removal                → stated, safe uninstall procedure
 ```
 
-Uncommon file formats ship with a `.schema` companion that documents the
-format — an `agent.rego` ships with an `agent.rego.schema`, so an implementer
-with zero prior knowledge of Rego can still work with the file. The
-convention: every `<name>.<ext>` gets a `<name>.<ext>.schema` alongside it.
+Two kinds of `.schema` file exist, and the split matters:
+
+- **The container format** — `SCHEMATIC.md` itself — has a single canonical
+  companion, [`schemas/spec-1/SCHEMATIC.md.schema`](schemas/spec-1/SCHEMATIC.md.schema),
+  keyed by the `spec:` field in a spec's frontmatter (`spec: 1` selects that
+  revision). It is not copied into packages: one document, one place to fix it.
+- **Artifact schemas** describe content that is genuinely per-package: an
+  `agent.rego` ships with an `agent.rego.schema` alongside it, so an implementer
+  with zero prior knowledge of Rego can still work with the file. The
+  convention: every `<name>.<ext>` gets a `<name>.<ext>.schema` next to it.
 
 The **ten binding principles** — each an acceptance criterion, not a style
 preference:

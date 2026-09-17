@@ -3,6 +3,7 @@
 name: fetch-music-over-usenet
 version: 0.2.1
 status: published
+spec: 1
 description: Privately acquiring music over usenet - Lidarr automating artist and album grabs through the indexer-manager and downloader the movie/series stack already runs. Shares the downloading infrastructure instead of duplicating it; imports in place into the music library the server reads.
 ---
 

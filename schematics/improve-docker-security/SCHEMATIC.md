@@ -3,6 +3,7 @@
 name: improve-docker-security
 version: 0.1.1
 status: published
+spec: 1
 description: A composition schematic - hardens a Docker host's three weakest points by wiring together three sibling schematics: restrict raw Docker API access behind a deny-by-default proxy, policy-police what the daemon itself may do through OPA authorization, and encrypt every container secret at rest with per-service keys. No images of its own; the glue is the threat model, the deployment order, and the cross-verification between the three.
 ---
 
