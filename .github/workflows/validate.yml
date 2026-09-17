@@ -20,4 +20,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate catalog, specs, and dependency pins
+        env:
+          # The updated-bump rule compares a pull request against its base
+          # branch. A push to main has no base branch, and github.base_ref is
+          # empty there, so the rule skips itself.
+          BASE_REF: ${{ github.base_ref }}
         run: bash scripts/validate-catalog.sh
