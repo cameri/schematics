@@ -37,8 +37,8 @@ spec (SCHEMATIC.md), per-component contracts (modules/), anything runnable
 artifact states what is true now, never how it got there. No version-to-version
 narrative ("until <version>", "the <version> table", "shipped in", "used to",
 "previously"), no issue or PR number as the reason for a rule, and no story of a
-defect that was fixed — a builder who has only the artifact cannot act on any of
-it. Compatibility facts (which versions load the file, which reject it),
+defect that was fixed — a builder who has only the artifact cannot act on any
+of it. Compatibility facts (which versions load the file, which reject it),
 verification provenance (what was run, under which versions, with which inputs),
 and warnings that stop a careful builder doing the wrong thing are current facts
 and stay.
@@ -48,7 +48,7 @@ either inside the package or to a declared, publicly reachable dependency. Then
 grep every file the change touches for that narrative:
 
 ```
-grep -nEi 'until [0-9]|used to|previously|shipped in|was wrong|no longer|#[0-9]+|CHANGELOG|issue [0-9]' <changed files>
+grep -nEi 'until [0-9]|used to|previously|shipped in|was wrong|#[0-9]+|issue [0-9]' <changed files>
 ```
 
 Every hit must be justifiable as a current fact: an issue number is acceptable

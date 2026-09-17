@@ -63,8 +63,8 @@ The most commonly violated ones:
 - **Self-describing files:** uncommon file types ship with their own
   `.schema` companion (see the spec section of the README).
 - **A build spec, not a changelog:** the artifact states what is true now.
-  No version-to-version narrative ("until 0.5.0", "the 0.4.0 table", "used
-  to", "previously"), no issue or PR number used as the reason for a rule,
+  No version-to-version narrative ("until <version>", "the <version> table",
+  "used to", "previously"), no issue or PR number used as the reason for a rule,
   and no story of a defect that was fixed — the pull request, the issue, and
   `CHANGELOG.md` carry that history. Compatibility facts (which versions
   load the file, which reject it), verification provenance (what was run,
