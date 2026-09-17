@@ -14,7 +14,7 @@
 ---
 name: <kebab-case-name>       # REQUIRED: Unique schematic identifier
 version: 0.1.0                # REQUIRED: Semantic version
-status: draft                 # REQUIRED: draft | stable | superseded
+status: draft                 # REQUIRED: draft | published | stable | superseded
 spec: 1                       # REQUIRED: Blueprint format version (always 1)
 description: "One-line..."    # REQUIRED: Copied to marketplace.json
 created: 2026-09-09           # REQUIRED: ISO date

@@ -84,7 +84,10 @@ Inside `SCHEMATIC.md`, sections appear in a fixed order:
 name: my-schematic
 version: 0.1.0
 status: draft
+spec: 1
 description: One-line summary copied to the marketplace
+created: 2026-09-17
+updated: 2026-09-17
 ---
 
 # Schematic: <Capability>

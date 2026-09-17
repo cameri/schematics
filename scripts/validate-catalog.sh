@@ -67,8 +67,10 @@ specs = sorted(glob.glob('schematics/*/SCHEMATIC.md'))
 # A spec's `spec:` frontmatter field selects its format companion, so it must
 # be present and the companion must exist. The catalog resolves the companion
 # by this field; without it, a reader cannot tell which revision a spec claims.
+# An inline YAML comment after the value is allowed: the template and the
+# companion both write one.
 FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*$', re.S | re.M)
-SPEC_REVISION = re.compile(r'^spec:\s*(\S+)\s*$', re.M)
+SPEC_REVISION = re.compile(r'^spec:\s*([^\s#]+)\s*(?:#.*)?$', re.M)
 for spec in specs:
     fm = FRONTMATTER.search(open(spec, encoding='utf-8').read())
     declared = SPEC_REVISION.search(fm.group(1)) if fm else None

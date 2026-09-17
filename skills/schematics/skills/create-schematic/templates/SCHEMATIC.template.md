@@ -1,7 +1,7 @@
 ---
 name: <schematic-name>
 version: 0.1.0
-status: draft          # draft | stable | superseded
+status: draft          # draft | published | stable | superseded
 spec: 1                # schematic format version (this template's shape)
 created: <YYYY-MM-DD>
 updated: <YYYY-MM-DD>
