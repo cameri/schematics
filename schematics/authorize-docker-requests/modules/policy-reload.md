@@ -112,7 +112,11 @@ code decide the whole procedure:
    actually reads, derived from its `-policy-file` argument and the mount that
    carries it. Compare that with P-7 before deploying: a policy written to a
    directory the plugin does not mount is installed perfectly and read by
-   nobody.
+   nobody. Prefer this over any documented path, because the mount is a path as
+   the *host* sees it: on a snap install the plugin mounts
+   `/var/snap/docker/current/etc/docker` at `/opa`, so the directory P-6 and P-7
+   name as `/etc/docker/authz` lives under the snap root there, and the plugin's
+   own report is the thing that resolves it.
 1. `sha256sum P-7/agent.rego`, then read the plugin's decision log for the next
    request and compare with its `config_hash` — the plugin logs the hash of the
    bytes it actually evaluated, so this is the difference between "the file on

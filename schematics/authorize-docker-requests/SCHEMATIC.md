@@ -220,6 +220,19 @@ deployment that does not accept them is deploying something else.
   on its own yields no root at all, so its failure direction is a denied create
   rather than a widened boundary — the identity token is the one whose leftover
   opens everything (R-13).
+- **A policy that grants neither `exec` nor `attach` changes what a client
+  command can do, and the failure reads as a broken tool rather than as a
+  decision.** Measured against a hardened daemon as the sandbox client:
+  `docker run` cannot complete — its create is granted and the attach that
+  follows is refused — so the working forms are `docker create` + `docker start`,
+  or `docker compose up -d`. A build must set `DOCKER_BUILDKIT=0`: BuildKit's
+  first request is `POST /grpc`, which is denied and stays denied (the classic
+  builder needs no grant the policy should not give), and its second is a builder
+  container that the project-name rules refuse. And anything that administers or
+  inspects a container through `docker exec` — cross-container tooling,
+  in-container diagnostics — stops working. Every one of those denials carries
+  the plugin's message (`authorization denied by plugin <P-14>`), so the state is
+  legible once it is clear that it is the policy answering, not a fault.
 - **A malformed or placeholder-bearing policy is not a security hole but an
   outage or an open door, depending on how it fails**: unresolved placeholders
   make every request allowed (R-13), while a policy that does not compile leaves
@@ -473,7 +486,7 @@ deployment that does not accept them is deploying something else.
 | P-10 | OPA_PLUGIN_IMAGE        | string | ghcr.io/open-policy-agent/opa-docker-authz:v0.10 | The image tag must carry an OPA engine that runs Rego v1: `v0.10` embeds **OPA v1.3.0** and `openpolicyagent/opa-docker-authz-v2:0.9` embeds **OPA v0.60.0** (measured from each release's own `go.mod`, and this package's policy was evaluated under both); `v0.8` (OPA v0.30) rejects `import rego.v1` | Which plugin image is installed; it decides the policy language version (see `skeleton/agent.rego.schema`) |
 | P-11 | ~~BUILDKIT_PREFIX~~ | string | ~~/buildx_buildkit_~~ | **Superseded 2026-09-17 by R-17** — the BuildKit carve-out is removed, so nothing reads this token | Nothing. The row is kept because the leftover-token check still greps for it, so deploying a copy of the pre-R-17 template is caught |
 | P-12 | TESTCONTAINERS_LABEL    | string | org.testcontainers               | N/A — a known testcontainers-go label key, whose value is `true`           | OPA uses this to identify testcontainers containers                 |
-| P-13 | DAEMON_CONFIG_FILE      | path   | /etc/docker/daemon.json          | A snap-installed daemon uses `/var/snap/docker/current/config/daemon.json` instead; discovery: `systemctl show docker --property=FragmentPath,ExecStart` | The file the daemon actually reads. Writing the other path has no effect (see the daemon-config module) |
+| P-13 | DAEMON_CONFIG_FILE      | path   | /etc/docker/daemon.json          | The daemon's own command line: `ps -o args= -C dockerd` carries `--config-file`, which is the one answer that cannot be wrong (`systemctl show <unit> --property=ExecStart` carries the same argument). A snap-installed daemon names `/var/snap/docker/<revision>/config/daemon.json` — a revision directory that a snap refresh replaces — with `/var/snap/docker/current/config/daemon.json` as its stable alias | The file the daemon actually reads. Writing a different file has no effect and produces no error (see the daemon-config module) |
 | P-14 | OPA_PLUGIN_NAME         | string | opa-docker-authz                 | The name shown by `docker plugin ls` after install (the `--alias` value)   | The `authorization-plugins` entry, the reload script's target, and the name in denial messages |
 | P-15 | PROJECT_DIR             | path   | (discovered)                     | The host directory of the compose project — `docker inspect <c> --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'` for a container of that project | The policy's host-path boundary (R-15): a mount source must be under this directory (or be a volume name) for a create to be allowed. Attribution is unchanged — by label for container creates, by name or path segment for network and volume calls — and the directory is no longer consulted for attribution at all |
 | P-16 | EXTRA_BIND_ROOTS        | list   | (empty)                          | The bind sources already in use on this host: `docker ps -q \| xargs docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| sort -u`, then keep the roots this deployment accepts — discovery is a decision, not a lookup | Further roots whose bind sources are accepted (R-15), as comma-separated absolute directories. Each root is a prefix grant and is as narrow as it is written: a directory accepts its whole subtree, and a single file may be named exactly, without granting the directory holding it. Empty — the default — accepts nothing beyond P-15. A `..` segment is refused under every root |
@@ -699,10 +712,14 @@ Steps:
 4. Verify python3: `python3 --version` succeeds.
 5. Verify root access: `whoami` shows `root`, or `sudo -n true` exits 0. Without
    it, stop here.
-6. Discover the **live daemon configuration file (P-13)**:
-   `systemctl show docker --property=FragmentPath,ExecStart`. A unit owned by the
-   snap package means `/var/snap/docker/current/config/daemon.json`; a
-   distribution unit means `/etc/docker/daemon.json`. Confirm the file exists.
+6. Discover the **live daemon configuration file (P-13)** from the daemon's own
+   command line: `ps -o args= -C dockerd` carries `--config-file=<file>`, and
+   that is the file the daemon reads, whatever the install. A snap-installed
+   daemon names a **revision-numbered** directory there
+   (`/var/snap/docker/<revision>/config/daemon.json`, replaced on snap refresh),
+   whose stable alias is `/var/snap/docker/current/config/daemon.json`; a
+   distribution unit means `/etc/docker/daemon.json`. Confirm the recorded file
+   exists and parses.
 7. Discover the certificate directory (P-6), the sandbox config directory (P-8),
    the project name (P-3), the project directory (P-15), and the extra bind roots
    (P-16), using the discovery commands in the Parameters table. P-16 is a
@@ -717,8 +734,8 @@ Verify:
 docker version --format '{{.Server.Version}}' && openssl version && python3 --version && systemctl --version
 ```
 All four commands exit 0, and P-13, P-6, P-8, P-3, P-15, P-16, P-1 are recorded —
-these values are substituted into the policy and the client configuration later, so a
-value that is guessed here becomes a defect there.
+these values are substituted into the policy and the client configuration later,
+so a value that is guessed here becomes a defect there.
 
 ### Phase 2: Create certificate authority and certificates
 Goal: Generate a self-signed CA, a server certificate (with SANs for the Docker
@@ -1138,6 +1155,13 @@ Each test names the requirements it covers. `...` stands for
   build (A-6) must still exit 0.
 
 ## Failure Modes and Rollback
+
+**A second daemon on the same host:** starting a throwaway `dind` container with
+`--privileged --network host` takes `docker0` down, and the network of every
+container already running with it — a working stack losing its network to a
+debugging container. Nothing in this package's policy causes it and nothing in
+this package prevents it, so run such a trial on another host, or without
+`--network host` and without `--privileged`.
 
 **Phase 1 (discovery):** The two traps this phase exists to catch are a
 configuration file the daemon does not read, and a guessed project name or path.

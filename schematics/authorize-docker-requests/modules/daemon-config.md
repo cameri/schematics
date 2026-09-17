@@ -19,26 +19,51 @@ is written, it looks correct, and the daemon never changes behavior.
 | Daemon install | Live configuration file | Notes |
 |----------------|------------------------|-------|
 | Distribution package (`docker-ce`, `docker.io`) | `/etc/docker/daemon.json` | The documented default (`dockerd --config-file`) |
-| Snap (`snap install docker`) | `/var/snap/docker/current/config/daemon.json` | The snap runs its own `dockerd` with its own `--config-file`. `/etc/docker/daemon.json` may exist and is **inert** — the daemon never reads it |
+| Snap (`snap install docker`) | `/var/snap/docker/<revision>/config/daemon.json` | The snap runs its own `dockerd` with its own `--config-file`, pointing at a **revision-numbered** directory that a snap refresh replaces; `/var/snap/docker/current/config/daemon.json` is the symlinked alias and the name to keep in scripts. `/etc/docker/daemon.json` may exist and is **inert** — the daemon never reads it |
 
 Discovery, in this order:
 
-1. Resolve the unit that owns the daemon:
+1. Ask the daemon itself: `ps -o args= -C dockerd` carries
+   `--config-file=<file>`, and that file is the one being read — on every
+   install, including one whose unit was rewritten or whose wrapper moved the
+   file. `systemctl show <unit> --property=ExecStart` carries the same argument.
+2. Resolve the unit that owns the daemon (for the drop-in path below, and to
+   recognize a snap):
    `systemctl show docker --property=FragmentPath,Id,ExecStart`.
    A `FragmentPath` under `/etc/systemd/system/snap.docker.dockerd.service` (or
    an `Id` beginning with `snap.docker`) means the snap layout.
-2. For the snap layout, read the configuration directory from the unit's
-   environment or the snap data path (`/var/snap/docker/current/config/`), and
-   confirm the file exists and parses: `python3 -m json.tool <file>`.
-3. Do not trust the path by inspection alone. The check that the file is live is
+3. For the snap layout the argument names a revision-numbered directory. Write
+   the `current` alias (`/var/snap/docker/current/config/daemon.json`) in
+   scripts, read whichever of the two exists, and expect the revision directory
+   to be replaced on the next `snap refresh` — re-read the argument afterwards
+   rather than reusing a recorded path.
+4. Confirm the file exists and parses: `python3 -m json.tool <file>`.
+5. Do not trust the path by inspection alone. The check that the file is live is
    an **observable effect**: after writing a change and reloading (below), the
    daemon must behave differently — for the plugin entry, the plugin starts
    receiving authorization requests; for the TLS entries, the TCP listener
    appears. A change that produces no observable difference means the file is
    not the one being read; stop and re-discover rather than restarting the
    daemon again.
-4. `dockerd --validate --config-file <file>` parses and validates the file
+6. `dockerd --validate --config-file <file>` parses and validates the file
    statically (it does not apply anything). Run it before every reload.
+
+### The paths around the daemon are snap-layout too
+
+On a snap install the daemon never sees the host's `/etc/docker`, and neither
+does the plugin. The snap declares a **layout** that binds
+`/var/snap/docker/current/etc/docker` over `/etc/docker` *inside the daemon's
+mount namespace*, and the plugin mounts that same host directory at `/opa`. So
+the host-side home of the policy and the certificates is under the snap root on
+such a host, while every path inside the daemon and the plugin is the ordinary
+`/etc/docker` — and a policy written to the host's `/etc/docker/authz` is
+installed perfectly and read by nobody.
+
+Read the mount back from the plugin instead of assuming either path:
+`docker plugin inspect <P-14>` shows the bind, and
+`scripts/reload-opa-policy.sh --discover` resolves the plugin's own
+`-policy-file` argument through it. That is the same rule as for the
+configuration file above, applied to the paths around it.
 
 ## Inputs
 

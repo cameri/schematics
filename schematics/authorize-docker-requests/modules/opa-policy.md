@@ -174,6 +174,14 @@ limitations):
   `P-16` is the default and accepts nothing beyond the project directory; an
   unsubstituted token yields no root, so the failure direction is a denied
   create.
+- **A client that cannot `exec` or `attach` has a smaller vocabulary than the
+  Docker CLI suggests.** `docker run` fails after its create succeeds (the attach
+  is refused), so `docker create` + `docker start` and `docker compose up -d` are
+  the working forms; a build needs `DOCKER_BUILDKIT=0`, because BuildKit's
+  `POST /grpc` is denied and its builder container is refused by the
+  project-name rules; and tooling that reaches a container through `docker exec`
+  stops working by design. Those are decisions, and the client reports them as
+  such (`authorization denied by plugin <P-14>`).
 - **The mount check is only as good as the plugin's filesystem view.** A
   managed-plugin install mounts only the policy directory into the plugin, so
   `Resolved` is empty for project paths and the check falls back to the raw
