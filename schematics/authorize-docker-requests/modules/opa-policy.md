@@ -6,7 +6,7 @@ authorization plugin on every daemon request.
 
 ## Purpose
 
-Implements the authorization rules defined in R-1 through R-18. The policy
+Implements the authorization rules defined in R-1 through R-19. The policy
 distinguishes sandbox clients (by TLS certificate CN or HTTP header) from local
 host users, grants the sandbox read-only access by default, and then selectively
 permits compose project operations, image builds, pulls, and a closed lifecycle
@@ -32,6 +32,11 @@ container, in its project" are different grants:
   `/exec` must not satisfy the create rule.
 - **R-18** — network and volume deletes are scoped by the project as a whole
   path segment, the same way creation is scoped by name.
+- **R-19** — path matching is version-independent. `path` is `PathPlain` with
+  one optional `/v<major>[.<minor>]` prefix removed and no `..` segment; every
+  rule matches that, so the same policy decides the same on a live daemon (which
+  sends `/v1.56/containers/create`) and for a client that omits the version
+  (which sends `/containers/create`).
 
 ## Inputs
 
@@ -44,11 +49,18 @@ before evaluation. Fields the policy uses:
 - `input.AuthMethod` — string. `TLS` when the client authenticated with a
   certificate.
 - `input.Method` — string. HTTP method: `GET`, `HEAD`, `POST`, `DELETE`.
-- `input.PathPlain` — string. Request path without the query string, e.g.
-  `/containers/json`, `/images/create`, `/build`. Grants are matched against it
-  with `==` (R-17).
-- `input.PathArr` — array. `PathPlain` split into path elements. Used to match a
-  resource named in the path as a whole segment rather than as a substring.
+- `input.PathPlain` — string. The **raw request path**: API version prefix
+  included, query string excluded (`u.Path`), e.g. `/v1.56/containers/json`.
+  Nothing strips the version, so the policy derives `path` from it
+  and matches that with `==` (R-17, R-19) — the raw field is read for nothing
+  else.
+- `input.PathArr` — array. `PathPlain` split into path elements, so its second
+  element is the version. Not read by the policy: `path_segments` is the derived
+  path split the same way, which is what matches a resource named in the path as
+  a whole segment rather than as a substring.
+- `input.Query` — object. The parsed query string as a map of arrays. A
+  container create's name arrives here (Docker takes it from the `name` query
+  parameter, not the body); no grant depends on it.
 - `input.Headers` — object. Header names to header values, as plain strings
   (`map[string]string` in Docker's own message type, so a value is never an
   array). The header named by `P-9` with the value `true` is the secondary
@@ -94,8 +106,8 @@ so the plugin release decides the language version:
 
 | Plugin image | Embedded OPA | Result |
 |--------------|--------------|--------|
-| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 71 probe rows decides as specified |
-| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 71 probe rows |
+| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 78 probe rows decides as specified |
+| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 78 probe rows |
 | `openpolicyagent/opa-docker-authz-v2:0.8` | v0.30.0 | does **not** load — `import rego.v1` is rejected |
 
 The embedded versions are read from each release's own `go.mod` at its tag
@@ -115,9 +127,9 @@ A leftover is a silent full-access bug, not a cosmetic one: `is_sandbox` then
 never matches a real client, so the sandbox is classified as a host user and
 every request is allowed. See Phase 6 and its acceptance test.
 
-(`P-11`'s `BUILDKIT_PREFIX` token is retired — R-17 removed the BuildKit
-carve-out — but the leftover check still greps for it, so deploying a copy of
-the pre-R-17 template is caught rather than silently accepted.)
+(`P-11`'s `BUILDKIT_PREFIX` token is not read by any rule, but the leftover
+check still greps for it, so a copy that carries the token is rejected rather
+than silently deployed.)
 
 ## Limitations
 
@@ -138,6 +150,12 @@ limitations):
   of those has a form that is allowed (no `DriverOpts`, an explicit network, a
   name); a deployment that needs the refused form must extend the policy
   deliberately, and the probe table must grow a row with it.
+- **The table is not the daemon.** A probe row decides about the input it
+  carries; if that input is not the plugin's, the table agrees with a fiction.
+  The plugin always sends the API version prefix in `PathPlain`, so a row fed a
+  version-less path exercises a request that never arrives — run rows with the
+  plugin's own values (`main.go`'s `makeInput`), and treat a live test as what
+  proves those values are the plugin's.
 - **Host port publishing is not part of the gate.** A project container may
   publish a host port (`ports:`), which does not read the host filesystem but
   can occupy a free port and answer for it. Closing that is the daemon
@@ -160,8 +178,7 @@ limitations):
 ## Dependencies
 
 - D-1, D-3, D-4 (from SCHEMATIC.md)
-- Parameters P-3, P-4, P-9, P-12, P-15 (P-11 is retired with the BuildKit
-  carve-out, R-17)
+- Parameters P-3, P-4, P-9, P-12, P-15 (P-11 is not read by this policy)
 
 ## Failure Behavior
 

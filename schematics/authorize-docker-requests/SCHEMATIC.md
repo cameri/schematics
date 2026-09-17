@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: authorize-docker-requests
-version: 0.4.0
+version: 0.5.0
 status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
@@ -40,7 +40,6 @@ updated: 2026-09-17
 > table in which 30 of its 71 rows decided wrongly before the change and every
 > row decides as specified after it, on the three OPA engines the package names
 > (see `skeleton/agent.rego.schema`).
-
 Grants a sandbox container (isolated agent, CI runner, or untrusted workload)
 restricted TCP access to the host Docker daemon, policed by Open Policy Agent.
 After implementing this schematic, the host's Docker daemon listens on a TLS
@@ -139,7 +138,8 @@ Limitations).
   host directory later bind-mounted into the container.
 - The integration step that makes the policy effective for the sandbox: removing
   its Docker socket mount (R-14).
-- Policy reload procedure (bounce the plugin, not the daemon).
+- Policy reload procedure (replace the policy file; nothing is bounced — see
+the policy-reload module).
 - Verification commands for TLS connectivity and OPA enforcement.
 
 **Out of scope / non-goals:**
@@ -209,11 +209,22 @@ deployment that does not accept them is deploying something else.
   outage or an open door, depending on how it fails**: unresolved placeholders
   make every request allowed (R-13), while a policy that does not compile leaves
   the daemon failing closed.
-- **Verification is a build-time activity.** The policy is only proven by
-  running engines and probes as described in `skeleton/agent.rego.schema`; this
-  package's own pass ran its deny-probe table — 71 rows, decision-checked on
-  three OPA engines — under the engines the two installable plugin releases
-  embed (OPA v0.60.0 and v1.3.0) plus a newer one (v1.7.1).
+- **A probe table can only be as real as its inputs.** The policy is proven by
+  running engines and probes as described in `skeleton/agent.rego.schema` — 78
+  rows, decision-checked on three OPA engines (OPA v0.60.0 and v1.3.0, the two
+  the installable plugin releases embed, plus v1.7.1) — but a row decides only
+  about the input it carries. A row fed a version-less `PathPlain` proves
+  nothing: the plugin always sends the version, so the table agrees with itself
+  while the rules it covers decide nothing. Only a **live** run (A-11, A-16)
+  can find a mismatch between the table's model of the input and the plugin's.
+- **A project name that is also an API path segment widens the segment match.**
+  `P-3` is matched as a whole path segment (R-12, R-18). A deployment whose
+  project is called `containers` — the host this package was verified against —
+  therefore also satisfies the match on any path that contains the API's own
+  `containers` segment, so a foreign network or volume literally named
+  `containers` could be deleted. Container paths are unaffected in practice
+  (container delete and lifecycle calls are unscoped anyway). Pick a project
+  name that is not an API segment if that matters.
 
 **Preservation List** *(reverse-engineered; corrected 2026-09-16)*:
 
@@ -305,6 +316,13 @@ deployment that does not accept them is deploying something else.
   start, stop, restart, kill, pause, unpause, wait, update.
 - **R-9**: The sandbox container MUST NOT require Docker configuration changes
   when the OPA policy is updated — policy reload is a host-side operation.
+  "Reload" is precisely stated: the plugin re-reads the policy **file on every
+  request** (`os.ReadFile(p.policyFile)` inside `evaluatePolicyFile`), so a
+  policy change is a file replacement and nothing else — no plugin bounce
+  (disabling a plugin the daemon references makes dockerd **exit**; measured,
+  Q-4), no daemon restart, and no sandbox change. The replacement must be
+  atomic, because a *missing* policy file is the plugin's one fail-open path.
+  See the policy-reload module.
 - **R-10**: The host's unix socket (`/var/run/docker.sock`) MUST remain
   unrestricted for local host users.
 - **R-11**: The OPA policy MUST allow testcontainers-go containers — those
@@ -373,6 +391,18 @@ deployment that does not accept them is deploying something else.
   `P-3_<suffix>` as a whole path segment) MUST be allowed, and a delete of any
   other network or volume — a foreign name, or an opaque id — MUST be denied.
   Container deletion stays unscoped (R-5's revision; see Limitations).
+- **R-19**: The OPA policy MUST match request paths independently of the API
+  version prefix, and MUST NOT depend on a field value the plugin does not
+  send. `PathPlain` is the raw request path **including** `/v<major>.<minor>`
+  (`"PathPlain": u.Path` in the plugin's `main.go`; nothing strips it), so the
+  policy MUST either derive a version-free path from it or match in a way that
+  tolerates the prefix. The derivation MUST leave a request without a prefix
+  unchanged (a client may omit the version), strip at most one prefix, leave
+  `/_ping` and any other unversioned path alone, and yield no match for a path
+  carrying a `..` segment — the daemon cleans the path before routing while the
+  plugin authorizes the raw one. The documented input shape, and every probe
+  row, MUST use the values the plugin actually sends; a version-less probe
+  input proves nothing about a live daemon.
 
 ## Design Principles Binding the Implementation
 
@@ -447,8 +477,9 @@ deployment that does not accept them is deploying something else.
   sandbox container's bind-mounted config directory, plus the socket-mount
   precondition.
 - **Policy Reload** (`modules/policy-reload.md`) — host-side procedure to apply
-  a Rego policy change by bouncing the OPA plugin (no daemon restart), with the
-  pre-flight checks that keep a bad policy from being deployed.
+  a Rego policy change: an atomic file replacement (the plugin re-reads the
+  policy per request), with the pre-flight checks that keep a bad policy from
+  being deployed, and why a plugin bounce is fatal rather than cheap.
 
 ## Interfaces and Contracts
 
@@ -474,8 +505,21 @@ for the `AuthZPlugin.AuthZReq` / `AuthZPlugin.AuthZRes` message schema.
 
 ### Rego input schema (contract consumed by the policy)
 
-The plugin passes the Docker API request to the Rego evaluation in this shape
-(documented by the plugin, with its additions marked):
+The plugin passes the Docker API request to the Rego evaluation in this shape.
+The values are the plugin's own, quoted from `main.go`'s `makeInput` — and
+the two path fields are easy to misread: `PathPlain` keeps the API version
+prefix, and `PathArr` is split from that same versioned path:
+
+```go
+input := map[string]interface{}{
+        "Headers":    r.RequestHeaders,
+        "Path":       r.RequestURI,               // raw URI: version prefix + query
+        "PathPlain":  u.Path,                     // raw path: version prefix, no query
+        "PathArr":    strings.Split(u.Path, "/"),
+        "Query":      u.Query(),
+        ...
+}
+```
 
 ```json
 {
@@ -483,8 +527,9 @@ The plugin passes the Docker API request to the Rego evaluation in this shape
   "AuthMethod": "TLS",
   "Method": "POST",
   "Path": "/v1.47/containers/create?name=backend-services-web-1",
-  "PathPlain": "/containers/create",
+  "PathPlain": "/v1.47/containers/create",
   "PathArr": ["", "v1.47", "containers", "create"],
+  "Query": { "name": ["backend-services-web-1"] },
   "Headers": { "X-Sandbox-Agent": "true" },
   "Body": {
     "Labels": { "com.docker.compose.project": "backend-services" },
@@ -499,20 +544,51 @@ The plugin passes the Docker API request to the Rego evaluation in this shape
 }
 ```
 
+**`PathPlain` carries the API version prefix.** The example above shows it
+(`/v1.47/containers/create`), and a real plugin sends exactly that: nothing in
+`main.go` strips the prefix, and `-skip-ping` only bypasses `HEAD /_ping`. A
+policy that matches the raw field by equality therefore decides nothing on a
+live daemon, and it fails **closed**: the grants disappear while every denial
+holds, so the sandbox cannot create, build, pull or delete anything for its own
+project — a broken policy that looks like a working one.
+
+The policy derives the version-free path once (R-19) and every rule matches
+that:
+
+```rego
+path := p if {
+        p := regex.replace(object.get(input, "PathPlain", ""), "^/v[0-9]+(\\.[0-9]+)?", "")
+        not traversal(p)
+}
+
+path_segments := split(path, "/")
+```
+
+The strip is anchored and single, so: `/v1.56/containers/create` →
+`/containers/create`; `/containers/create` (a client that sends no version) →
+unchanged; `/v1/containers/create` → `/containers/create`; `/_ping` →
+unchanged; `/v1.56/v1.56/containers/create` → `/v1.56/containers/create`, which
+is no grant. A path with a `..` segment yields no `path` at all, so no rule can
+match it.
+
 A create request carries no container name in its body: Docker takes it from the
-`name` query parameter, which is why the policy reads the name of a container
-create from the path and the name of a network or volume create from
-`Body.Name` (those two endpoints take it in the body). The example above is the
-compose-labelled create, the one case where a container create is granted.
+`name` query parameter (which lands in `input.Query`), the name of a network or
+volume create from `Body.Name`. The example above is the compose-labelled
+create, the one case where a container create is granted.
 
 Fields used by the policy:
 - `input.User` — the TLS client certificate's subject common name; empty for
   unix-socket clients and for TCP clients with no certificate
 - `input.Method` — HTTP method (`GET`, `HEAD`, `POST`, `DELETE`)
-- `input.PathPlain` — request path without the API version prefix or query;
-  the policy matches grants against it by **equality** (R-17)
-- `input.PathArr` — the same path split into elements (a plugin addition); used
-  for whole-segment matching of names in the path
+- `input.PathPlain` — the raw request path: **with** the API version prefix,
+  without the query string (`u.Path`). Read only to derive `path`; no rule
+  matches the raw field (R-19)
+- `input.PathArr` — that path split on `/` (`["", "v1.47", "containers",
+  "create"]`). Not read by the policy: the derived `path_segments` is used for
+  whole-segment matching, so the version element cannot reach a match
+- `input.Query` — the parsed query string, as a map of arrays (`{"name":
+  ["backend-services-web-1"]}`). Where a container create's name arrives; no
+  grant depends on it
 - `input.Headers` — request headers; the `P-9` header is the secondary identity
   signal, and header values are strings (`map[string]string`), never arrays
 - `input.Body` — the decoded request body, or `null` for requests without one
@@ -831,16 +907,32 @@ Steps:
    ```
    Output must be empty. If it is not, stop and fix the substitution.
 3. Validate the policy against an engine **no newer than the plugin's** (P-10):
-   `opa check /tmp/agent.rego`. Without an `opa` binary, deploy and then verify
-   with the Phase 8 denial test instead.
-4. Install it where the plugin's `-policy-file` argument points:
-   `install -D -m 644 /tmp/agent.rego P-7/agent.rego`
-5. Reload so the plugin compiles the new file:
+   `opa check /tmp/agent.rego`, or the engine's own image when no binary is
+   installed —
+   `docker run --rm -v "$(pwd):/w:ro" -w /w openpolicyagent/opa:1.3.0 check agent.rego`
+   (1.3.0 is what `v0.10` embeds; never check with a newer engine than the
+   plugin's). The deploy script does this step itself.
+4. Deploy it where the plugin's `-policy-file` argument points:
    `scripts/reload-opa-policy.sh /tmp/agent.rego`
-   The script runs the same leftover check, keeps the previous policy for
-   rollback, and bounces the plugin. **While the plugin is disabled every API
-   call is denied**, host users included — the window is short, but it is a
-   denial window, not an open one.
+   That path is P-7, and it does not have to be guessed — the installed plugin
+   reports it, since `docker plugin inspect` shows both the policy argument and
+   the mount carrying it (`-policy-file /opa/authz/agent.rego` with
+   `/etc/docker -> /opa` means `/etc/docker/authz/agent.rego`). The script finds
+   it the same way when `POLICY_DST`/`POLICY_DIR` are unset, and
+   `scripts/reload-opa-policy.sh --discover` prints it without changing
+   anything.
+   There is nothing to bounce: the plugin re-reads the policy **file on every
+   request**, so the change is live on the next API call. The script runs the
+   same leftover check, parses the policy under the plugin's engine, keeps the
+   previous policy at `P-7/agent.rego.previous` for rollback, and installs the
+   new file by writing a temporary file and renaming it over the target. Both
+   halves are load-bearing:
+   - **Never `docker plugin disable` / `rm` / `upgrade` a plugin the running
+     daemon references**: dockerd exits with `Error validating authorization
+     plugin ... not found` (measured; Q-4). Nothing in a policy update needs it.
+   - **Never copy or truncate the live file**: while it is absent the plugin
+     **fails open** (`OPA policy file ... does not exist, failing open and
+     allowing request`). The rename is what makes the replacement atomic.
 
 Verify:
 ```
@@ -949,13 +1041,20 @@ Each test names the requirements it covers. `...` stands for
 - **A-7** (covers R-8): a lifecycle action from the allowlist is allowed —
   `docker ... stop <container of the project>` exits 0, and
   `docker ... exec <container> ls` is denied (R-6).
-- **A-8** (covers R-9): a policy update is a plugin bounce, not a daemon restart
-  — change the policy, run `scripts/reload-opa-policy.sh`, then re-run A-3 and
-  A-4: the read still works, the denial still denies, and the daemon's start time
-  is unchanged (`systemctl show <unit> --property=ExecMainStartTimestamp`).
+- **A-8** (covers R-9, R-19): a policy update is a file deployment — not a
+  plugin bounce, not a daemon restart. Change the policy, run
+  `scripts/reload-opa-policy.sh`, then re-run A-3 and A-4: the read still
+  works, the denial still denies, the daemon's start time is unchanged
+  (`systemctl show <unit> --property=ExecMainStartTimestamp`), and
+  `docker plugin ls` shows the plugin's enabled state unchanged. Confirm which
+  policy is live from the plugin's own decision log: it logs `config_hash`, the
+  sha256 of the bytes it read, which must equal `sha256sum P-7/agent.rego` after
+  the next API call. Reversing the change is `scripts/reload-opa-policy.sh
+  --rollback`, and it must restore the previous decisions without touching the
+  plugin or the daemon either.
 - **A-9** (covers R-13): the deployed policy has no leftover placeholders — the
   `awk` check from Phase 6, step 2, over `P-7/agent.rego`, prints nothing.
-  Run it *before* the reload: a file that fails this check turns A-4 into a
+  Run it *before* deploying: a file that fails this check turns A-4 into a
   false pass.
 - **A-10** (covers R-3): the plugin was installed with its policy argument —
   `docker plugin inspect <P-14>` contains `policy-file` (or `config-file`), and
@@ -977,14 +1076,23 @@ Each test names the requirements it covers. `...` stands for
   expects — `openssl x509 -in P-8/cert.pem -noout -subject` shows `CN=P-4`, its
   `extendedKeyUsage` is client authentication, and the server certificate's SANs
   cover P-1.
-- **A-15** (covers R-5, R-6, R-7, R-8, R-11, R-12, R-17): the policy's decision
-  table — the probes in `skeleton/agent.rego.schema`, run with the plugin
-  image's own engine (P-10) against the deployed file, produce the expected
-  allow/deny for **every** row, including the exact-path rows (a smuggled body
-  on `/containers/<id>/attach` and `/exec` must be denied), the `POST /session`
-  grant, the testcontainers label, and both directions of the project-scoped
-  create checks. This is the cheapest test to run and the only one that
-  exercises policy branches a live host cannot easily reach.
+- **A-15** (covers R-5, R-6, R-7, R-8, R-11, R-12, R-17, R-19): the policy's
+  decision table — the probes in `skeleton/agent.rego.schema`, run with the
+  plugin image's own engine (P-10) against the deployed file, produce the
+  expected allow/deny for **every** row, including the exact-path rows (a
+  smuggled body on `/containers/<id>/attach` and `/exec` must be denied), the
+  `POST /session` grant, the testcontainers label, and both directions of the
+  project-scoped create checks.
+  **The rows must be fed the plugin's real input shape** (`Path`, `PathPlain`
+  and `PathArr` carrying the version prefix, `Query` parsed) — a table cannot
+  catch a disagreement between its own model of the input and the plugin's
+  (`main.go`'s `makeInput`) unless it uses the plugin's values. Run the table
+  **twice** where the shape is in question: once with a version prefix and once
+  without, and require identical decisions.
+  **This test alone is not enough**: with a wrong input shape the whole table
+  passes while every create on a live host is denied. The live tests (A-11,
+  A-16) are the ones that catch that class; run at least one of them against a
+  real daemon before trusting a policy change.
 - **A-16** (covers R-15, R-16): the host-access gate holds for a project-labelled
   client — from the sandbox, each of these is denied by the plugin, and the
   denial is not a mistake of syntax but the R-15/R-16 decision:
@@ -1147,7 +1255,10 @@ Decisions:
   - **Reload semantics were wrong in one direction.** The package said a policy
     reload was unblocked; in fact a plugin bounce is a *denial* window (the
     daemon fails closed while the plugin is down), and a plugin installed
-    without `opa-args` fails *open*. Both are now stated where they apply, and
+    without `opa-args` fails *open*. **Corrected 2026-09-17**: the bounce is
+    worse than a denial window — with the plugin referenced by a running daemon
+    it is fatal to the daemon, and it was never needed in the first place
+    (Q-4, below). Both are now stated where they apply, and
     the install step passes the policy argument explicitly.
   - **Two failure-behavior claims were corrected**: the daemon fails closed on a
     plugin error (documented), and the plugin allows everything when it has no
@@ -1248,6 +1359,46 @@ Decisions:
     deletion of the per-package `SCHEMATIC.md.schema` is in the base rather
     than a conflict here.
 
+- **Path matching derives the version-free path inside the policy** (R-19):
+  `path` is `PathPlain` with one optional `/v<major>[.<minor>]` prefix removed
+  and with no `..` segment, and `path_segments` is `split(path, "/")`. Deriving
+  was chosen over rebuilding the path from `PathArr` because rebuilding
+  mishandles a path that carries no version (`/_ping` would lose a real segment)
+  and needs the same guard anyway, while one anchored regex leaves an
+  unversioned path untouched — a client that omits the version keeps working.
+  The `..` guard exists because the daemon cleans the path before routing while
+  the plugin authorizes the raw one, so no rule may be reachable through a
+  traversal. The property is asserted by running the probe table with a version
+  prefix, without one, and with a major-only prefix: all three give identical
+  decisions.
+- **A policy reload replaces the file and never touches the plugin (Q-4).**
+  Disabling, removing or upgrading a plugin that a running daemon references is
+  fatal: `level=fatal msg="Error validating authorization plugin" error="plugin
+  \"<P-14>\" not found"`, and dockerd exits (measured on Docker 29.6.1, snap
+  install). `docker plugin enable` cannot recover that state, because it needs a
+  running daemon — remove the reference from the live configuration file (P-13)
+  first. No bounce is needed in any case: `evaluatePolicyFile` reads the policy
+  **file on every request**, so the deployed file *is* the live policy. Replace
+  it by installing to a temporary name and renaming over the target, because a
+  *missing* policy file is the plugin's one fail-open path (`OPA policy file %s
+  does not exist, failing open and allowing request`), which copying or
+  truncating the live path can produce.
+  `scripts/reload-opa-policy.sh` does this and verifies the result through the
+  decision log's `config_hash`.
+- **A snap-installed daemon does bind-mount the policy directory (Q-5).** The
+  host directory (P-6) appears inside the managed plugin at `/opa`, so the
+  policy is a host file the plugin reads. The plugin's own record names both
+  halves — `docker plugin inspect <P-14>` shows the `-policy-file` argument and
+  the mount that carries it — which is how the deploy script derives the host
+  path (P-7) instead of assuming it.
+- **The registered plugin name is the install name, tag included** (P-14).
+  Installed without `--alias` it registers as `opa-docker-authz:latest`, which
+  is the name the daemon's `authorization-plugins` entry must carry and the name
+  that appears in denial messages.
+- **The probe table's evidence is decision-level.** A live end-to-end pass
+  (A-11, A-16) against a real daemon is what proves the table's model of the
+  input matches the plugin's.
+
 Open questions:
 
 - **Q-1** *(answered 2026-09-16; re-verified 2026-09-17)*:
@@ -1276,14 +1427,13 @@ Open questions:
   `inferred:` and untested here. Decide by testing on a maintenance window with
   a restart, not by assumption — until then, Phase 3's ordering (install first,
   reference second) is the safe procedure.
-- **Q-5** *(new 2026-09-17, raised in review)*: on a snap-installed daemon,
-  whether the confined daemon can bind-mount host `P-6` into the managed plugin
-  at `/opa` at all. The plugin path (`/opa/authz/agent.rego`) and the install
-  argument are documented and consistent on the distribution package; the snap's
-  confinement is `inferred:` and untested here, and if it cannot, the policy
-  file must live somewhere the daemon can already see. Decide by installing the
-  plugin on a snap host and reading `docker plugin inspect <P-14>` — Phase 3
-  succeeds either way; it is the policy load that would fail.
+- **Q-5** *(answered 2026-09-17)*: **yes** — a snap-installed daemon does
+  bind-mount host `P-6` into the managed plugin at `/opa`, verified by the
+  operator on the snap host this package was tested against (the daemon's
+  `/etc/docker` is a snap layout pointing at `$SNAP_DATA/etc/docker`, and the
+  plugin's mount source resolves there). The install argument and the policy
+  path (`/opa/authz/agent.rego`) are therefore correct as documented, and no
+  second location for the policy file is needed.
 
 
 

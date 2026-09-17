@@ -16,9 +16,9 @@ package docker.authz
 #   TESTCONTAINERS_LABEL_KEY   → P-12 label key, e.g. "org.testcontainers"
 #   TESTCONTAINERS_LABEL_VALUE → P-12 label value, e.g. "true"
 #
-# (P-11 BUILDKIT_PREFIX is superseded: the BuildKit carve-out is gone, see
-# SCHEMATIC.md's Decisions. The leftover-token check in the package still greps
-# for the token, so a template carrying the old carve-out is still caught.)
+# (P-11 BUILDKIT_PREFIX is not read by any rule — see SCHEMATIC.md's Decisions.
+# The leftover-token check in the package still greps for it, so a copy carrying
+# the token is caught rather than deployed.)
 #
 # Language and engine: Rego v1 syntax, evaluated by the OPA engine embedded in
 # the plugin. The plugin release determines the engine (see P-10), measured from
@@ -35,6 +35,11 @@ package docker.authz
 # request in that project's name that would reach the host (R-15, R-16). Every
 # create path passes `safe_container_config`; see the probe table in
 # agent.rego.schema for the requests this is asserted against.
+#
+# Paths are matched against `path`, not against the plugin's raw PathPlain
+# field: the plugin sets PathPlain to the *raw request path*, API version
+# prefix and all ("PathPlain": u.Path, main.go), so a policy keyed on the raw
+# field decides nothing on a live daemon. See the derivation below.
 
 import rego.v1
 
@@ -63,6 +68,38 @@ allow if {
 # ─── Sandbox default ─────────────────────────────────────────────
 default allow_sandbox := false
 
+# ─── Path handling ───────────────────────────────────────────────
+# The plugin builds the input from the raw request URL: `"PathPlain": u.Path`
+# and `"PathArr": strings.Split(u.Path, "/")` (main.go, makeInput). Nothing
+# strips the API version prefix — `-skip-ping` only bypasses `HEAD /_ping` —
+# so on a live daemon PathPlain is `/v1.56/containers/create`, not
+# `/containers/create`, and PathArr is `["", "v1.56", "containers", "create"]`.
+#
+# Every rule below therefore matches `path`: PathPlain with one optional
+# version segment removed. The strip is anchored and single, and a request
+# that carries no version is left alone, so all of these behave as the API
+# says they should:
+#
+#   /v1.56/containers/create  → /containers/create
+#   /containers/create        → /containers/create   (client sends no version)
+#   /v1/containers/create     → /containers/create   (major only)
+#   /_ping                    → /_ping               (nothing to strip)
+#   /v1.56/v1.56/x            → /v1.56/x             (one strip, still no grant)
+#
+# `path_segments` is the same path split on "/", so a resource named in the
+# path is matched as a whole segment and neither the version segment nor a
+# query string can satisfy a match.
+#
+# A path with a `..` segment yields no `path` at all, so no rule can match it:
+# the daemon cleans the path before routing, and the plugin authorizes the raw
+# one, so nothing in this policy should be reachable through a traversal.
+path := p if {
+	p := regex.replace(object.get(input, "PathPlain", ""), "^/v[0-9]+(\\.[0-9]+)?", "")
+	not traversal(p)
+}
+
+path_segments := split(path, "/")
+
 # ─── Read-only operations ────────────────────────────────────────
 allow_sandbox if {
 	is_sandbox
@@ -75,7 +112,7 @@ allow_sandbox if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/build"
+	path == "/build"
 }
 
 # `/session` is the CLI's BuildKit session endpoint: the daemon's built-in
@@ -87,25 +124,26 @@ allow_sandbox if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/session"
+	path == "/session"
 }
 
 # ─── Image pulls ─────────────────────────────────────────────────
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/images/create"
+	path == "/images/create"
 }
 
 # ─── Container create — the project's label and a safe config ────
-# Equality on PathPlain matters twice: the daemon forwards a JSON body to the
-# plugin for *any* endpoint whose content type is JSON, and the attach/exec
-# handlers ignore fields they do not know — so a rule matching a path prefix
-# could be satisfied by POST /containers/<id>/attach with a crafted body.
+# Equality on the version-free path matters twice: the daemon forwards a JSON
+# body to the plugin for *any* endpoint whose content type is JSON, and the
+# attach/exec handlers ignore fields they do not know — so a rule matching a
+# path prefix could be satisfied by POST /containers/<id>/attach with a crafted
+# body.
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/containers/create"
+	path == "/containers/create"
 	project_container
 	safe_container_config
 }
@@ -116,7 +154,7 @@ allow_sandbox if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/containers/create"
+	path == "/containers/create"
 	testcontainers_container
 	safe_container_config
 }
@@ -291,7 +329,7 @@ host_config := object.get(input, ["Body", "HostConfig"], {})
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	startswith(input.PathPlain, "/containers/")
+	startswith(path, "/containers/")
 	lifecycle_action
 }
 
@@ -300,14 +338,14 @@ lifecycle_action if {
 		"start", "stop", "restart", "kill",
 		"pause", "unpause", "wait", "update",
 	}
-	endswith(input.PathPlain, sprintf("/%s", [action]))
+	endswith(path, sprintf("/%s", [action]))
 }
 
 # ─── Container delete (documented limitation, see Limitations) ───
 allow_sandbox if {
 	is_sandbox
 	input.Method == "DELETE"
-	startswith(input.PathPlain, "/containers/")
+	startswith(path, "/containers/")
 }
 
 # ─── Network and volume creation ─────────────────────────────────
@@ -318,14 +356,14 @@ allow_sandbox if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/networks/create"
+	path == "/networks/create"
 	project_named_body
 }
 
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	input.PathPlain == "/volumes/create"
+	path == "/volumes/create"
 	project_named_body
 	safe_volume_create
 }
@@ -358,14 +396,14 @@ volume_driver_ok if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	startswith(input.PathPlain, "/networks/")
+	startswith(path, "/networks/")
 	project_path_resource
 }
 
 allow_sandbox if {
 	is_sandbox
 	input.Method == "POST"
-	startswith(input.PathPlain, "/volumes/")
+	startswith(path, "/volumes/")
 	project_path_resource
 }
 
@@ -377,14 +415,14 @@ allow_sandbox if {
 allow_sandbox if {
 	is_sandbox
 	input.Method == "DELETE"
-	startswith(input.PathPlain, "/networks/")
+	startswith(path, "/networks/")
 	project_path_resource
 }
 
 allow_sandbox if {
 	is_sandbox
 	input.Method == "DELETE"
-	startswith(input.PathPlain, "/volumes/")
+	startswith(path, "/volumes/")
 	project_path_resource
 }
 
@@ -401,16 +439,16 @@ project_named_body if {
 	startswith(input.Body.Name, "PROJECT_NAME_")
 }
 
-# The plugin enriches the input with PathArr (the request path split on "/"),
-# so a resource named in the path is matched as a whole segment rather than as
-# a substring of the path, which also means the query string cannot satisfy it.
+# A resource named in the path is matched as a whole segment of the derived
+# path rather than as a substring of it, which also means neither the version
+# segment nor a query string can satisfy the match.
 project_path_resource if {
-	some segment in input.PathArr
+	some segment in path_segments
 	segment == "PROJECT_NAME"
 }
 
 project_path_resource if {
-	some segment in input.PathArr
+	some segment in path_segments
 	startswith(segment, "PROJECT_NAME_")
 }
 
