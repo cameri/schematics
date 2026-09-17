@@ -276,12 +276,16 @@ def semver_key(value):
                                for p in pre.split('.'))
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)), pre_key)
 
-# ─── Pull requests: `updated` tracks the change ──────────────────
+# ─── Pull requests: the two diff-aware rules ─────────────────────
 # `updated` is defined as the date the spec last changed, and only the diff can
-# enforce that: a spec edited without moving the field drifts silently. The
-# check runs against the pull request's merge base with its base branch
-# (BASE_REF, which the workflow sets for pull requests only), never against a
-# push to main, where no base branch exists.
+# enforce that: a spec edited without moving the field drifts silently. A plugin
+# change needs its version raised for the same reason: the install is keyed by
+# version. Both rules run against the pull request's merge base with its base
+# branch (BASE_REF, which the workflow sets for pull requests only), never
+# against a push to main, where no base branch exists — and both live inside
+# the resolve test below, so that no rule runs on a base ref that did not
+# resolve: a diff-aware check that cannot compute its diff reports that one
+# error and nothing else.
 base_ref = os.environ.get('BASE_REF', '').strip()
 if not base_ref:
     warnings.append('BASE_REF unset: the updated-bump rule applies to pull requests '
@@ -320,41 +324,41 @@ else:
                 errors.append(f"{path}: SCHEMATIC.md changed on {changed_on} but updated "
                               f"is still {old}; set it to the date of this change")
 
-    # ─── Pull requests: a plugin change carries its version ──────
-    # The plugin's install is keyed by version, so a change that ships without
-    # a bump claims a content set it does not have: the installed copies stay
-    # stale and nothing notices until someone compares them by hand. Same base
-    # ref, same pull-request-only condition as the rule above.
-    changed_plugin = [p for p in changed if p.startswith(PLUGIN_DIR)]
-    if changed_plugin:
-        at_base = git('show', f'{merge_base}:{MANIFEST}')
-        before = (manifest_version(at_base.stdout.decode('utf-8', 'replace'))
-                  if at_base.returncode == 0 else None)
-        after = (manifest_version(open(MANIFEST, encoding='utf-8').read())
-                 if os.path.isfile(MANIFEST) else None)
-        before_key, after_key = semver_key(before), semver_key(after)
-        if after is None:
-            errors.append(f"{MANIFEST}: no version to compare, and {len(changed_plugin)} "
-                          f"file(s) under {PLUGIN_DIR} changed")
-        elif before_key is None or after_key is None:
-            errors.append(f"{MANIFEST}: version {after!r} (base {before!r}) is not a "
-                          f"semantic version, so a bump cannot be checked")
-        elif after_key < before_key:
-            errors.append(f"{MANIFEST}: version went backwards, {before} -> {after}; a "
-                          f"plugin change needs a greater version, not a lower one "
-                          f"(this repository has exactly one version manifest, so this "
-                          f"is a single-file comparison)")
-        elif after_key == before_key:
-            errors.append(f"{MANIFEST}: {len(changed_plugin)} file(s) under {PLUGIN_DIR} "
-                          f"changed but the version is still {after} — bump it. If a "
-                          f"parallel pull request already took the next number, bump "
-                          f"again rather than removing this check; and note this "
-                          f"repository has exactly one version manifest, so this is a "
-                          f"single-file comparison")
-        elif changed_plugin == [MANIFEST]:
-            # A version reserved ahead of its content: odd, but harmless.
-            warnings.append(f"{MANIFEST}: version raised {before} -> {after} with no "
-                            f"other file under {PLUGIN_DIR} changed")
+        # ─── Pull requests: a plugin change carries its version ──────
+        # The plugin's install is keyed by version, so a change that ships without
+        # a bump claims a content set it does not have: the installed copies stay
+        # stale and nothing notices until someone compares them by hand. Same base
+        # ref, same pull-request-only condition as the rule above.
+        changed_plugin = [p for p in changed if p.startswith(PLUGIN_DIR)]
+        if changed_plugin:
+            at_base = git('show', f'{merge_base}:{MANIFEST}')
+            before = (manifest_version(at_base.stdout.decode('utf-8', 'replace'))
+                      if at_base.returncode == 0 else None)
+            after = (manifest_version(open(MANIFEST, encoding='utf-8').read())
+                     if os.path.isfile(MANIFEST) else None)
+            before_key, after_key = semver_key(before), semver_key(after)
+            if after is None:
+                errors.append(f"{MANIFEST}: no version to compare, and {len(changed_plugin)} "
+                              f"file(s) under {PLUGIN_DIR} changed")
+            elif before_key is None or after_key is None:
+                errors.append(f"{MANIFEST}: version {after!r} (base {before!r}) is not a "
+                              f"semantic version, so a bump cannot be checked")
+            elif after_key < before_key:
+                errors.append(f"{MANIFEST}: version went backwards, {before} -> {after}; a "
+                              f"plugin change needs a greater version, not a lower one "
+                              f"(this repository has exactly one version manifest, so this "
+                              f"is a single-file comparison)")
+            elif after_key == before_key:
+                errors.append(f"{MANIFEST}: {len(changed_plugin)} file(s) under {PLUGIN_DIR} "
+                              f"changed but the version is still {after} — bump it. If a "
+                              f"parallel pull request already took the next number, bump "
+                              f"again rather than removing this check; and note this "
+                              f"repository has exactly one version manifest, so this is a "
+                              f"single-file comparison")
+            elif changed_plugin == [MANIFEST]:
+                # A version reserved ahead of its content: odd, but harmless.
+                warnings.append(f"{MANIFEST}: version raised {before} -> {after} with no "
+                                f"other file under {PLUGIN_DIR} changed")
 
 pins_found = 0
 pins_verified = 0
