@@ -82,12 +82,29 @@ The plugin enriches the request the daemon passes it (Docker's
 | `input.AuthMethod` | string | `TLS` when the client authenticated with a certificate |
 | `input.Method` | string | HTTP method (`GET`, `HEAD`, `POST`, `DELETE`) |
 | `input.Path` | string | Request path with the API version prefix and query string |
-| `input.PathPlain` | string | Request path without the query string (plugin addition) |
-| `input.PathArr` | array | `PathPlain` split on `/` (plugin addition) |
+| `input.PathPlain` | string | The **raw request path**: API version prefix included, query string excluded (`u.Path`). `/v1.56/containers/create`, not `/containers/create` — nothing strips the version (issue #35), which is why the policy derives `path` from it (R-19) instead of matching the field |
+| `input.PathArr` | array | `PathPlain` split on `/` — `["", "v1.56", "containers", "create"]` (plugin addition). Not read by the policy: `path_segments` is the derived path split the same way, so the version element cannot reach a match |
+| `input.Query` | object | The parsed query string, as a map of arrays (`{"name": ["web-1"]}`). A container create's name arrives here, not in the body; no grant depends on it |
 | `input.Headers` | object | Request headers as a flat `string → string` map — Docker's own message type is `map[string]string`, so a value is a string, never an array |
 | `input.Body` | object | Decoded JSON request body, or `null` for requests without one (a `DELETE` carries none) |
 | `input.Body.HostConfig` | object | The create's host-side configuration — `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`, `UsernsMode`, `Binds`, `Mounts` — and the whole of the R-15 gate |
 | `input.BindMounts` | array | One object per bind mount of a container-create request: `Source`, `ReadOnly`, `Resolved` (plugin addition) |
+
+Every path the policy matches is the derived `path` — `PathPlain` with one
+optional `/v<major>[.<minor>]` prefix removed, and with no `..` segment:
+
+```rego
+path := p if {
+        p := regex.replace(object.get(input, "PathPlain", ""), "^/v[0-9]+(\\.[0-9]+)?", "")
+        not traversal(p)
+}
+path_segments := split(path, "/")
+```
+
+`PathPlain` itself is read for nothing else. Fed the real field, this decides the
+same as it does for a client that omits the version; fed a version-less field
+(what this package shipped in 0.4.0), every equality rule matched — which is why
+a probe table written against that shape proved nothing about a live daemon.
 
 `Resolved` is the source path with symlinks resolved, and it is the field that
 defeats the documented symlink bypass of bind-mount checks — but the plugin can
@@ -115,13 +132,41 @@ shape.
 The decisions this package relies on, each an `opa eval` against the deployed
 file with a hand-built input. Every row below was run under OPA v0.60.0, v1.3.0,
 and v1.7.1 (the two embedded engines plus a newer one), and every row decides as
-its Expected column says on all three. Run them before trusting a change: a
-policy that loads is not a policy that decides correctly. Thirty of the rows
-decided wrongly before 0.4.0: 29 were "allow" where the answer is deny —
-R15.01–R15.18, R15.25, R15.28, R15.29, R15.33, R15.35, R16.01, R16.05, R18.02,
-R18.04, R18.05 and `/build/prune` — and one, `POST /session`, was denied where
-the answer is allow. The rest were already correct, and are listed so a future
-change cannot quietly break them.
+its Expected column says on all three.
+
+**The inputs carry the plugin's real field values** — `Path` and `PathPlain`
+with the API version prefix, `PathArr` split from that, `Query` parsed — because
+the version-less shape this package used until 0.5.0 is not what `main.go`'s
+`makeInput` produces, and a table written against it says nothing about a live
+daemon. Concretely, the two shape errors this table is built to catch:
+
+- **With a version-less `PathPlain`** (the 0.4.0 table), every host-access row
+  passed while the policy was allowing them, and `/session` looked denied: 30
+  rows decided wrongly, 29 of them "allow" where the answer is deny
+  (R15.01–R15.18, R15.25, R15.28, R15.29, R15.33, R15.35, R16.01, R16.05,
+  R18.02, R18.04, R18.05, `/build/prune`).
+- **With the real `PathPlain`** (this table), the same 0.4.0 policy decided
+  wrongly on 26 rows — every one of them a legitimate request *denied*:
+  creates, volume and network creates, deletes, lifecycle actions, build, pull,
+  `/session`. That is issue #35: the hardening's equality grants matched
+  nothing, and the failure was invisible because it failed closed.
+
+Each row is one `opa eval` against the substituted policy:
+
+```
+opa eval -f raw --data agent.rego --input <row>.json data.docker.authz.allow
+```
+
+evaluated with the engine the plugin embeds (P-10) — a container image of that
+engine does when no matching `opa` binary is available. The version prefix the
+rows carry is a parameter of whatever builds them, not of the policy: run the
+table twice when the shape is in question, once with a prefix and once without,
+and require identical decisions. Then run at least one **live** test (SCHEMATIC.md's A-11 or
+A-16): a table cannot disagree with the plugin if it is fed the plugin's values,
+but nothing but a live call proves those values are the plugin's.
+
+The rows are also a regression suite: they are listed so a future change cannot
+quietly break them.
 
 The `<P-3>` token below stands for the project name (`backend-services` with the
 defaults), `<P-15>` for the project directory (`/srv/compose/backend-services`),
@@ -178,6 +223,13 @@ otherwise.
 | `POST /build/prune` | deny — no match by prefix |
 | `POST /session` | allow — the BuildKit CLI session R-7's build needs |
 | `POST /containers/create?name=buildx_buildkit_default0`, no label | deny — a `name` query parameter attributes nothing, and the carve-out is gone |
+| `GET /_ping` with no version prefix at all | allow — read-only, and nothing to strip (a `HEAD /_ping` never reaches the policy: `-skip-ping` defaults to true) |
+| `POST /containers/create` with the project label, **no** version prefix | allow — a client that omits the version is not a different client |
+| `POST /v1.56/v1.56/containers/create` with the project label | deny — one strip only, and the result is not a granted path |
+| `POST /v1.56/containers/../containers/create` with the project label | deny — a `..` segment means no `path`, so no rule matches |
+| `POST /v1.56/containers/../../volumes/<P-3>_data` | deny — same guard, on a path-named volume operation |
+| `DELETE /v1.56/volumes/../volumes/hostdata` | deny — same guard, on a delete |
+| `POST /v1/containers/create` with the project label (major only) | allow — the minor is optional in the strip; the daemon's own router still decides whether it routes |
 
 ### R-12 — creation is scoped by name
 
