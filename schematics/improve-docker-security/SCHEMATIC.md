@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: improve-docker-security
-version: 0.1.1
+version: 0.1.2
 status: published
 spec: 1
 description: A composition schematic - hardens a Docker host's three weakest points by wiring together three sibling schematics: restrict raw Docker API access behind a deny-by-default proxy, policy-police what the daemon itself may do through OPA authorization, and encrypt every container secret at rest with per-service keys. No images of its own; the glue is the threat model, the deployment order, and the cross-verification between the three.
@@ -74,7 +74,10 @@ The three surfaces, and which sibling closes each:
   policed by the OPA authorization policy (D-3); the proxy's allowlist
   narrows what a consumer can *request*, OPA narrows what the daemon
   *executes*. The two layers must both be present for network clients -
-  neither substitutes for the other.
+  neither substitutes for the other. What OPA narrows is the policy at
+  D-3's pinned revision: this composition cannot promise a property that
+  lives in another package's revision, so if that pin lags, this claim
+  lags with it.
 - **R-3**: All service credentials are deployed via the encrypted-secrets
   pattern (D-4): no plaintext secret file ships in any deployed
   directory, and each service's blast radius is its own key.
@@ -130,7 +133,7 @@ against. See the composition-convention module for the full rules.
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker Engine + Compose v2 | Runs everything | `docker compose version` | Blocker |
 | D-2 | schematic | [restrict-docker-api-access v0.3.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/restrict-docker-api-access/SCHEMATIC.md) `sha256:29951fd2252a342d2863e960b4eaa8095599227d70d7e36694769af84ccaa50a` | Closes container→daemon access (R-1) | Its phases green | Consumers fall back to socket mounts - forbidden (R-1) |
-| D-3 | schematic | [authorize-docker-requests v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/authorize-docker-requests/SCHEMATIC.md) `sha256:73a1a2423df279ea1c163ae51496ef12b68882b7801cca819126ad4b192af506` | Polices daemon control (R-2) | Its phases green | OPA down → clients blocked by design; rollback line re-opens |
+| D-3 | schematic | [authorize-docker-requests v0.5.0](https://github.com/cameri/schematics/blob/67755106851a2444427620f6eb80e3d0db25c424/schematics/authorize-docker-requests/SCHEMATIC.md) `sha256:1ba2b19c6bc5a8f079d1a0bbeb2003a0e1680611efa4c426d7d2ea90009c9534` | Polices daemon control (R-2) | Its phases green | OPA down → clients blocked by design; rollback line re-opens |
 | D-4 | schematic | [encrypt-container-secrets v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:a776b9b1d34d5fc7883ecee8f7616d39860a9236f5d875dc476013fae413ba45` | Closes secrets at rest (R-3) | Its phases green | Deployment halts rather than falling back to plaintext |
 
 ## Parameters
@@ -272,8 +275,8 @@ Decisions:
   (composition-convention): the composition states exactly which contract
   it was built against, and verification is a hash comparison, not a
   trust statement.
-- 2026-09-17: Schematic dependencies are pinned to commit `81721d8` (the full
-  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+- 2026-09-17: Each schematic dependency is pinned to the commit in its own
+  link, carrying the SHA-256 of the file at that commit. Verify a
   pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
   and compare the result with the digest in the table.
 
