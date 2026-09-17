@@ -33,8 +33,7 @@ code decide the whole procedure:
   the running daemon references makes dockerd treat its own configuration as
   invalid and **exit**: `level=fatal msg="Error validating authorization
   plugin" error="plugin \"<P-14>\" not found"` (measured on Docker 29.6.1, snap
-  install; Q-4 in SCHEMATIC.md's decisions). Before this was measured, the
-  script this package shipped did exactly that.
+  install; Q-4 in SCHEMATIC.md's decisions).
 - **It is not removing the plugin reference.** Deleting `P-14` from
   `authorization-plugins` and sending SIGHUP leaves an unrestricted daemon:
   every request is allowed while the entry is absent. That is the deliberate
@@ -59,18 +58,17 @@ code decide the whole procedure:
 
 ## Pre-flight checks (before touching the deployed file)
 
-1. **No placeholders left**: `grep -nE 'SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL' <source>` must print nothing. A leftover token would be deployed as a literal and silently turn the policy into "allow everything". (`BUILDKIT_PREFIX` is retired — R-17 removed the BuildKit carve-out — and is kept in this pattern on purpose: the check is a superset of the template's tokens, so a source copied from an older template is still caught.)
+1. **No placeholders left**: `grep -nE 'SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL' <source>` must print nothing. A leftover token would be deployed as a literal and silently turn the policy into "allow everything". (`BUILDKIT_PREFIX` is not read by the policy and is kept in this pattern on purpose: the check is a superset of the template's tokens, so a source that carries the token is caught rather than deployed.)
 2. **It parses**, under an engine **no newer than the plugin's** (P-10):
    `opa check <source>`, or the engine's own image when no binary is installed —
    `docker run --rm -v "$(pwd):/w:ro" -w /w openpolicyagent/opa:1.3.0 check <source>`.
    A newer engine accepts syntax the plugin's engine rejects.
 3. **It decides correctly**: the `opa eval` probes in
    `skeleton/agent.rego.schema` still produce the expected allow/deny results —
-   **with the plugin's real input shape**, which is the part this package got
-   wrong once: `PathPlain` carries the API version prefix (`"PathPlain": u.Path`
-   in `main.go`), so a probe table written with a version-less `PathPlain`
-   proves nothing about a live daemon (issue #35). Every path in the table is
-   `/v1.<n>/…`, and the runner records the version it used.
+   **with the plugin's real input shape**: `PathPlain` carries the API version
+   prefix (`"PathPlain": u.Path` in `main.go`), so a probe table written with a
+   version-less `PathPlain` proves nothing about a live daemon. Every path in
+   the table is `/v1.<n>/…`, and the runner records the version it used.
 4. **A copy of the currently deployed policy is kept** before the replacement,
    so the change can be reverted with the same procedure.
 

@@ -16,9 +16,9 @@ package docker.authz
 #   TESTCONTAINERS_LABEL_KEY   → P-12 label key, e.g. "org.testcontainers"
 #   TESTCONTAINERS_LABEL_VALUE → P-12 label value, e.g. "true"
 #
-# (P-11 BUILDKIT_PREFIX is superseded: the BuildKit carve-out is gone, see
-# SCHEMATIC.md's Decisions. The leftover-token check in the package still greps
-# for the token, so a template carrying the old carve-out is still caught.)
+# (P-11 BUILDKIT_PREFIX is not read by any rule — see SCHEMATIC.md's Decisions.
+# The leftover-token check in the package still greps for it, so a copy carrying
+# the token is caught rather than deployed.)
 #
 # Language and engine: Rego v1 syntax, evaluated by the OPA engine embedded in
 # the plugin. The plugin release determines the engine (see P-10), measured from
