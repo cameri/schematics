@@ -6,9 +6,12 @@
 #   .agent-schematics/marketplace.json  parses, unique names, sources and spec
 #                                       files exist, exactly five featured,
 #                                       every `composes` entry names a plugin
-#   schematics/*/SCHEMATIC.md           every modules/, scripts/, skeleton/,
-#                                       templates/, assets/ path it references
-#                                       exists in the package
+#   schematics/*/SCHEMATIC.md           declares a spec: revision whose
+#                                       schemas/spec-<N>/SCHEMATIC.md.schema
+#                                       companion exists; every modules/,
+#                                       scripts/, skeleton/, templates/,
+#                                       assets/ path it references exists in
+#                                       the package
 #   schematic-kind dependency pins      every link into this repository is a
 #                                       well-formed pin: [<name> v<version>](
 #                                       .../blob/<commit-sha>/schematics/<name>/
@@ -59,6 +62,24 @@ if len(featured) != 5:
 SEG = r'[A-Za-z0-9._-]*[A-Za-z0-9_-]'
 REF = re.compile(r'(?<![\w/.-])((?:modules|scripts|skeleton|templates|assets)/(?:' + SEG + r'/)*' + SEG + r')')
 specs = sorted(glob.glob('schematics/*/SCHEMATIC.md'))
+
+# ─── Specs: declared format revision ─────────────────────────────
+# A spec's `spec:` frontmatter field selects its format companion, so it must
+# be present and the companion must exist. The catalog resolves the companion
+# by this field; without it, a reader cannot tell which revision a spec claims.
+FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*$', re.S | re.M)
+SPEC_REVISION = re.compile(r'^spec:\s*(\S+)\s*$', re.M)
+for spec in specs:
+    fm = FRONTMATTER.search(open(spec, encoding='utf-8').read())
+    declared = SPEC_REVISION.search(fm.group(1)) if fm else None
+    if not declared:
+        errors.append(f"{spec}: frontmatter declares no spec: revision")
+        continue
+    companion = f'schemas/spec-{declared.group(1)}/SCHEMATIC.md.schema'
+    if not os.path.isfile(companion):
+        errors.append(f"{spec}: declares spec: {declared.group(1)}, "
+                      f"but {companion} does not exist")
+
 for spec in specs:
     text = open(spec, encoding='utf-8').read()
     pkg = os.path.dirname(spec)

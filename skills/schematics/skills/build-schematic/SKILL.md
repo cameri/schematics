@@ -54,12 +54,17 @@ package without asking; if one exists, report the conflict and stop.
 
 The fetched spec is checked before the build is reported as complete:
 
-1. **Schema check.** Fetch the canonical container-format schema from
-   `https://raw.githubusercontent.com/cameri/schematics/HEAD/schemas/spec-1/SCHEMATIC.md.schema`
-   and verify the spec against it: required frontmatter fields present, all
-   mandated sections in order, requirements and acceptance tests present and
-   cross-referenced. Packages no longer ship a copy of it — the canonical is
-   keyed by the `spec:` field in the spec's frontmatter.
+1. **Schema check.** Read the `spec:` field from the fetched spec's frontmatter
+   and fetch the companion that revision names:
+   `https://raw.githubusercontent.com/cameri/schematics/HEAD/schemas/spec-<N>/SCHEMATIC.md.schema`.
+   Verify the spec against that companion: required frontmatter fields present,
+   all mandated sections in order, requirements and acceptance tests present and
+   cross-referenced. Packages never ship a copy of the companion — it is
+   resolved by the `spec:` field, one copy per revision for the whole catalog.
+   A spec that declares a revision the catalog has no companion for (the fetch
+   returns 404), or declares none at all, is a reported deviation: name the
+   revision found, and never check an unknown or missing revision against
+   revision 1 as if it were the declared one.
 2. **Reference check.** Every file the spec references (modules, scripts,
    skeleton) must exist in the built package. Missing references are a
    failed build: report them, do not mark the package built.

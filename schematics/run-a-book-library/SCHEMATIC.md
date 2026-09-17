@@ -3,6 +3,7 @@
 name: run-a-book-library
 version: 0.3.1
 status: published
+spec: 1
 description: A composition schematic - assembles the fetch-books-over-vpn and serve-books-using-containers schematics into one operating system for a self-hosted digital library, and defines the shared volume contract between them. Contains no images of its own; its content is the wiring, the shared paths, and the isolation rule that keeps the fetching stack and the serving stack from contaminating each other.
 ---
 

@@ -73,8 +73,9 @@ package directory:
 
 The `SCHEMATIC.md` format's own companion is not part of a package: it is
 canonical at [`schemas/spec-1/SCHEMATIC.md.schema`](schemas/spec-1/SCHEMATIC.md.schema),
-keyed by the `spec:` field in the spec's frontmatter — one copy for the whole
-catalog.
+keyed by the `spec:` field every spec declares in its frontmatter — one copy for
+the whole catalog, and `scripts/validate-catalog.sh` fails any spec that names a
+revision the catalog has no companion for.
 
 Inside `SCHEMATIC.md`, sections appear in a fixed order:
 

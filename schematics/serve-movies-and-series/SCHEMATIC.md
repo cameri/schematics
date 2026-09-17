@@ -3,6 +3,7 @@
 name: serve-movies-and-series
 version: 0.2.1
 status: published
+spec: 1
 description: Serving a movies-and-series library - Jellyfin reading the same tree the fetching stack imports into, with Jellyseerr as the request front. Exposure as a first-class choice (local, tailnet, or a gated public hostname), read-only by posture over the media.
 ---
 
