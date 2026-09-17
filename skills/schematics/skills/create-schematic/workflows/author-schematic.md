@@ -80,6 +80,10 @@ Run the portability lint over every file in the package before declaring done:
 - [ ] No vendor tool names or agent-harness concepts (no "use the X tool", no
       skill frontmatter, no session/channel concepts).
 - [ ] No unresolved references to "the interview", "as discussed", "above chat".
+- [ ] No repository history in the artifact: no version-to-version narrative
+      ("until <version>", "shipped in", "used to", "previously"), no issue or PR
+      number as the reason for a rule, no story of a defect that was fixed
+      (grep in `references/schematic-principles.md` §3).
 - [ ] Every acronym expanded on first use.
 - [ ] Every parameter in the code has a row in the Parameters table.
 - [ ] Every dependency in the Dependencies table has a discovery method and a

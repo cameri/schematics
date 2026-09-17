@@ -33,10 +33,27 @@ else.
 **Demands:** The package is the complete world. The implementer needs: the
 spec (SCHEMATIC.md), per-component contracts (modules/), anything runnable
 (scripts/), anything copied (skeleton/), anything produced (templates/). No
-"see the original repo", no "ask the author".
+"see the original repo", no "ask the author". The same applies to time: the
+artifact states what is true now, never how it got there. No version-to-version
+narrative ("until <version>", "the <version> table", "shipped in", "used to",
+"previously"), no issue or PR number as the reason for a rule, and no story of a
+defect that was fixed — a builder who has only the artifact cannot act on any
+of it. Compatibility facts (which versions load the file, which reject it),
+verification provenance (what was run, under which versions, with which inputs),
+and warnings that stop a careful builder doing the wrong thing are current facts
+and stay.
 
 **Verify:** Read the package as a stranger. Every external reference resolves
-either inside the package or to a declared, publicly reachable dependency.
+either inside the package or to a declared, publicly reachable dependency. Then
+grep every file the change touches for that narrative:
+
+```
+grep -nEi 'until [0-9]|used to|previously|shipped in|was wrong|#[0-9]+|issue [0-9]' <changed files>
+```
+
+Every hit must be justifiable as a current fact: an issue number is acceptable
+only when it is the dependency or the tracking reference, never as the reason a
+rule exists. Rewrite the rest as the requirement it stands for.
 
 ## 4. Predictable, intuitive, ergonomic
 
