@@ -65,7 +65,10 @@ criteria:
    differences between deployments are configuration, never code edits.
 7. **Dependencies called out** — implement the declared failure behavior for
    every Dependency.
-8. **Composable in kind** — a dependency may be another schematic in the catalog; a composition schematic owns no services, only the shared contracts and the end-to-end acceptance test
+8. **Composable in kind** — a dependency may be another schematic in the
+   catalog, pinned to a commit and a content hash; a composition schematic
+   owns no services, only the shared contracts and the end-to-end
+   acceptance test.
 9. **Applicable context stated** — discover what Must discover locally
    says; do not silently assume beyond May assume.
 10. **Pluggable** — implement the attach/remove seams defined in Modules and
