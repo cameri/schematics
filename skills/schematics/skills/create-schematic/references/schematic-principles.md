@@ -82,10 +82,14 @@ verification, answer: could this pass and fail on the same state? Fix both.
 name, type, default, discovery method (how the implementer finds the right
 value on its host), effect. Modules split at real seams — each has inputs,
 outputs, failure behavior, and no hidden coupling; anything a module needs
-from another module appears in its contract.
+from another module appears in its contract. Behavior that varies between
+deployments is configuration, never a code edit: the phases wire every knob
+through the parameter mechanism.
 
 **Verify:** Every literal that would differ between two deployments exists as
 a `P-<n>`; every cross-module need is declared in both modules' contracts.
+Imagine two deployments that must behave differently per the requirements —
+both are achievable by parameters alone.
 
 ## 7. Dependencies called out
 
@@ -98,7 +102,24 @@ degrade how).
 **Verify:** For each `D-<n>`: run its discovery command mentally against a
 bare host; the failure behavior is stated and sane.
 
-## 8. Applicable context stated
+## 8. Composable in kind
+
+**Demands:** A dependency may be another schematic in this catalog (Kind
+`schematic` in the Dependencies table), pinned to a specific commit of the
+remote repository **plus** the SHA-256 of the linked file's contents at that
+commit — never a floating ref. A composition schematic owns no images and no
+services of its own: only the shared contracts between the parts, the
+isolation rules that keep them independent, and the end-to-end acceptance
+test that spans them. Optional parts live in a separate Recommended table,
+pinned the same way, each row stating the behavior when none of them is
+implemented.
+
+**Verify:** Every `schematic`-kind dependency resolves — the commit is
+reachable, the file exists at it, the sha256 matches, and the version in the
+pin text equals the linked file's frontmatter. For a composition, name the
+images it owns: the answer must be none.
+
+## 9. Applicable context stated
 
 **Demands:** The Applicable Context section separates three kinds of
 knowledge: what the implementer MUST discover locally (with the discovery
@@ -108,16 +129,6 @@ the package.
 
 **Verify:** For each non-universal claim in the package, it appears in one of
 the three context lists.
-
-## 9. Configuration flexibility
-
-**Demands:** Behavior that varies between deployments is configuration, never
-a code edit. The schematic names every knob, its type, default, and effect —
-and the implementation phases wire them through the parameter mechanism, not
-by editing source.
-
-**Verify:** Imagine two deployments that must behave differently per the
-requirements; both are achievable by parameters alone.
 
 ## 10. Pluggable
 

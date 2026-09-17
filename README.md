@@ -121,10 +121,10 @@ preference:
 3. **Self-contained** — the package is the complete world
 4. **Predictable, intuitive, ergonomic** — identical layout, same section order
 5. **Idempotent and deterministic** — re-runnable without damage
-6. **Parameterized and modular** — every tunable in one table, every concern a module
+6. **Parameterized and modular** — every tunable in one table, every concern a module; behavior differences are configuration, never code edits
 7. **Dependencies called out** — with discovery and failure behavior
-8. **Applicable context stated** — discover vs assume vs don't-change
-9. **Configuration flexibility** — behavior is config, never code edits
+8. **Composable in kind** — a dependency may be another schematic, pinned to a commit and a content hash
+9. **Applicable context stated** — discover vs assume vs don't-change
 10. **Pluggable** — clean seams and a stated removal procedure
 
 Full details: [`skills/schematics/skills/create-schematic/references/schematic-principles.md`](skills/schematics/skills/create-schematic/references/schematic-principles.md).
