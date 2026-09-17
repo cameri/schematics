@@ -1,0 +1,33 @@
+name: require-issue
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+# Reads the pull request event payload only. The check is a plain shell test,
+# so nothing here needs write access to anything.
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    # Rule zero is a gate for outside contributors: a schematic needs the
+    # public discussion an issue provides before anyone spends effort on it.
+    # Collaborators, the owner, and bots are exempt.
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR' &&
+      github.event.pull_request.user.type != 'Bot'
+    steps:
+      - name: Require an issue reference in the pull request body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$BODY" | grep -Eq '#[0-9]+'; then
+            echo "The pull request body references an issue."
+            exit 0
+          fi
+          echo "::error title=No issue referenced::CONTRIBUTING.md rule zero: open an issue describing what you want to contribute, wait for feedback, then open the pull request and reference that issue. See https://github.com/cameri/schematics/blob/main/CONTRIBUTING.md"
+          exit 1
