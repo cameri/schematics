@@ -8,9 +8,11 @@ anything.
 **Every pull request must reference an open issue that was opened first,
 by you, describing what you want to contribute.**
 
-PRs opened by outside contributors without a prior issue are rejected
-automatically, and the rejection will cite this rule. There are no
-exceptions, including for small fixes.
+PRs opened by outside contributors without a prior issue are blocked
+automatically by the `require-issue` workflow
+(`.github/workflows/require-issue.yml`), whose failing check cites this rule;
+the body must reference an issue (`#N`). Collaborators and bots are exempt.
+There are no other exceptions, including for small fixes.
 
 Why this rule exists: a schematic is a build specification that others
 implement independently. Before anyone spends effort on a PR, the idea
