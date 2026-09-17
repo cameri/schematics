@@ -59,6 +59,18 @@ genuinely does not apply (never leave stubs like "TBD" or "N/A" prose).
 shared vocabulary beyond universal engineering knowledge. See
 `references/llm-agnostic-authoring.md` before writing any schematic content.
 
+**A schematic is a build spec, not a changelog.** Its reader is a builder who has
+the artifact and nothing else: no repository history, no issues, no earlier
+version. State what is true now and what the implementer must do. Do not narrate
+how the artifact changed between versions ("until 0.5.0", "the 0.4.0 table",
+"used to", "previously"), use an issue or PR number as the reason for a rule, or
+tell the story of a defect that was fixed: that belongs in the PR, the issue, and
+`CHANGELOG.md`, and in the artifact it costs tokens without changing what the
+builder does. What stays, because it is current: which versions load the file and
+which reject it, what was run to verify it and under which versions, and any
+warning that stops a careful builder doing the wrong thing. Say what is true and
+what to do; leave out how it was discovered.
+
 </essential_principles>
 
 <intake>

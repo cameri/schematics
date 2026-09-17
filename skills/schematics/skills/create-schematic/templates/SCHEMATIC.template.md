@@ -7,6 +7,15 @@ created: <YYYY-MM-DD>
 updated: <YYYY-MM-DD>
 ---
 
+<!-- Authoring rule (delete this comment before publishing): a schematic is a
+build spec, not a changelog. State what is true now — do not narrate how the
+artifact changed between versions ("until <version>", "shipped in", "used to",
+"previously"), use an issue or PR number as the reason for a rule, or tell the
+story of a defect that was fixed; that belongs in the PR, the issue, and
+CHANGELOG.md. Compatibility facts (which versions load or reject this file),
+verification provenance (what was run, under which versions), and warnings that
+stop a careful builder doing the wrong thing are current facts and stay. -->
+
 # Schematic: <Human-readable capability name>
 
 One paragraph: what this capability is and what exists after the implementer
