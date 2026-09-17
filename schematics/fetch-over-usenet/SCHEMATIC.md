@@ -5,6 +5,8 @@ version: 0.1.1
 status: published
 spec: 1
 description: The shared usenet downloading infrastructure every media *arr registers with - SABnzbd as the one downloader, Prowlarr as the one indexer authority, unpackerr cleaning archives, and optional Bazarr and flaresolverr as shared services. Deploys once per host; media kinds (movies, series, music, books) join by category, never by second instance.
+created: 2026-09-11
+updated: 2026-09-17
 ---
 
 # Schematic: Fetch Over Usenet (Shared Infrastructure)

@@ -5,6 +5,8 @@ version: 0.2.2
 status: published
 spec: 1
 description: A composition schematic - runs a complete music library by wiring the music-fetching half (Lidarr over the shared usenet pipeline) to the serving half (the Jellyfin instance from the movies-and-series serving stack, gaining music libraries). Shares infrastructure instead of duplicating it - one downloader, one indexer manager, one server. Recommended but optional: hardening the Docker host and keeping deployments current. No images of its own; the glue is the sharing contracts and the artist-to-playlist loop.
+created: 2026-09-11
+updated: 2026-09-17
 ---
 
 # Schematic: Run a Music Library (Composition)

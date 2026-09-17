@@ -5,6 +5,8 @@ version: 0.3.1
 status: published
 spec: 1
 description: Exposes a deny-by-default Docker API to containers over an internal network - an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon.
+created: 2026-09-11
+updated: 2026-09-17
 ---
 
 # Schematic: Restrict Docker API Access

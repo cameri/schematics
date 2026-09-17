@@ -5,6 +5,8 @@ version: 0.1.1
 status: published
 spec: 1
 description: Privately acquiring series over usenet - Sonarr automating episode and season grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the series library the server reads.
+created: 2026-09-11
+updated: 2026-09-17
 ---
 
 # Schematic: Fetch Series Over Usenet
