@@ -23,7 +23,10 @@
 #                                       package's .agent-schematics entry;
 #                                       unknown fields warn
 #   a pull request's own diff           every schematics/<name>/SCHEMATIC.md it
-#                                       changes carries a bumped `updated`
+#                                       changes carries a bumped `updated`, and
+#                                       a change to any file under
+#                                       skills/schematics/ raises the plugin's
+#                                       version in .claude-plugin/plugin.json
 #                                       (BASE_REF=<base branch>; the workflow
 #                                       sets it for pull requests only)
 #   schematic-kind dependency pins      every link into this repository is a
@@ -247,6 +250,32 @@ if not in_repo:
 elif shallow:
     warnings.append('shallow clone: dependency pins were found but not verified (fetch the full history)')
 
+# ─── Pull requests: the two diff-aware rules ─────────────────────
+PLUGIN_DIR = 'skills/schematics/'
+MANIFEST = PLUGIN_DIR + '.claude-plugin/plugin.json'
+
+def manifest_version(text):
+    """The plugin manifest's version, or None when it does not parse."""
+    try:
+        return json.loads(text).get('version')
+    except ValueError:
+        return None
+
+def semver_key(value):
+    """A comparable key, or None when the value is not a semantic version.
+    Numeric parts compare as numbers, so 0.10.0 is greater than 0.9.0; a
+    pre-release sorts below its release."""
+    m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?', value or '')
+    if not m:
+        return None
+    pre = m.group(4)
+    if pre is None:
+        pre_key = (1,)
+    else:
+        pre_key = (0,) + tuple((0, int(p)) if p.isdigit() else (1, p)
+                               for p in pre.split('.'))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), pre_key)
+
 # ─── Pull requests: `updated` tracks the change ──────────────────
 # `updated` is defined as the date the spec last changed, and only the diff can
 # enforce that: a spec edited without moving the field drifts silently. The
@@ -290,6 +319,42 @@ else:
                 # carrying the change's date needs no second bump.
                 errors.append(f"{path}: SCHEMATIC.md changed on {changed_on} but updated "
                               f"is still {old}; set it to the date of this change")
+
+    # ─── Pull requests: a plugin change carries its version ──────
+    # The plugin's install is keyed by version, so a change that ships without
+    # a bump claims a content set it does not have: the installed copies stay
+    # stale and nothing notices until someone compares them by hand. Same base
+    # ref, same pull-request-only condition as the rule above.
+    changed_plugin = [p for p in changed if p.startswith(PLUGIN_DIR)]
+    if changed_plugin:
+        at_base = git('show', f'{merge_base}:{MANIFEST}')
+        before = (manifest_version(at_base.stdout.decode('utf-8', 'replace'))
+                  if at_base.returncode == 0 else None)
+        after = (manifest_version(open(MANIFEST, encoding='utf-8').read())
+                 if os.path.isfile(MANIFEST) else None)
+        before_key, after_key = semver_key(before), semver_key(after)
+        if after is None:
+            errors.append(f"{MANIFEST}: no version to compare, and {len(changed_plugin)} "
+                          f"file(s) under {PLUGIN_DIR} changed")
+        elif before_key is None or after_key is None:
+            errors.append(f"{MANIFEST}: version {after!r} (base {before!r}) is not a "
+                          f"semantic version, so a bump cannot be checked")
+        elif after_key < before_key:
+            errors.append(f"{MANIFEST}: version went backwards, {before} -> {after}; a "
+                          f"plugin change needs a greater version, not a lower one "
+                          f"(this repository has exactly one version manifest, so this "
+                          f"is a single-file comparison)")
+        elif after_key == before_key:
+            errors.append(f"{MANIFEST}: {len(changed_plugin)} file(s) under {PLUGIN_DIR} "
+                          f"changed but the version is still {after} — bump it. If a "
+                          f"parallel pull request already took the next number, bump "
+                          f"again rather than removing this check; and note this "
+                          f"repository has exactly one version manifest, so this is a "
+                          f"single-file comparison")
+        elif changed_plugin == [MANIFEST]:
+            # A version reserved ahead of its content: odd, but harmless.
+            warnings.append(f"{MANIFEST}: version raised {before} -> {after} with no "
+                            f"other file under {PLUGIN_DIR} changed")
 
 pins_found = 0
 pins_verified = 0
