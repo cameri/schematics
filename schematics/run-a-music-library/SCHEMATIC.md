@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-a-music-library
-version: 0.2.1
+version: 0.2.2
 status: published
 description: A composition schematic - runs a complete music library by wiring the music-fetching half (Lidarr over the shared usenet pipeline) to the serving half (the Jellyfin instance from the movies-and-series serving stack, gaining music libraries). Shares infrastructure instead of duplicating it - one downloader, one indexer manager, one server. Recommended but optional: hardening the Docker host and keeping deployments current. No images of its own; the glue is the sharing contracts and the artist-to-playlist loop.
 ---
@@ -72,9 +72,9 @@ registers with the existing ones under category separation.
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | Docker + Compose v2 | Runs everything | `docker compose version` | Blocker |
-| D-2 | schematic | [fetch-music-over-usenet v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-music-over-usenet/SCHEMATIC.md) `sha256:d1ece75f0f3cf939a17fb9aea85f1095476796d40efe9ac3ddaa01b49aeb80ae` | Acquires music | Its phases 1-2 green | Music static; other media unaffected |
-| D-3 | schematic | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | OWNS the shared Prowlarr + SABnzbd that music registers to | Its phases 1-2 green | Blocker for D-2: no shared infra to register with |
-| D-4 | schematic | [serve-movies-and-series v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/serve-movies-and-series/SCHEMATIC.md) `sha256:384ec85884529472943287701cc9912eeceedd4fa53591d77a7fd45a6c3745ce` | OWNS the Jellyfin instance that gains music libraries | Its phases 1-2 green | Music fetches fine, nothing plays |
+| D-2 | schematic | [fetch-music-over-usenet v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-music-over-usenet/SCHEMATIC.md) `sha256:86cffb26f187bf51285d87ff77f0502e578fca1c8f0231f4679258f8ef887c55` | Acquires music | Its phases 1-2 green | Music static; other media unaffected |
+| D-3 | schematic | [fetch-over-usenet v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/fetch-over-usenet/SCHEMATIC.md) `sha256:bef7d4c87fa7227f5f6d9653365a1ab66f6e7429978e8ef221939cf772ea64a3` | OWNS the shared Prowlarr + SABnzbd that music registers to | Its phases 1-2 green | Blocker for D-2: no shared infra to register with |
+| D-4 | schematic | [serve-movies-and-series v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/serve-movies-and-series/SCHEMATIC.md) `sha256:384ec85884529472943287701cc9912eeceedd4fa53591d77a7fd45a6c3745ce` | OWNS the Jellyfin instance that gains music libraries | Its phases 1-2 green | Music fetches fine, nothing plays |
 
 Note the shape: D-3 and D-4 are dependencies of D-2's and this
 composition's design respectively - music composes with stacks that own
@@ -89,9 +89,9 @@ Optional, pinned the same way; declining any keeps R-6 satisfiable.
 
 | Id  | Kind | What | Adds | Without it |
 |-----|------|------|------|------------|
-| RD-1 | schematic | [improve-docker-security v0.1.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/improve-docker-security/SCHEMATIC.md) `sha256:08b9f072a0a96047fcce8036c519d61e5b76b9fd02c98b1ce85ed43324ff153b` | Hardens the Docker host: scoped API, OPA-policed control, encrypted secrets | Accepted risk of socket mounts and plaintext keys |
-| RD-2 | schematic | [update-images-on-push v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/update-images-on-push/SCHEMATIC.md) `sha256:810129ef2839e77f88b469601e494e6367a9cc5afd1b1c904fb9e1fe37705067` | Keeps pushed images current | Manual upgrades |
-| RD-3 | schematic | [run-a-movies-and-series-library v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/run-a-movies-and-series-library/SCHEMATIC.md) `sha256:b3cbc5bd8bfdac62725f2058fd2a4cb273b8032838ca11fd97b122d35bbc3356` | The full movies-and-series loop around the same shared infrastructure, with Jellyseerr requests | Music-only deployment; the serving and fetching halves still exist per D-3/D-4, just without the request front |
+| RD-1 | schematic | [improve-docker-security v0.1.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/improve-docker-security/SCHEMATIC.md) `sha256:173d89578cb487139584f76efefa013c20ffa070349401db3d7897076838e10d` | Hardens the Docker host: scoped API, OPA-policed control, encrypted secrets | Accepted risk of socket mounts and plaintext keys |
+| RD-2 | schematic | [update-images-on-push v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/update-images-on-push/SCHEMATIC.md) `sha256:810129ef2839e77f88b469601e494e6367a9cc5afd1b1c904fb9e1fe37705067` | Keeps pushed images current | Manual upgrades |
+| RD-3 | schematic | [run-a-movies-and-series-library v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/run-a-movies-and-series-library/SCHEMATIC.md) `sha256:fabdcca62a37a9b8bef37590b90155ae079f9f1394b91c166db47bc50caee82a` | The full movies-and-series loop around the same shared infrastructure, with Jellyseerr requests | Music-only deployment; the serving and fetching halves still exist per D-3/D-4, just without the request front |
 
 ## Parameters
 
@@ -199,6 +199,18 @@ Decisions:
   recommended rather than required: music can run beside the shared
   infrastructure without the request front. Recommended dependencies
   may be compositions, not just capability schematics.
+- 2026-09-17: Schematic dependencies are pinned to commit `81721d8` (the full
+  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+  pin (A-6) with
+  `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  and compare the result with the digest in the table. The cross-references
+  the glue relies on: R-1 is fetch-music-over-usenet R-1 applied stack-wide;
+  P-2 is its P-1 (`${MEDIA_ROOT}/music`) and P-3 is its P-2; the audio
+  category (3000) is fetch-over-usenet P-6; the shared-downloader module named
+  under Interfaces is the module of that name in fetch-music-over-usenet;
+  RD-3 composes the same D-3 and D-4 this package
+  depends on, so it attaches after Phase 2 (see the recommended-attachments
+  module). Version 0.2.2.
 
 Open questions:
 

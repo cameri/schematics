@@ -288,7 +288,7 @@ reading is the contract this schematic was built against. Verify with
 |-----|------|------|------------|-----------|-------------------|
 | D-1 | system | Docker Engine + Compose v2 with file-backed `secrets:` | Runs the router and mounts the store | `docker compose version` exits 0 | Hard fail before Phase 5: without compose secrets, bind-mount the store and key instead and parameterize their paths |
 | D-2 | system | Provider accounts the operator controls: one credential, one API base, and the upstream model ids per family (`P-8`, `P-9`, `P-10`) | The router has nothing to route to; BYOK is the point (R-2) | The provider console, then a direct call with the key to confirm the correct API base | Hard fail for that family's aliases: those aliases return the provider's error while other families keep serving. Never remedied by routing them elsewhere (R-3) |
-| D-3 | schematic | [encrypt-container-secrets v0.2.1](https://github.com/cameri/schematics/blob/56e02f9/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:a776b9b1d34d5fc7883ecee8f7616d39860a9236f5d875dc476013fae413ba45` | Keys encrypted at rest, decrypted in memory at boot, and a per-service key so the router can decrypt nothing else (R-4) | Its own phases green: an encrypted store exists and its editing script runs | Hard fail before Phase 3: the deployment halts rather than falling back to provider keys in plaintext environment variables |
+| D-3 | schematic | [encrypt-container-secrets v0.2.1](https://github.com/cameri/schematics/blob/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:a776b9b1d34d5fc7883ecee8f7616d39860a9236f5d875dc476013fae413ba45` | Keys encrypted at rest, decrypted in memory at boot, and a per-service key so the router can decrypt nothing else (R-4) | Its own phases green: an encrypted store exists and its editing script runs | Hard fail before Phase 3: the deployment halts rather than falling back to provider keys in plaintext environment variables |
 | D-4 | system | A client that can set an OpenAI-compatible base URL, credential, and model ids | Consumes the router; without it R-11 cannot be met | Inspect the client's configuration surface | Degrade: the router serves and passes every acceptance test up to Phase 7; nothing consumes it |
 | D-5 | system | A private network path between client and router when they are not containers on one network | Reachability only (R-6) | From the client host, resolve `P-12` and connect to `P-2` | Hard fail for off-host clients only; on-host clients are unaffected |
 
@@ -685,6 +685,10 @@ Decisions:
   and per-consumer credentials are deliberately out (Q-4): they change the
   trust model (the router becomes an authorization boundary, not just a
   routing one) and deserve their own schematic.
+- 2026-09-17 — Schematic dependencies are pinned to commit `81721d8` (the full
+  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+  pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  and compare the result with the digest in the table.
 
 Open questions:
 
