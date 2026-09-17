@@ -207,8 +207,8 @@ Decisions:
   the glue relies on: R-1 is fetch-music-over-usenet R-1 applied stack-wide;
   P-2 is its P-1 (`${MEDIA_ROOT}/music`) and P-3 is its P-2; the audio
   category (3000) is fetch-over-usenet P-6; the shared-downloader module named
-  under Interfaces is `modules/shared-downloader.md` in
-  fetch-music-over-usenet; RD-3 composes the same D-3 and D-4 this package
+  under Interfaces is the module of that name in fetch-music-over-usenet;
+  RD-3 composes the same D-3 and D-4 this package
   depends on, so it attaches after Phase 2 (see the recommended-attachments
   module). Version 0.2.2.
 
