@@ -5,6 +5,8 @@ version: 0.2.1
 status: published
 spec: 1
 description: Self-updating Docker Compose deployments: when you push, the image updates. A GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.
+created: 2026-09-11
+updated: 2026-09-17
 ---
 
 # Schematic: Update Images on Push
