@@ -45,10 +45,15 @@ IP.2 = <ip-address>                # Additional IPs
   are needed so Docker accepts connections from both localhost and external
   clients.
 - OpenSSL's `openssl x509 -req` requires `-extfile` to pass extensions when
-  signing a CSR — just having them in the CSR config is not enough.
-- The server certificate uses `extendedKeyUsage = serverAuth` (implicit in
-  the `san` section); the client certificate uses
-  `extendedKeyUsage = clientAuth`.
+  signing a CSR — just having them in the CSR config is not enough. It has no
+  `-addext` option (verified on OpenSSL 3.0.13), so even a single extension such
+  as the client's `clientAuth` needs a file to point at.
+- The server certificate carries `extendedKeyUsage = serverAuth` (set in the
+  template's `[req_ext]` section, so it must also be passed at signing time);
+  the client certificate must carry `extendedKeyUsage = clientAuth`, which the
+  Docker daemon requires before it will accept a client certificate.
+- A certificate with no extended key usage is not restricted to one purpose,
+  so the extension is stated explicitly rather than left implicit.
 
 ## See Also
 

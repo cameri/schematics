@@ -1,89 +1,238 @@
 # Rego Policy File — `.rego` Schema
 #
-# Rego is Open Policy Agent's policy language. This file describes the
-# structure and conventions used in `agent.rego` so any LLM implementer
-# can read and modify it without prior Rego knowledge.
+# This file documents the authorization policy that `skeleton/agent.rego`
+# implements: what engine evaluates it, what input it sees, what decision it
+# must produce, and which tokens must be substituted before deployment.
+#
+# It is an artifact schema — it describes a file that lives in this package,
+# not the container format. See `schemas/spec-1/SCHEMATIC.md.schema` for the
+# latter.
 
 ## File Extension
-`.rego` — plain text, evaluated by the OPA engine embedded in the
-`authorize-docker-requests` Docker plugin.
 
-## Syntax Overview
+`.rego` — plain text, Open Policy Agent's policy language. Nothing compiles it
+ahead of time: the engine embedded in the authorization plugin parses and
+evaluates it.
+
+## Engine and Syntax Version
+
+The policy is evaluated by the OPA engine compiled into the plugin image, so
+the plugin release decides the language version. The embedded version was read
+from each release's own `go.mod` at its tag, and this package's policy was then
+evaluated under all three engines:
+
+| Plugin release | Embedded OPA | Version read from | Result |
+|----------------|--------------|-------------------|--------|
+| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | `go.mod` at tag `v0.10` | loads; every probe row decides as specified |
+| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | `go.mod` at tag `v0.9` | loads; every probe row decides identically |
+| `openpolicyagent/opa-docker-authz-v2:0.8` | v0.30.0 | `go.mod` at tag `v0.8` | not supported — the file fails to load (`import rego.v1` rejected) |
+
+OPA v1.7.1 was run as a forward check: all rows identical. The engine is a
+property of the plugin, not of this package, so validate with an engine **no
+newer than the plugin's** — a policy that loads on a newer engine may use
+syntax the plugin's engine rejects:
 
 ```
-package <name>              # Every file declares a package.
-                            # The plugin expects "docker.authz".
-
-import future.keywords.in    # Enables the `in` operator (membership check).
-
-default <rule> := <value>    # Default value when no rule matches.
-                            # The plugin reads `allow` — default `false` = deny.
-
-<rule> if { <conditions> }   # A rule body. If all conditions are true,
-                            # the rule assigns `true` to itself.
-                            # Multiple rules with the same name = OR logic:
-                            # `allow if { A }` and `allow if { B }` means
-                            # "allow when A OR B".
-
-<rule> if {                  # Multiple conditions are ANDed.
-    condition1
-    condition2
-}
+opa check agent.rego
+opa eval -f raw --data agent.rego --input probe.json data.docker.authz.allow
 ```
 
-## Built-in Functions Used in This Policy
+A policy that parses is not a policy that decides correctly: see "Probes" below
+for the decision checks.
 
-| Function | Purpose | Example |
-|----------|---------|---------|
-| `contains(str, substr)` | String contains check | `contains(input.PathPlain, "/build")` |
-| `startswith(str, prefix)` | String prefix check | `startswith(name, "/buildx_buildkit_")` |
-| `endswith(str, suffix)` | String suffix check | `endswith(input.PathPlain, "/start")` |
-| `object.get(obj, [keys], default)` | Safe key access — returns default if key missing | `object.get(body, ["Labels"], {})` |
-| `sprintf(format, [args])` | String formatting | `sprintf("/%s", [action])` |
+## Placeholders
 
-## Input Schema (Provided by the Plugin)
+The file is a template. Every token in the left column must be replaced with
+the parameter value in the right column, and **no token may remain** in the
+deployed file: with a placeholder left in place, `is_sandbox` never matches a
+real client, the policy classifies the sandbox as a host user, and every
+request is allowed.
 
-Every Docker API request produces this JSON, which OPA evaluates as `input`:
+| Token in the file | Parameter | Example value |
+|-------------------|-----------|---------------|
+| `SANDBOX_USERNAME` | P-4 | `sandbox-agent` |
+| `AUTH_HEADER_NAME` | P-9 | `X-Sandbox-Agent` |
+| `PROJECT_NAME` | P-3 | `backend-services` |
+| `PROJECT_DIR_PATH` | P-15 | `/srv/compose/backend-services` |
+| `TESTCONTAINERS_LABEL_KEY` | P-12 | `org.testcontainers` |
+| `TESTCONTAINERS_LABEL_VALUE` | P-12 | `true` |
 
-```json
-{
-  "User": "sandbox-agent",       // TLS certificate CN, or "" for unix socket
-  "Method": "GET",               // HTTP method
-  "Path": "/v1.47/containers/json",
-  "PathPlain": "/containers/json?all=true",   // Path without API version
-  "Headers": { "X-My-Header": ["true"] },
-  "Body": {
-    "Labels": { "key": "value" },
-    "HostConfig": {
-      "Binds": ["/src:/dst"],
-      "Mounts": [{"Source": "/src", "Target": "/dst", "Type": "bind"}]
-    },
-    "Name": "/container-name"
-  }
-}
+`BUILDKIT_PREFIX` (P-11) is **retired**: R-17 removed the BuildKit carve-out, so
+nothing reads that token and it is gone from the file. The leftover check below
+still greps for it, so deploying a copy of the pre-0.4.0 template is caught
+rather than silently accepted.
+
+The deployed copy must be checked, not assumed — and the check must ignore
+comments, which name the tokens on purpose:
+
+```
+awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print FILENAME":"FNR": "$0}' <deployed>.rego
 ```
 
-## Output
+No output means every token that the engine sees was substituted.
 
-The policy sets `allow` to `true` or `false`. The `authorize-docker-requests` plugin
-reads this value. If `allow` is undefined or `false`, the plugin returns
-`403 Forbidden: authorization denied by plugin authorize-docker-requests`.
+## The Input Document
 
-## Evaluation Model
+The plugin enriches the request the daemon passes it (Docker's
+`AuthZPlugin.AuthZReq` message) before evaluating the policy:
 
-- Every rule is evaluated from every request — there is no caching.
-- If `allow` is not set by any rule, it defaults to `false` (the `default allow := false` declaration).
-- Multiple `allow if { ... }` rules are OR-ed: the request is allowed if ANY rule's conditions are true.
-- Multiple conditions inside one rule are AND-ed: all must be true.
+| Field | Type | Meaning |
+|-------|------|---------|
+| `input.User` | string | The TLS client certificate's subject common name; empty for unix-socket requests and for TCP clients without a certificate |
+| `input.AuthMethod` | string | `TLS` when the client authenticated with a certificate |
+| `input.Method` | string | HTTP method (`GET`, `HEAD`, `POST`, `DELETE`) |
+| `input.Path` | string | Request path with the API version prefix and query string |
+| `input.PathPlain` | string | Request path without the query string (plugin addition) |
+| `input.PathArr` | array | `PathPlain` split on `/` (plugin addition) |
+| `input.Headers` | object | Request headers as a flat `string → string` map — Docker's own message type is `map[string]string`, so a value is a string, never an array |
+| `input.Body` | object | Decoded JSON request body, or `null` for requests without one (a `DELETE` carries none) |
+| `input.Body.HostConfig` | object | The create's host-side configuration — `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`, `UsernsMode`, `Binds`, `Mounts` — and the whole of the R-15 gate |
+| `input.BindMounts` | array | One object per bind mount of a container-create request: `Source`, `ReadOnly`, `Resolved` (plugin addition) |
 
-## Idempotency
+`Resolved` is the source path with symlinks resolved, and it is the field that
+defeats the documented symlink bypass of bind-mount checks — but the plugin can
+only resolve paths it can read. A managed-plugin install mounts only the policy
+directory into the plugin, so `Resolved` is empty for project paths; a legacy
+install (plugin container started with the host filesystem readable) or a
+custom plugin `config.json` is what makes it useful. The policy therefore checks
+every witness of a mount — `Resolved`, `Source`, and the raw
+`HostConfig.Binds`/`HostConfig.Mounts` arrays — rather than the first that
+answers, and SCHEMATIC.md states which of them is effective in which deployment
+shape.
 
-Rego evaluation is pure (no side effects) and stateless. The same input always
-produces the same output. Policy files are read at plugin-enable time; changing
-a `.rego` file requires a plugin bounce (disable + enable) to take effect.
+## The Decision
+
+- The policy must be in package `docker.authz`; the plugin queries the `allow`
+  rule (`data.docker.authz.allow`).
+- `true` allows the request, `false` denies it, and an undefined/empty result
+  denies it (the engine treats a missing decision as denial).
+- A denial reaches the client as
+  `Error response from daemon: authorization denied by plugin <name>: ...`.
+- The policy is pure: same input, same decision, no side effects, no state.
+
+## Probes
+
+The decisions this package relies on, each an `opa eval` against the deployed
+file with a hand-built input. Every row below was run under OPA v0.60.0, v1.3.0,
+and v1.7.1 (the two embedded engines plus a newer one), and every row decides as
+its Expected column says on all three. Run them before trusting a change: a
+policy that loads is not a policy that decides correctly. Thirty of the rows
+decided wrongly before 0.4.0: 29 were "allow" where the answer is deny —
+R15.01–R15.18, R15.25, R15.28, R15.29, R15.33, R15.35, R16.01, R16.05, R18.02,
+R18.04, R18.05 and `/build/prune` — and one, `POST /session`, was denied where
+the answer is allow. The rest were already correct, and are listed so a future
+change cannot quietly break them.
+
+The `<P-3>` token below stands for the project name (`backend-services` with the
+defaults), `<P-15>` for the project directory (`/srv/compose/backend-services`),
+and every row is evaluated with the identity `User: <P-4>` unless it says
+otherwise.
+
+### R-15 — a create must not reach the host
+
+| Input | Expected |
+|-------|----------|
+| `POST /containers/create`, project label, `HostConfig{Privileged:true, Binds:["/:/host"], PidMode:"host"}` | deny |
+| same, project label, `CapAdd: ["SYS_ADMIN"]` | deny |
+| same, project label, `Devices: [{PathOnHost:"/dev/kvm"}]` | deny |
+| same, project label, `SecurityOpt: ["seccomp=unconfined"]` | deny |
+| same, project label, `VolumesFrom: ["host-container"]` | deny |
+| same, project label, `PidMode: "host"` | deny |
+| same, project label, `IpcMode: "host"` | deny |
+| same, project label, `NetworkMode: "host"` | deny |
+| same, project label, `NetworkMode: "container:<id>"` | deny — a joined namespace is the host's, one hop away |
+| same, project label, `CgroupnsMode: "host"` | deny |
+| same, project label, `UsernsMode: "host"` | deny |
+| same, project label, `Binds: ["/var/run/docker.sock:/var/run/docker.sock"]` | deny |
+| same, project label, `Binds: ["/etc:/host-etc"]` | deny |
+| same, project label, `Binds: ["<P-15>/../../etc:/x"]` | deny — the path starts with `<P-15>` but carries a `..` segment |
+| same, project label, `HostConfig.Mounts: [{Type:"bind", Source:"/root", Target:"/root"}]` | deny |
+| same, project label, `BindMounts: [{Source:"<P-15>/link", Resolved:"/etc"}]` | deny — the symlink case `Resolved` exists for |
+| same, project label, `BindMounts: [{Source:"/etc"}]`, no `HostConfig` mounts at all | deny — the plugin's enrichment alone is enough to refuse |
+| same with a *testcontainers* label instead, `Privileged: true` | deny — the gate covers every create grant |
+| `POST /containers/create` with a BuildKit container name and `Privileged: true` | deny — the name-prefix carve-out is gone (R-17) |
+| `POST /containers/create`, no label, no carve-out | deny — attribution is by label |
+| `POST /containers/create`, no label, but `Binds: ["<P-15>/src:/app/src"]` | deny — a project *path* is not attribution either |
+| `POST /containers/create`, label of another project | deny |
+| `POST /containers/create`, project label, no body | deny |
+| `POST /containers/<id>/attach`, body `{Name:"/buildx_buildkit_"}` | deny — a create-shaped body on another endpoint satisfies nothing |
+| `POST /containers/<id>/exec`, body `{Name:"/buildx_buildkit_", Cmd:["sh"]}` | deny — same, and exec is refused outright (R-6) |
+| `POST /containers/create`, project label, no `HostConfig` at all | allow — the ordinary compose create |
+| same, empty `HostConfig: {}` | allow |
+| same, `Binds: ["<P-15>/src:/app/src"]` | allow — a host path inside `<P-15>` |
+| same, `Binds: ["<P-3>_data:/var/lib/data"]` | allow — a named volume |
+| same, `HostConfig.Mounts: [{Type:"volume", Source:"<P-3>_data", Target:"/data"}]` | allow |
+| same, `HostConfig.Mounts: [{Type:"bind", Source:"<P-15>/x", Target:"/x"}]` | allow |
+| same, `HostConfig.Mounts: [{Source:"<P-15>/x", Target:"/x"}]` (no `Type`) | allow — an untyped entry is treated as a bind |
+| same, `HostConfig.Mounts: [{Source:"/etc", Target:"/etc"}]` (no `Type`) | deny |
+| same, `BindMounts: [{Source:"<P-15>/src"}]` (no `Resolved`) | allow — the absent-field case must not refuse a legitimate mount |
+| same, `BindMounts: [{Source:"<P-15>/src", Resolved:""}]` | allow — the managed-plugin shape, where `Resolved` cannot be filled |
+| same, `BindMounts: [{Source:"/etc"}]` (no `Resolved`) | deny |
+| testcontainers label, no `HostConfig` | allow |
+
+### R-17 — grants match a path exactly
+
+| Input | Expected |
+|-------|----------|
+| `POST /build` | allow |
+| `POST /build/prune` | deny — no match by prefix |
+| `POST /session` | allow — the BuildKit CLI session R-7's build needs |
+| `POST /containers/create?name=buildx_buildkit_default0`, no label | deny — a `name` query parameter attributes nothing, and the carve-out is gone |
+
+### R-12 — creation is scoped by name
+
+| Input | Expected |
+|-------|----------|
+| `POST /networks/create`, `{Name:"<P-3>_default"}` | allow |
+| `POST /networks/create`, `{Name:"other_default"}` | deny |
+
+### R-16 — a volume create may not be a host mount
+
+| Input | Expected |
+|-------|----------|
+| `POST /volumes/create`, `{Name:"<P-3>_root", Driver:"local", DriverOpts:{type:"none", o:"bind", device:"/"}}` | deny |
+| same, `{Name:"<P-3>_net", Driver:"nfs"}` | deny |
+| same, `{Name:"<P-3>_data", Driver:"local"}` | allow |
+| same, `{Name:"<P-3>_cache"}` (no driver) | allow |
+| same, `{Name:"other_data"}` | deny — a foreign name |
+
+### R-18 — deletes are scoped by name
+
+| Input | Expected |
+|-------|----------|
+| `DELETE /volumes/<P-3>_data` | allow |
+| `DELETE /networks/<P-3>_default` | allow |
+| `DELETE /volumes/hostdata` | deny |
+| `DELETE /networks/hostnet` | deny |
+| `DELETE /volumes/<64-hex id>` | deny — a delete that names the resource by id cannot be attributed; see Limitations |
+| `DELETE /containers/<id>` | allow — documented limitation: no attribution is possible |
+
+### Regressions — the rest of the contract
+
+| Input | Expected |
+|-------|----------|
+| `User: ""` (unix socket), any method, including a privileged create | allow — host users are unrestricted (R-10) |
+| `User: <P-4>`, `GET /containers/json` | allow — read-only grant (R-4) |
+| `User: <P-4>`, `HEAD /containers/json` | allow |
+| `User: <P-4>`, `POST /images/create` | allow — pull (R-7) |
+| `User: <P-4>`, `DELETE /images/<id>` | deny |
+| `User: <P-4>`, `POST /secrets/create` | deny |
+| `User: <P-4>`, `POST /containers/<id>/start` | allow — lifecycle allowlist (R-8) |
+| `User: <P-4>`, `POST /containers/<id>/stop` | allow |
+| `User: <P-4>`, `POST /containers/<id>/kill` | allow — an existing container, any id; see Limitations |
+| `User: <P-4>`, `POST /containers/<id>/update` | allow — same |
+| `User: <P-4>`, `POST /networks/<P-3>_default/connect` | allow (R-12) |
+| `User: <P-4>`, `POST /networks/other_default/connect` | deny |
+| `User: <P-4>`, `POST /volumes/<P-3>_data` (path-named operation) | allow |
+| `User: <P-4>`, `POST /volumes/other_data` | deny |
+| `User: <other>`, header `<P-9>: true`, `GET /containers/json` | allow — the header is the secondary identity |
+| `User: <other>`, header `<P-9>: true`, create with another project's label | deny — the header narrows to the sandbox, it does not grant a project |
+| `User: <other>` without the header, any method | allow — a non-sandbox identity is a host user |
 
 ## See Also
 
-- [Open Policy Agent documentation](https://www.openpolicyagent.org/docs/latest/policy-language/)
-- `skeleton/agent.rego` — the actual policy file using these patterns
-- `modules/opa-policy.md` — module contract for this policy
+- `skeleton/agent.rego` — the policy template this file describes
+- `schemas/spec-1/SCHEMATIC.md.schema` — the container-format companion
+- `https://www.openpolicyagent.org/docs/docker-authorization` — OPA's own
+  tutorial for this plugin, including an input document for a container-create
+  request

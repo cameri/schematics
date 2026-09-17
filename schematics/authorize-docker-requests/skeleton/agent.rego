@@ -2,37 +2,62 @@ package docker.authz
 
 # ─── OPA authorization policy for restricted Docker sandbox access ──
 #
-# This file contains PLACEHOLDERS that must be replaced with values from
-# the Parameters table in SCHEMATIC.md before deployment:
+# This file is a TEMPLATE: the PLACEHOLDER tokens below must be replaced with
+# values from the Parameters table in SCHEMATIC.md before it is deployed, and
+# no placeholder may remain in the deployed copy (the policy would silently
+# treat every sandbox client as a host client and allow everything — see the
+# deployment phase and its acceptance test).
 #
-#   SANDBOX_USERNAME          → P-4 value (e.g. "sandbox-agent")
-#   AUTH_HEADER_NAME          → P-9 header name (e.g. "X-Sandbox-Agent")
-#   PROJECT_NAME              → P-3 value (e.g. "backend-services")
-#   PROJECT_DIR_PATH          → host path to the project (e.g.
-#                               "/home/user/workspace/projects/myproject/")
-#   BUILDKIT_PREFIX           → P-11 value (e.g. "/buildx_buildkit_")
-#   TESTCONTAINERS_LABEL_KEY  → P-12 label key (e.g. "org.testcontainers")
-#   TESTCONTAINERS_LABEL_VALUE→ P-12 label value (e.g. "true")
+#   SANDBOX_USERNAME           → P-4 (client certificate CN), e.g. "sandbox-agent"
+#   AUTH_HEADER_NAME           → P-9 header name, e.g. "X-Sandbox-Agent"
+#   PROJECT_NAME               → P-3 compose project name, e.g. "backend-services"
+#   PROJECT_DIR_PATH           → P-15 host directory holding the project, e.g.
+#                                "/srv/compose/backend-services"
+#   TESTCONTAINERS_LABEL_KEY   → P-12 label key, e.g. "org.testcontainers"
+#   TESTCONTAINERS_LABEL_VALUE → P-12 label value, e.g. "true"
 #
-# Use `sed` to replace all occurrences of each placeholder, or edit by hand.
-# Example: sed -i 's/SANDBOX_USERNAME/sandbox-agent/g' agent.rego
+# (P-11 BUILDKIT_PREFIX is superseded: the BuildKit carve-out is gone, see
+# SCHEMATIC.md's Decisions. The leftover-token check in the package still greps
+# for the token, so a template carrying the old carve-out is still caught.)
+#
+# Language and engine: Rego v1 syntax, evaluated by the OPA engine embedded in
+# the plugin. The plugin release determines the engine (see P-10), measured from
+# the plugin's own go.mod at each tag: v0.10 embeds OPA v1.3.0, v0.9 embeds OPA
+# v0.60.0 — this file loads and decides identically on both, and on 1.7.1.
+# Older releases (v0.8, OPA v0.30) reject `import rego.v1`. Validate a change
+# with an engine no newer than the plugin's:
+#
+#   opa check agent.rego
+#   opa eval -f raw --data agent.rego --input probe.json data.docker.authz.allow
+#
+# The policy has two jobs, and the second one is the reason it exists: restrict
+# a sandbox client to its own compose project (R-5, R-12, R-18), and refuse any
+# request in that project's name that would reach the host (R-15, R-16). Every
+# create path passes `safe_container_config`; see the probe table in
+# agent.rego.schema for the requests this is asserted against.
 
-import future.keywords.in
+import rego.v1
 
 default allow := false
 
 # ─── Identity detection ──────────────────────────────────────────
+# The plugin sets input.User to the TLS client certificate's subject common
+# name; it is empty for unix-socket requests and for TCP clients without a
+# certificate.
 is_sandbox if {
-    input.User == "SANDBOX_USERNAME"
+	input.User == "SANDBOX_USERNAME"
 }
 
+# The header is the secondary signal. Docker's authorization request carries
+# headers as `map[string]string`, so the value is a string and only a string is
+# compared here.
 is_sandbox if {
-    input.Headers["AUTH_HEADER_NAME"] == "true"
+	input.Headers["AUTH_HEADER_NAME"] == "true"
 }
 
 # ─── Host users (unix socket) — unrestricted ─────────────────────
 allow if {
-    not is_sandbox
+	not is_sandbox
 }
 
 # ─── Sandbox default ─────────────────────────────────────────────
@@ -40,148 +65,357 @@ default allow_sandbox := false
 
 # ─── Read-only operations ────────────────────────────────────────
 allow_sandbox if {
-    is_sandbox
-    input.Method in {"GET", "HEAD"}
+	is_sandbox
+	input.Method in {"GET", "HEAD"}
 }
 
 # ─── Image builds ────────────────────────────────────────────────
+# `/build` exactly: equality, not `contains`, so that no neighbouring endpoint
+# (/build/prune) and no path that merely contains the string is granted.
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/build")
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/build"
+}
+
+# `/session` is the CLI's BuildKit session endpoint: the daemon's built-in
+# builder asks the client for build inputs over it, so a build on a
+# BuildKit-enabled daemon (the default) needs it. It is granted for the same
+# reason `/build` is: the client runs the build, and the session serves data
+# the client already holds. Without it, R-7's build test fails on a default
+# daemon — see SCHEMATIC.md's Decisions.
+allow_sandbox if {
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/session"
 }
 
 # ─── Image pulls ─────────────────────────────────────────────────
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/images/create")
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/images/create"
 }
 
-# ─── Container create — only if it belongs to the project ────────
+# ─── Container create — the project's label and a safe config ────
+# Equality on PathPlain matters twice: the daemon forwards a JSON body to the
+# plugin for *any* endpoint whose content type is JSON, and the attach/exec
+# handlers ignore fields they do not know — so a rule matching a path prefix
+# could be satisfied by POST /containers/<id>/attach with a crafted body.
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/containers/create")
-    project_container
-}
-
-# ─── BuildKit builder containers (no compose labels) ──────────────
-allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/containers/create")
-    buildkit_builder
-}
-
-buildkit_builder if {
-    body := input.Body
-    name := object.get(body, ["Name"], "")
-    startswith(name, "BUILDKIT_PREFIX")
-}
-
-allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/containers/")
-    buildkit_builder
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/containers/create"
+	project_container
+	safe_container_config
 }
 
 # ─── Testcontainers containers (integration tests) ────────────────
+# No compose label, so the label is the identity here; the same R-15 gate
+# applies, which means a test container may only mount paths inside P-15.
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/containers/create")
-    testcontainers_container
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/containers/create"
+	testcontainers_container
+	safe_container_config
 }
 
 testcontainers_container if {
-    body := input.Body
-    labels := object.get(body, ["Labels"], {})
-    object.get(labels, ["TESTCONTAINERS_LABEL_KEY"], "") == "TESTCONTAINERS_LABEL_VALUE"
+	input.Body.Labels["TESTCONTAINERS_LABEL_KEY"] == "TESTCONTAINERS_LABEL_VALUE"
 }
 
+# ─── R-15: refuse a container that could reach the host ──────────
+# This is the gate every create path passes. It rejects, in order: a privileged
+# container, added capabilities, host devices, a relaxed security profile,
+# inherited volumes, a host or joined namespace, an explicit userns mode, and
+# any mount whose source is not a volume name or a path inside the project
+# directory.
+safe_container_config if {
+	not host_access_config
+	not unsafe_bind
+}
+
+host_access_config if {
+	host_config.Privileged == true
+}
+
+host_access_config if {
+	count(object.get(host_config, "CapAdd", [])) > 0
+}
+
+host_access_config if {
+	count(object.get(host_config, "Devices", [])) > 0
+}
+
+host_access_config if {
+	count(object.get(host_config, "SecurityOpt", [])) > 0
+}
+
+# `--volumes-from` copies another container's mounts — including whatever host
+# paths that container holds — into this one.
+host_access_config if {
+	count(object.get(host_config, "VolumesFrom", [])) > 0
+}
+
+host_access_config if {
+	host_namespace_mode(host_config.PidMode)
+}
+
+host_access_config if {
+	host_namespace_mode(host_config.IpcMode)
+}
+
+host_access_config if {
+	host_namespace_mode(host_config.NetworkMode)
+}
+
+host_access_config if {
+	host_namespace_mode(host_config.CgroupnsMode)
+}
+
+host_access_config if {
+	host_config.UsernsMode == "host"
+}
+
+# A namespace is granted either by joining the host's or by joining another
+# container's: `container:<id>` on a host-networked container is the host's
+# network, one hop away. Deliberate extension of R-15's list; see the probe
+# table. It does mean a compose `network_mode: service:<name>` is refused.
+host_namespace_mode(mode) if {
+	is_string(mode)
+	mode == "host"
+}
+
+host_namespace_mode(mode) if {
+	is_string(mode)
+	startswith(mode, "container:")
+}
+
+# ─── R-15: mounts ────────────────────────────────────────────────
+unsafe_bind if {
+	some m in object.get(host_config, "Binds", [])
+	not bind_ok(split(m, ":")[0])
+}
+
+unsafe_bind if {
+	some m in object.get(host_config, "Mounts", [])
+	not mount_ok(m)
+}
+
+# The plugin's own enrichment: `Resolved` is the source with symlinks resolved,
+# so it is the field that catches a link inside the project directory pointing
+# outside it. It is empty when the plugin cannot read the host path (a
+# managed-plugin install), in which case the raw source is what gets checked.
+unsafe_bind if {
+	some bm in object.get(input, ["BindMounts"], [])
+	not bindmount_ok(bm)
+}
+
+bindmount_ok(bm) if {
+	is_string(bm.Resolved)
+	bm.Resolved != ""
+	bind_ok(bm.Resolved)
+}
+
+bindmount_ok(bm) if {
+	not resolved_source(bm)
+	bind_ok(bm.Source)
+}
+
+resolved_source(bm) if {
+	r := object.get(bm, "Resolved", "")
+	is_string(r)
+	r != ""
+}
+
+# A named or anonymous volume: Docker treats a source that is not an absolute
+# path as a volume name. Volume *creation* is what R-16 constrains, so a
+# project volume mounted here is the legitimate case this must not refuse.
+bind_ok(src) if {
+	is_string(src)
+	not startswith(src, "/")
+}
+
+# A host path inside the project directory, with no traversal segment: a source
+# of "/srv/compose/backend-services/../../etc" starts with the project
+# directory but is not inside it.
+bind_ok(src) if {
+	is_string(src)
+	in_project_path(src)
+}
+
+in_project_path(p) if {
+	not traversal(p)
+	project_dir == p
+}
+
+in_project_path(p) if {
+	not traversal(p)
+	startswith(p, concat("", [project_dir, "/"]))
+}
+
+traversal(p) if {
+	some segment in split(p, "/")
+	segment == ".."
+}
+
+project_dir := trim_suffix("PROJECT_DIR_PATH", "/")
+
+mount_ok(m) if {
+	m.Type == "volume"
+}
+
+mount_ok(m) if {
+	m.Type == "tmpfs"
+}
+
+mount_ok(m) if {
+	m.Type == "bind"
+	bind_ok(m.Source)
+}
+
+# An entry with no type is treated as a bind: its source decides.
+mount_ok(m) if {
+	not is_string(object.get(m, "Type", null))
+	bind_ok(m.Source)
+}
+
+host_config := object.get(input, ["Body", "HostConfig"], {})
+
 # ─── Container lifecycle actions (closed allowlist) ──────────────
+# Any container id: the authorization request for an operation on an existing
+# container carries no body and names its target only by id, so no policy at
+# this interface can attribute it to a project (see SCHEMATIC.md's
+# Limitations).
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/containers/")
-    lifecycle_action
+	is_sandbox
+	input.Method == "POST"
+	startswith(input.PathPlain, "/containers/")
+	lifecycle_action
 }
 
 lifecycle_action if {
-    some action
-    actions := {
-        "start", "stop", "restart", "kill",
-        "pause", "unpause", "wait", "update",
-    }
-    action = actions[_]
-    endswith(input.PathPlain, sprintf("/%s", [action]))
+	some action in {
+		"start", "stop", "restart", "kill",
+		"pause", "unpause", "wait", "update",
+	}
+	endswith(input.PathPlain, sprintf("/%s", [action]))
 }
 
-# ─── Container delete ────────────────────────────────────────────
+# ─── Container delete (documented limitation, see Limitations) ───
 allow_sandbox if {
-    is_sandbox
-    input.Method == "DELETE"
-    contains(input.PathPlain, "/containers/")
+	is_sandbox
+	input.Method == "DELETE"
+	startswith(input.PathPlain, "/containers/")
 }
 
-# ─── Network operations — only for project ───────────────────────
+# ─── Network and volume creation ─────────────────────────────────
+# Creation is project-scoped through the resource name in the request body
+# (compose names its networks and volumes "<project>_<suffix>"). A volume
+# create additionally passes R-16: a project-named volume must not be a
+# disguised host mount.
 allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/networks/")
-    project_resource
-}
-
-allow_sandbox if {
-    is_sandbox
-    input.Method == "DELETE"
-    contains(input.PathPlain, "/networks/")
-}
-
-# ─── Volume operations — only for project ────────────────────────
-allow_sandbox if {
-    is_sandbox
-    input.Method == "POST"
-    contains(input.PathPlain, "/volumes/")
-    project_resource
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/networks/create"
+	project_named_body
 }
 
 allow_sandbox if {
-    is_sandbox
-    input.Method == "DELETE"
-    contains(input.PathPlain, "/volumes/")
+	is_sandbox
+	input.Method == "POST"
+	input.PathPlain == "/volumes/create"
+	project_named_body
+	safe_volume_create
+}
+
+# ─── R-16: a volume create may not carry driver options ──────────
+# `DriverOpts: {type: none, o: bind, device: /}` turns a project-named volume
+# into the host filesystem; a project container then mounts it. Only the local
+# driver with no options is accepted.
+safe_volume_create if {
+	not volume_driver_opts
+	volume_driver_ok
+}
+
+volume_driver_opts if {
+	opts := object.get(input.Body, "DriverOpts", {})
+	is_object(opts)
+	count(opts) > 0
+}
+
+volume_driver_ok if {
+	# object.get, not `not is_string(...)`: a builtin call on a missing field
+	# makes the whole rule fail rather than fall through, so the absent-driver
+	# case would have been denied. A missing driver means the default (`local`).
+	object.get(input.Body, "Driver", "local") in {"", "local"}
+}
+
+# ─── Path-named network and volume operations ────────────────────
+# Attach/detach and other in-place operations name the resource in the path, so
+# the project is matched as a whole path segment.
+allow_sandbox if {
+	is_sandbox
+	input.Method == "POST"
+	startswith(input.PathPlain, "/networks/")
+	project_path_resource
+}
+
+allow_sandbox if {
+	is_sandbox
+	input.Method == "POST"
+	startswith(input.PathPlain, "/volumes/")
+	project_path_resource
+}
+
+# ─── R-18: deletes are scoped the same way ───────────────────────
+# `docker compose down` deletes its own network and volumes by name, and a
+# delete names the resource in the path, so the same whole-segment match
+# applies. A delete by opaque id does not match and is refused; container
+# deletes stay unscoped above, because their request carries nothing at all.
+allow_sandbox if {
+	is_sandbox
+	input.Method == "DELETE"
+	startswith(input.PathPlain, "/networks/")
+	project_path_resource
+}
+
+allow_sandbox if {
+	is_sandbox
+	input.Method == "DELETE"
+	startswith(input.PathPlain, "/volumes/")
+	project_path_resource
 }
 
 # ─── Project resource detection ──────────────────────────────────
 project_container if {
-    body := input.Body
-    labels := object.get(body, ["Labels"], {})
-    object.get(labels, ["com.docker.compose.project"], "") == "PROJECT_NAME"
+	input.Body.Labels["com.docker.compose.project"] == "PROJECT_NAME"
 }
 
-project_resource if {
-    contains(input.Path, "PROJECT_NAME")
+project_named_body if {
+	input.Body.Name == "PROJECT_NAME"
 }
 
-project_resource if {
-    some mount
-    mounts := object.get(input.Body, ["HostConfig", "Binds"], [])
-    mount = mounts[_]
-    contains(mount, "PROJECT_DIR_PATH")
+project_named_body if {
+	startswith(input.Body.Name, "PROJECT_NAME_")
 }
 
-project_resource if {
-    some m
-    mounts := object.get(input.Body, ["HostConfig", "Mounts"], [])
-    m = mounts[_]
-    source := object.get(m, ["Source"], "")
-    contains(source, "PROJECT_DIR_PATH")
+# The plugin enriches the input with PathArr (the request path split on "/"),
+# so a resource named in the path is matched as a whole segment rather than as
+# a substring of the path, which also means the query string cannot satisfy it.
+project_path_resource if {
+	some segment in input.PathArr
+	segment == "PROJECT_NAME"
+}
+
+project_path_resource if {
+	some segment in input.PathArr
+	startswith(segment, "PROJECT_NAME_")
 }
 
 # ─── Final decision ──────────────────────────────────────────────
 allow if {
-    is_sandbox
-    allow_sandbox
+	is_sandbox
+	allow_sandbox
 }

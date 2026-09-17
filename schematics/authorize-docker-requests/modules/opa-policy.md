@@ -1,73 +1,206 @@
 # Module: OPA Policy
 
 The Rego authorization policy that decides which Docker API calls the sandbox
-may perform. Evaluated by the `authorize-docker-requests` plugin on every daemon request.
+may perform. The policy file is `skeleton/agent.rego`; it is evaluated by the
+authorization plugin on every daemon request.
 
 ## Purpose
 
-Implements the authorization rules defined in R-1 through R-12. The policy
-distinguishes sandbox clients (by TLS certificate CN or HTTP header) from
-local host users, grants the sandbox read-only access by default, and then
-selectively permits compose project operations, image builds, pulls, and a
-closed lifecycle allowlist. Everything else is denied. Local host users (unix
-socket, no TLS) pass through unrestricted.
+Implements the authorization rules defined in R-1 through R-18. The policy
+distinguishes sandbox clients (by TLS certificate CN or HTTP header) from local
+host users, grants the sandbox read-only access by default, and then selectively
+permits compose project operations, image builds, pulls, and a closed lifecycle
+allowlist. Everything else is denied. Local host users (unix socket, no TLS)
+pass through unrestricted.
+
+Four of those rules are what the policy does *beyond* naming a project, and they
+exist because "may create containers in its project" and "may create any
+container, in its project" are different grants:
+
+- **R-15** — every create path that carries the project label (or the
+  testcontainers label) must additionally pass a host-access gate: no
+  `Privileged`, no `CapAdd`, no `Devices`, no `SecurityOpt`, no `VolumesFrom`,
+  no host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
+  `CgroupnsMode`), no `UsernsMode`, and no mount whose source is neither a
+  volume name nor a path inside `P-15`.
+- **R-16** — a volume create may not carry `DriverOpts`, and its driver must be
+  `local` (or unset). `DriverOpts: {type: none, o: bind, device: /}` makes a
+  project-named volume the host filesystem.
+- **R-17** — grants match a path by *equality* (`/build`, `/images/create`,
+  `/containers/create`), never by substring, and no carve-out may be reachable
+  from another endpoint — a create-shaped body on `/containers/<id>/attach` or
+  `/exec` must not satisfy the create rule.
+- **R-18** — network and volume deletes are scoped by the project as a whole
+  path segment, the same way creation is scoped by name.
 
 ## Inputs
 
-- `input.User` — string. Set by the plugin from the TLS client certificate CN.
-  Empty string for unix-socket (host) requests. Value `"sandbox-agent"` for
-  sandbox clients.
+The plugin enriches the request the daemon passes it (`AuthZPlugin.AuthZReq`)
+before evaluation. Fields the policy uses:
+
+- `input.User` — string. The TLS client certificate's subject common name;
+  empty for unix-socket requests and for TCP clients that present no
+  certificate. Value `P-4` for sandbox clients.
+- `input.AuthMethod` — string. `TLS` when the client authenticated with a
+  certificate.
 - `input.Method` — string. HTTP method: `GET`, `HEAD`, `POST`, `DELETE`.
-- `input.PathPlain` — string. Request path without API version prefix, e.g.
-  `/containers/json`, `/images/create`, `/build`.
-- `input.Headers` — object (string → string array). HTTP headers. The
-  `X-Sandbox-Agent` header with value `"true"` is used as a secondary identity
-  check.
-- `input.Body.Labels` — object (string → string). Container labels, present
-  only on container-create requests. Contains `com.docker.compose.project`
-  for compose-created containers.
-- `input.Body.HostConfig.Binds` — array of strings. Bind mount specifications,
-  e.g. `["/src/path:/dst/path"]`.
-- `input.Body.HostConfig.Mounts` — array of objects. JSON-style mount specs,
-  each with `Source`, `Target`, `Type` keys.
-- `input.Body.Name` — string. Container name, present on container-create
-  requests. Used to detect BuildKit builder containers (prefix `/buildx_buildkit_`).
+- `input.PathPlain` — string. Request path without the query string, e.g.
+  `/containers/json`, `/images/create`, `/build`. Grants are matched against it
+  with `==` (R-17).
+- `input.PathArr` — array. `PathPlain` split into path elements. Used to match a
+  resource named in the path as a whole segment rather than as a substring.
+- `input.Headers` — object. Header names to header values, as plain strings
+  (`map[string]string` in Docker's own message type, so a value is never an
+  array). The header named by `P-9` with the value `true` is the secondary
+  identity check.
+- `input.Body` — object or `null`. Decoded JSON request body. `null` for
+  requests that carry none, which is every `DELETE` and most `GET`s.
+- `input.Body.Labels` — object. Container labels. Contains
+  `com.docker.compose.project = P-3` for containers created by the project's
+  compose file.
+- `input.Body.Name` — string. Network or volume name. Compose names its
+  networks and volumes `<project>_<suffix>`. A *container* name is not here:
+  Docker takes it from the `name` query parameter, which is why the create
+  grant does not read it at all.
+- `input.Body.Driver`, `input.Body.DriverOpts` — a volume create's driver and
+  driver options; R-16 refuses a non-`local` driver and any non-empty
+  `DriverOpts`.
+- `input.Body.HostConfig` — the create's host-side configuration, and the whole
+  of the R-15 gate: `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`,
+  `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`,
+  `UsernsMode`, `Binds`, `Mounts`.
+- `input.BindMounts` — array of objects with `Source`, `ReadOnly`, and
+  `Resolved` (the source path with symlinks resolved). Derived from either
+  `HostConfig.Binds` or `HostConfig.Mounts`. The policy checks every witness of
+  a mount — `Resolved` where the plugin supplies it, then `Source`, then the raw
+  arrays — rather than the first that answers, so an inconsistency between them
+  refuses the create instead of passing it. It is not used to attribute a
+  create to the project; the label does that.
 
 ## Outputs
 
-- `allow` — boolean. The `authorize-docker-requests` plugin reads this as the
-  authorization decision. Must evaluate to `true` for the request to proceed;
-  any other value (or undefined) denies the request with a `403 Forbidden`
-  response containing `"authorization denied by plugin authorize-docker-requests"`.
+- `allow` in package `docker.authz` — boolean. The plugin queries
+  `data.docker.authz.allow` for the authorization decision. `true` allows the
+  request; `false` or an undefined result denies it, and the client sees
+  `authorization denied by plugin <name>`.
 
 Side effects: none. The Rego evaluation is pure and stateless.
+
+## Language and Engine
+
+The policy ships in **Rego v1** syntax (`import rego.v1`, `if` rule heads,
+`some x in`). It is evaluated by the OPA engine compiled into the plugin image,
+so the plugin release decides the language version:
+
+| Plugin image | Embedded OPA | Result |
+|--------------|--------------|--------|
+| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 71 probe rows decides as specified |
+| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 71 probe rows |
+| `openpolicyagent/opa-docker-authz-v2:0.8` | v0.30.0 | does **not** load — `import rego.v1` is rejected |
+
+The embedded versions are read from each release's own `go.mod` at its tag
+(`v0.10` → `github.com/open-policy-agent/opa v1.3.0`), and the probe table was
+then run under those engines and under a newer one (v1.7.1) as a forward check.
+
+A change to the policy is validated with the engine that will run it
+(`opa check`, then `opa eval` probes as listed in
+`skeleton/agent.rego.schema`). Validating with a newer `opa` binary than the
+plugin's engine proves nothing about the plugin.
+
+## Placeholders
+
+`agent.rego` is a template: six tokens must be substituted from the Parameters
+table before deployment, and the deployed file must be checked for leftovers.
+A leftover is a silent full-access bug, not a cosmetic one: `is_sandbox` then
+never matches a real client, so the sandbox is classified as a host user and
+every request is allowed. See Phase 6 and its acceptance test.
+
+(`P-11`'s `BUILDKIT_PREFIX` token is retired — R-17 removed the BuildKit
+carve-out — but the leftover check still greps for it, so deploying a copy of
+the pre-R-17 template is caught rather than silently accepted.)
+
+## Limitations
+
+These are properties of the authorization interface, not defects to be fixed
+later; the deployment must be aware of them (SCHEMATIC.md states them as
+limitations):
+
+- **A `DELETE` or a lifecycle call on an existing *container* carries nothing
+  that attributes it to a project.** The request body is `null` and the path
+  holds only an id or name. `docker compose down` needs those calls, so they are
+  allowed for any container the client can name. Network and volume deletes are
+  scoped (R-18) because their path names the resource; container deletion and
+  lifecycle calls are not.
+- **The R-15 gate refuses in the safe direction.** A create that asks for a
+  field the gate knows is refused even where the field is exotic rather than
+  dangerous — a `DriverOpts`-bearing local volume (R-16), a compose
+  `network_mode: service:<name>`, a mount that names a resource by id. Every one
+  of those has a form that is allowed (no `DriverOpts`, an explicit network, a
+  name); a deployment that needs the refused form must extend the policy
+  deliberately, and the probe table must grow a row with it.
+- **Host port publishing is not part of the gate.** A project container may
+  publish a host port (`ports:`), which does not read the host filesystem but
+  can occupy a free port and answer for it. Closing that is the daemon
+  configuration's or the firewall's job; see SCHEMATIC.md's Limitations.
+- **Identity is what the client presents, not what it is.** Any TLS client whose
+  certificate CN is not exactly `P-4`, and any client reaching the unix socket,
+  is treated as a host user and allowed everything. The CA must sign sandbox
+  certificates only for `P-4`; a second certificate signed by the same CA with a
+  different CN is a host-equivalent credential.
+- **The mount check is only as good as the plugin's filesystem view.** A
+  managed-plugin install mounts only the policy directory into the plugin, so
+  `Resolved` is empty for project paths and the check falls back to the raw
+  source strings — which a symlink inside `P-15` pointing outside it satisfies.
+  Sources with a `..` segment are refused outright, so the residual case is a
+  symlink, not a traversal. A legacy install (or a rebuilt plugin `config.json`
+  with the host filesystem mounted read-only) is what makes symlink resolution
+  effective. The check applies to every container create (R-15); it is not
+  consulted for attribution.
 
 ## Dependencies
 
 - D-1, D-3, D-4 (from SCHEMATIC.md)
-- Parameters P-3, P-4, P-8, P-9, P-11, P-12
+- Parameters P-3, P-4, P-9, P-12, P-15 (P-11 is retired with the BuildKit
+  carve-out, R-17)
 
 ## Failure Behavior
 
-- If the policy file is absent or malformed, the OPA plugin fails to start
-  (plugin enable fails with a compile error). Docker continues running but
-  without authorization — all requests pass through until the plugin is
-  re-enabled with a valid policy.
-- If the policy is missing a rule that should match (e.g. a new compose
-  project), the default `allow := false` denies the request. This is a safe
-  failure.
+Failure behavior has two independent halves, and they point in opposite
+directions. Both were read from the plugin's and Docker's own documentation:
+
+- **The daemon fails closed.** When the plugin is unreachable or returns an
+  error, the Engine's authorization middleware denies the request and surfaces
+  the error to the client. A dead plugin is an outage for every client,
+  including host users, not an open door.
+- **The plugin fails open if it was given no policy.** A plugin installed
+  without a `-policy-file` or `-config-file` argument answers *every* request
+  with "allow". This is why the install step must pass `opa-args` and why the
+  deployment verifies it (Phase 3 and its acceptance test).
+- **A malformed policy is a third case**: the plugin cannot compile it, so it
+  does not serve a decision and the daemon's fail-closed behavior applies.
+  Installing a policy therefore cannot silently open the daemon, but deploying
+  one with unresolved placeholders can (see Placeholders above).
+- **If the policy is missing a rule that should match** (e.g. a new compose
+  project), `default allow_sandbox := false` denies the request. That is the
+  intended direction.
 
 ## Idempotency Notes
 
 - The Rego policy is pure (no side effects) and stateless. Re-evaluating it a
   thousand times with the same input gives the same result.
-- Policy file writes are idempotent: `install -m 644 agent.rego P-7/agent.rego`
-  overwrites in place. The plugin must be bounced to pick up changes.
+- Substitution is idempotent as long as the tokens are gone afterwards; the
+  leftover check makes a second run report "nothing to do" rather than corrupt
+  an already-substituted file.
+- Policy file writes are idempotent: `install -m 644 agent.rego <POLICY_DIR>/agent.rego`
+  overwrites in place.
 
 ## Removal Notes
 
-- Remove the file: `rm P-7/agent.rego`
-- Disable the plugin: `docker plugin disable authorize-docker-requests`
-- Without the plugin, Docker runs without authorization — the sandbox gets
-  full Docker access over TLS. To restore the unsecured state, remove the
-  plugin and restart dockerd without the authorization-plugins config.
+- Remove the file: `rm <POLICY_DIR>/agent.rego`
+- Remove the plugin from `authorization-plugins` **first**, then uninstall it:
+  removing the plugin while the daemon still references it leaves the daemon
+  failing closed, which is an outage rather than a rollback.
+- With the policy gone and the plugin no longer referenced, the daemon accepts
+  every authenticated client again: the sandbox's TLS client keeps working, and
+  is no longer restricted. Removing this capability is a deliberate return to
+  "anyone who can reach the daemon can do anything".
