@@ -56,6 +56,7 @@ request is allowed.
 | `PROJECT_DIR_PATH` | P-15 | `/srv/compose/backend-services` |
 | `TESTCONTAINERS_LABEL_KEY` | P-12 | `org.testcontainers` |
 | `TESTCONTAINERS_LABEL_VALUE` | P-12 | `true` |
+| `EXTRA_BIND_ROOTS` | P-16 | `/srv/media,/srv/downloads` (or empty) |
 
 `BUILDKIT_PREFIX` (P-11) is not read by this file: no rule uses it. The leftover
 check below still greps for it, so a copy that carries the token is caught
@@ -65,7 +66,7 @@ The deployed copy must be checked, not assumed — and the check must ignore
 comments, which name the tokens on purpose:
 
 ```
-awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print FILENAME":"FNR": "$0}' <deployed>.rego
+awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|EXTRA_BIND_ROOTS|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print FILENAME":"FNR": "$0}' <deployed>.rego
 ```
 
 No output means every token that the engine sees was substituted.
@@ -173,6 +174,13 @@ defaults), `<P-15>` for the project directory (`/srv/compose/backend-services`),
 and every row is evaluated with the identity `User: <P-4>` unless it says
 otherwise.
 
+`<P-16>` stands for the extra bind roots of the deployment a row describes. The
+rows that name an accepted extra root are evaluated with `P-16` set
+to `/srv/media,/srv/data/known_hosts` — deliberately a directory **and** a single
+file — and **every other row in this file is evaluated with `P-16` empty**, which
+is the parameter's default. State the value a row used when you re-run it; a row
+that grants a bind proves nothing about the default deployment.
+
 ### R-15 — a create must not reach the host
 
 | Input | Expected |
@@ -214,6 +222,14 @@ otherwise.
 | same, `BindMounts: [{Source:"<P-15>/src", Resolved:""}]` | allow — the managed-plugin shape, where `Resolved` cannot be filled |
 | same, `BindMounts: [{Source:"/etc"}]` (no `Resolved`) | deny |
 | testcontainers label, no `HostConfig` | allow |
+| same, `Binds: ["/srv/media/downloads:/data"]` | allow — a bind source inside an accepted extra root |
+| same, `Binds: ["/srv/media:/data"]` | allow — the root itself |
+| same, `HostConfig.Mounts: [{Type:"bind", Source:"/srv/media/lib", Target:"/lib"}]` | allow |
+| same, `Binds: ["/srv/data/known_hosts:/known:ro"]` | allow — a single file named exactly in `P-16` |
+| same, `Binds: ["/srv/data/other"]` | deny — naming the file does not grant the directory holding it |
+| same, `Binds: ["/srv/mediaX:/x"]` | deny — a root is a path boundary, not a string prefix |
+| same, `Binds: ["/srv/media/../../etc:/x"]` | deny — traversal under an accepted root; this is what a prefix grant otherwise reaches |
+| same, `BindMounts: [{Source:"/srv/media/x", Resolved:"/etc"}]` | deny — the symlink case still applies inside an extra root |
 
 ### R-17 — grants match a path exactly
 

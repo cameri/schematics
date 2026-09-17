@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: authorize-docker-requests
-version: 0.5.0
+version: 0.6.0
 status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
@@ -205,12 +205,27 @@ deployment that does not accept them is deploying something else.
   than the first that answers — and the raw source is refused outright when it
   contains a `..` segment. Closing the remainder means a plugin installation
   that can read the host paths it checks.
+- **The bind allow-list is exactly as wide as `P-15` plus `P-16`.** A bind
+  source is the one input to this decision where the operator's real layout, not
+  the API's shape, decides what is legitimate: a host whose stacks keep
+  downloads, libraries or documents outside the project directory cannot create
+  those containers at all until each such root is named in `P-16`. Two
+  consequences follow. A root is a *prefix* grant — naming `/srv/media` accepts
+  its whole subtree, so name the narrowest root that covers the deployment, and
+  name a single file exactly rather than its directory when only that file is
+  intended (a directory holding private keys stays out while one named file
+  inside it can be named). And traversal is refused under every root, because
+  `path..` is what a prefix grant otherwise reaches: `<P-16>/../../etc` starts
+  with the root and is still refused. An unsubstituted `EXTRA_BIND_ROOTS` token
+  on its own yields no root at all, so its failure direction is a denied create
+  rather than a widened boundary — the identity token is the one whose leftover
+  opens everything (R-13).
 - **A malformed or placeholder-bearing policy is not a security hole but an
   outage or an open door, depending on how it fails**: unresolved placeholders
   make every request allowed (R-13), while a policy that does not compile leaves
   the daemon failing closed.
 - **A probe table can only be as real as its inputs.** The policy is proven by
-  running engines and probes as described in `skeleton/agent.rego.schema` — 78
+  running engines and probes as described in `skeleton/agent.rego.schema` — 86
   rows, decision-checked on three OPA engines (OPA v0.60.0 and v1.3.0, the two
   the installable plugin releases embed, plus v1.7.1) — but a row decides only
   about the input it carries. A row fed a version-less `PathPlain` proves
@@ -361,7 +376,8 @@ deployment that does not accept them is deploying something else.
   security profile (`SecurityOpt`); another container's volumes (`VolumesFrom`);
   a host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
   `CgroupnsMode` naming `host` or `container:<id>`); an explicit `UsernsMode`;
-  and any mount whose source is neither a volume name nor a path inside `P-15`.
+  and any mount whose source is neither a volume name nor a path inside `P-15`
+  or inside one of the roots `P-16` names.
   The same gate MUST apply to every create-equivalent path the policy grants —
   the compose-label create, the testcontainers create, and volume creation
   (R-16) — so no grant can be used to reach the host. Host port publishing is
@@ -460,6 +476,7 @@ deployment that does not accept them is deploying something else.
 | P-13 | DAEMON_CONFIG_FILE      | path   | /etc/docker/daemon.json          | A snap-installed daemon uses `/var/snap/docker/current/config/daemon.json` instead; discovery: `systemctl show docker --property=FragmentPath,ExecStart` | The file the daemon actually reads. Writing the other path has no effect (see the daemon-config module) |
 | P-14 | OPA_PLUGIN_NAME         | string | opa-docker-authz                 | The name shown by `docker plugin ls` after install (the `--alias` value)   | The `authorization-plugins` entry, the reload script's target, and the name in denial messages |
 | P-15 | PROJECT_DIR             | path   | (discovered)                     | The host directory of the compose project — `docker inspect <c> --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'` for a container of that project | The policy's host-path boundary (R-15): a mount source must be under this directory (or be a volume name) for a create to be allowed. Attribution is unchanged — by label for container creates, by name or path segment for network and volume calls — and the directory is no longer consulted for attribution at all |
+| P-16 | EXTRA_BIND_ROOTS        | list   | (empty)                          | The bind sources already in use on this host: `docker ps -q \| xargs docker inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| sort -u`, then keep the roots this deployment accepts — discovery is a decision, not a lookup | Further roots whose bind sources are accepted (R-15), as comma-separated absolute directories. Each root is a prefix grant and is as narrow as it is written: a directory accepts its whole subtree, and a single file may be named exactly, without granting the directory holding it. Empty — the default — accepts nothing beyond P-15. A `..` segment is refused under every root |
 
 ## Modules
 
@@ -687,8 +704,10 @@ Steps:
    snap package means `/var/snap/docker/current/config/daemon.json`; a
    distribution unit means `/etc/docker/daemon.json`. Confirm the file exists.
 7. Discover the certificate directory (P-6), the sandbox config directory (P-8),
-   the project name (P-3), and the project directory (P-15) using the discovery
-   commands in the Parameters table.
+   the project name (P-3), the project directory (P-15), and the extra bind roots
+   (P-16), using the discovery commands in the Parameters table. P-16 is a
+   decision rather than a lookup: list the bind sources the host's existing
+   containers already use, then record the roots this deployment accepts.
 8. Discover DOCKER_HOST_IP (P-1) from Tailscale or the LAN address.
 9. Verify port P-2 is free: `ss -tlnp '(sport = :P-2)'` — no listener yet. Skip
    if re-running after a failed later phase.
@@ -697,8 +716,8 @@ Verify:
 ```
 docker version --format '{{.Server.Version}}' && openssl version && python3 --version && systemctl --version
 ```
-All four commands exit 0, and P-13, P-6, P-8, P-3, P-15, P-1 are recorded — these
-values are substituted into the policy and the client configuration later, so a
+All four commands exit 0, and P-13, P-6, P-8, P-3, P-15, P-16, P-1 are recorded —
+these values are substituted into the policy and the client configuration later, so a
 value that is guessed here becomes a defect there.
 
 ### Phase 2: Create certificate authority and certificates
@@ -877,7 +896,7 @@ the sandbox then stops being recognised as a sandbox client at all.
 Root required: yes (writing under P-7).
 
 Steps:
-1. Substitute the six tokens from `skeleton/agent.rego` with the Phase 1
+1. Substitute the seven tokens from `skeleton/agent.rego` with the Phase 1
    values. Any mechanism is fine (editor, `sed`, a deployment script); the check
    in step 2 is what makes it safe:
    ```
@@ -887,12 +906,20 @@ Steps:
        -e 's#PROJECT_DIR_PATH#P-15 value#g' \
        -e 's#TESTCONTAINERS_LABEL_KEY#P-12 key#g' \
        -e 's#TESTCONTAINERS_LABEL_VALUE#P-12 value#g' \
+       -e 's#EXTRA_BIND_ROOTS#P-16 value#g' \
        skeleton/agent.rego > /tmp/agent.rego
    ```
-   `#` is the delimiter, not `/`: three of these values are paths
-   (`P-15` is `/srv/compose/backend-services` with the defaults) and a `/`
-   delimiter ends the `s` command at the first slash in the value. If a value
-   itself contains `#`, pick another character that appears in none of them. The
+   `P-16` goes in as one value whether it names one root or several
+   (`/srv/media,/srv/downloads`) and is empty for a deployment whose project
+   directory is the only accepted boundary. Empty is not the same as
+   unsubstituted: an empty value yields no extra root, while an unsubstituted
+   token yields a root that matches nothing — both are denied, and step 2 is
+   what makes the difference visible.
+   `#` is the delimiter, not `/`: several of these values are paths (`P-15` is
+   `/srv/compose/backend-services` with the defaults, and `P-16` is a list of
+   them), and a `/` delimiter ends the `s` command at the first slash in the
+   value. If a value itself contains `#`, pick another character that appears in
+   none of them. The
    `g` flag matters for the same reason it always does — a token appears more
    than once in the file — and the leftover check in step 2 is the guarantee, not
    the substitution command.
@@ -903,7 +930,7 @@ Steps:
 2. Check the substituted file for leftover tokens **in code lines** (comments
    name the tokens on purpose):
    ```
-   awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print FILENAME":"FNR": "$0}' /tmp/agent.rego
+   awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|EXTRA_BIND_ROOTS|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print FILENAME":"FNR": "$0}' /tmp/agent.rego
    ```
    Output must be empty. If it is not, stop and fix the substitution.
 3. Validate the policy against an engine **no newer than the plugin's** (P-10):
@@ -936,7 +963,7 @@ Steps:
 
 Verify:
 ```
-awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print}' P-7/agent.rego   # no output
+awk '!/^[[:space:]]*#/ && /SANDBOX_USERNAME|AUTH_HEADER_NAME|PROJECT_NAME|PROJECT_DIR_PATH|EXTRA_BIND_ROOTS|BUILDKIT_PREFIX|TESTCONTAINERS_LABEL/ {print}' P-7/agent.rego   # no output
 docker plugin ls --format '{{.Name}} enabled={{.Enabled}}' | grep -q "^P-14 enabled=true$"
 ```
 and then the denial test in Phase 8 — a plugin that is enabled but running a
