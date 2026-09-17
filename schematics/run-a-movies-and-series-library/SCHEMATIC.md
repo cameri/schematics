@@ -192,19 +192,19 @@ Decisions:
   feature (separate table, same pinning, degraded-mode behavior stated
   per row); canonical text in improve-docker-security's
   composition-convention module.
-- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
-  in this repository's history, to `81721d8`, the commit the surviving hashes
-  were computed from. D-2, D-5, and RD-2 are unchanged in content and hash.
-  D-3 (fetch-movies-over-usenet), D-4 (fetch-series-over-usenet), and RD-1
-  (improve-docker-security) carried hashes that match no content ever
-  published on `main`; they are re-pinned to the published contents at
-  `81721d8`. The glue was re-read against those three contracts as
-  published (issue #21): every R-n, P-n, A-n, phase, and module reference
-  this composition makes into them resolves, and MEDIA_ROOT-derived roots,
-  category maps, and key rules agree. One drift found and fixed: Phase 0
-  still named D-2 and D-3 only ("two green lists") from before the fetching
-  half was split into fetch-over-usenet, fetch-movies-over-usenet, and
-  fetch-series-over-usenet; it now orders all four dependencies. Patch bump.
+- 2026-09-17: Schematic dependencies are pinned to commit `81721d8` (the full
+  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+  pin (A-7) with
+  `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  and compare the result with the digest in the table. The cross-references
+  the glue relies on: R-3's key rule is fetch-over-usenet R-5, restated by
+  fetch-movies-over-usenet R-4 and fetch-series-over-usenet R-4; P-1 feeds
+  fetch-movies P-1 (`${MEDIA_ROOT}/movies`) and fetch-series P-1
+  (`${MEDIA_ROOT}/tvseries`); the categories both arrs register under come
+  from fetch-over-usenet P-6; RD-1's secrets layer (improve-docker-security
+  R-3) is what makes R-3 mechanical. Phase 0 runs the four dependencies in
+  registration order: the shared infrastructure first, the two arrs that
+  register with it, then the server. Version 0.2.2.
 
 Open questions:
 

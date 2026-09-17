@@ -232,10 +232,10 @@ Decisions:
   content SHA-256 (convention v2; see improve-docker-security's
   composition-convention module). Relative links are gone: the pinned
   URL is the version-of-record for the contract.
-- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
-  in this repository's history, to `81721d8`, the commit the pinned hashes
-  were computed from. Contents and hashes are unchanged; only the link was
-  dead (issue #21).
+- 2026-09-17: Schematic dependencies are pinned to commit `81721d8` (the full
+  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+  pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  and compare the result with the digest in the table.
 
 Open questions:
 

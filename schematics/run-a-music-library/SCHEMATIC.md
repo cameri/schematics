@@ -199,19 +199,18 @@ Decisions:
   recommended rather than required: music can run beside the shared
   infrastructure without the request front. Recommended dependencies
   may be compositions, not just capability schematics.
-- 2026-09-17: Dependency pins re-pointed from commit `56e02f9`, which is not
-  in this repository's history, to `81721d8`, the commit the surviving hashes
-  were computed from. D-3, D-4, and RD-2 are unchanged in content and hash.
-  D-2 (fetch-music-over-usenet), RD-1 (improve-docker-security), and RD-3
-  (run-a-movies-and-series-library) carried hashes that match no content
-  ever published on `main`; they are re-pinned to the published contents at
-  `81721d8`. The glue was re-read against those three contracts as
-  published (issue #21): R-1's reference to fetch-music-over-usenet R-1, the
-  navidrome pointer to its Q-1, the shared-downloader module, MUSIC_ROOT
-  and MUSIC_CATEGORY against its P-1/P-2, the audio category 3000 against
-  fetch-over-usenet P-6, RD-3's D-3/D-4 ownership note, and every phase
-  and acceptance reference all resolve; no drift found. Patch bump for the
-  re-pin.
+- 2026-09-17: Schematic dependencies are pinned to commit `81721d8` (the full
+  sha is in the link) with the SHA-256 of the file at that commit. Verify a
+  pin (A-6) with
+  `curl -s https://raw.githubusercontent.com/cameri/schematics/<commit>/<path> | sha256sum`
+  and compare the result with the digest in the table. The cross-references
+  the glue relies on: R-1 is fetch-music-over-usenet R-1 applied stack-wide;
+  P-2 is its P-1 (`${MEDIA_ROOT}/music`) and P-3 is its P-2; the audio
+  category (3000) is fetch-over-usenet P-6; the shared-downloader module named
+  under Interfaces is `modules/shared-downloader.md` in
+  fetch-music-over-usenet; RD-3 composes the same D-3 and D-4 this package
+  depends on, so it attaches after Phase 2 (see the recommended-attachments
+  module). Version 0.2.2.
 
 Open questions:
 
