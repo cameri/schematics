@@ -28,8 +28,8 @@ AUTH_PASSWORD=…
 
 The rule when migrating a value: **name the store key exactly what the
 application reads**, then delete the compose `environment:` entry for it.
-Renaming the key is not optional — the entry is what used to bridge the two
-names, and the wrapper does not. Keeping both leaves two sources of truth for
+Renaming the key is not optional — in the setup you are migrating from, the
+compose entry is what bridges the two names, and the wrapper does not. Keeping both leaves two sources of truth for
 one variable (`inferred:` which one wins is decided by environment-merge order
 and is not worth depending on).
 
