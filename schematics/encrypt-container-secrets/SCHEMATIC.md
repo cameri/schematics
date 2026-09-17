@@ -519,11 +519,11 @@ encrypted source remains the only committed artifact.
 
   Verified in `alpine:3` (busybox `find`/`sha256sum`): `0` with no copy of the
   master key present, `0` for a same-size file with different content, `1` when
-  a copy is planted — each in under a second. The form this replaces
-  (`docker exec <service> sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null'`) was
-  still walking `/proc` after 20 s in the same container and had *already*
-  matched the intended key file, so it could neither pass nor fail
-  unambiguously.
+  a copy is planted — each in under a second. A substring scan instead
+  (`docker exec <service> sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null'`)
+  matches the key file that is supposed to be mounted, so it cannot tell a
+  correct deployment from a leak, and it descends into `/proc`, where it does
+  not terminate.
 - **A-4** (covers R-4): the values are in the application's process environment
   under the expected names — Phase 7, step 2, (a) and (b) both print nothing —
   and no cleartext is on disk, scoped to the locations a leak could land in:
@@ -572,7 +572,7 @@ output. Fix the wrapper; no other phase is affected.
 
 **Phase 7 (verification):** if the value is absent from the process environment,
 the usual causes are, in order: **the store key is named something other than
-what the application reads** (the count-based check could not see this; the
+what the application reads** (a count of environment lines cannot see this; the
 name diff in step 2 reports `MISSING <name>` and the fix is to rename the store
 key, see `modules/env-secrets.md`), wrong target name (no `.env` suffix → format
 misdetection), quoted value in the store, wrong key mounted (secret-name
@@ -614,31 +614,27 @@ Decisions:
   sidecar/watcher container pattern (superseded; it appears only in Removal
   context as historical), and repository-specific helper naming. The public
   contract kept intact is the in-memory decrypt + per-service key blast radius.
-- 2026-09-17: Two defects found while implementing this schematic for real, both
-  fixed here (#26):
-  - **The verbatim key-name mapping was undocumented.** `sops exec-env` injects
-    each store key verbatim, so the key name *is* the variable name, and a value
-    migrated out of a compose `environment:` mapping keeps working only if the
-    store key is renamed to what the application reads. The rule, a concrete
-    before/after, and the failure symptom now live in `modules/env-secrets.md`,
-    the Preservation List, and the dotenv-store contract; the Phase 7 check no
-    longer counts environment lines (a count cannot see a wrongly-named
-    variable) but compares the store's key names, the process environment's
-    names, and the names the application reads, with the misnamed-key case added
-    to the Phase 7 failure modes.
-  - **A-3 could not pass as written.** `docker exec <service> sh -c 'grep -rl
-    AGE-SECRET-KEY-1 / 2>/dev/null'` matches the key file that is *supposed* to
-    be mounted, so its result was ambiguous, and it walks `/proc`, where it does
-    not terminate — observed at 20 s in `alpine:3` with the intended file
-    already matched. It is replaced by a content-hash procedure: the mounted key
-    is identified by sha256 against the host's dedicated key and against the
-    master key, and the master key's bytes are searched for by digest over the
-    container's own filesystems, size-filtered and with `/proc`, `/sys` and
-    `/dev` pruned (verified in `alpine:3`: 0 / 0 for a same-size different-content
-    file / 1 when a copy is planted, each under a second). The same unbounded
-    pattern in the Phase 7 steps and in A-4 was swept: the on-disk cleartext
-    check is now scoped to the writable locations, with `docker diff` alongside
-    it.
+- 2026-09-17: Two decisions:
+  - **The store key name is the variable name.** `sops exec-env` injects each
+    store key verbatim, so a value migrated out of a compose `environment:`
+    mapping keeps working only if the store key is renamed to what the
+    application reads. The rule, a concrete before/after and the failure symptom
+    are in `modules/env-secrets.md`, the Preservation List, and the dotenv-store
+    contract; the Phase 7 check compares the store's key names, the process
+    environment's names and the names the application reads, and the
+    misnamed-key case is one of the Phase 7 failure modes. A count of
+    environment lines cannot see a wrongly-named variable.
+  - **A-3 decides by content hash, not by a substring.** `docker exec <service>
+    sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null'` matches the key file that
+    is *supposed* to be mounted, so it cannot tell a correct deployment from a
+    leak, and it descends into `/proc`, where it does not terminate. The test
+    identifies the mounted key by sha256 against the host's dedicated key and
+    against the master key, and searches the container's own filesystems for the
+    master key's bytes by digest, size-filtered and with `/proc`, `/sys` and
+    `/dev` pruned (verified in `alpine:3`: `0` with no copy present, `0` for a
+    same-size file with different content, `1` when a copy is planted, each
+    under a second). The on-disk cleartext check in the Phase 7 steps and in A-4
+    is scoped to the writable locations, with `docker diff` alongside it.
 
 Open questions:
 
