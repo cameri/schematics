@@ -9,10 +9,15 @@
 #   schematics/*/SCHEMATIC.md           every modules/, scripts/, skeleton/,
 #                                       templates/, assets/ path it references
 #                                       exists in the package
-#   schematic-kind dependency pins      the pinned commit exists in this
-#                                       repository, the file exists at that
-#                                       commit, and its SHA-256 matches; no
-#                                       floating refs (main/HEAD/master)
+#   schematic-kind dependency pins      every link into this repository is a
+#                                       well-formed pin: [<name> v<version>](
+#                                       .../blob/<commit-sha>/schematics/<name>/
+#                                       SCHEMATIC.md) `sha256:<hex>`; the sha is
+#                                       a commit reachable from the checked-out
+#                                       history (not a tag or branch name), the
+#                                       file exists at that commit, its SHA-256
+#                                       matches, and the link's name and version
+#                                       match the pinned file's frontmatter
 #
 # Pin checks need the full history: a shallow clone skips them with a warning.
 
@@ -48,7 +53,11 @@ if len(featured) != 5:
     errors.append(f"featured count is {len(featured)}, must be exactly 5: {featured}")
 
 # ─── Specs: referenced package files ─────────────────────────────
-REF = re.compile(r'`((?:modules|scripts|skeleton|templates|assets)/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)`')
+# A package path anywhere in the text (prose, code spans, or code blocks), not
+# only directly after a backtick. Segments may not end in '.', so a path at
+# the end of a sentence is matched without its full stop.
+SEG = r'[A-Za-z0-9._-]*[A-Za-z0-9_-]'
+REF = re.compile(r'(?<![\w/.-])((?:modules|scripts|skeleton|templates|assets)/(?:' + SEG + r'/)*' + SEG + r')')
 specs = sorted(glob.glob('schematics/*/SCHEMATIC.md'))
 for spec in specs:
     text = open(spec, encoding='utf-8').read()
@@ -58,45 +67,79 @@ for spec in specs:
             errors.append(f"{spec}: references {ref}, which does not exist in the package")
 
 # ─── Specs: schematic-kind dependency pins ───────────────────────
-PIN = re.compile(r'https://github\.com/cameri/schematics/blob/([^/\s)]+)/([^)\s]+)\)\s*`sha256:([0-9a-f]{64})`')
-FLOAT = re.compile(r'https://github\.com/cameri/schematics/blob/(main|HEAD|master)/')
+# Any link into this repository's blob/ tree is a dependency pin and must have
+# exactly this shape; anything else on such a line is a malformed pin.
+PIN = re.compile(
+    r'\[([a-z0-9-]+) v([0-9][0-9A-Za-z.+-]*)\]'
+    r'\(https://github\.com/cameri/schematics/blob/([^/\s)]+)/(schematics/([a-z0-9-]+)/SCHEMATIC\.md)\)'
+    r' `sha256:([0-9a-f]{64})`')
+LINK = re.compile(r'https://github\.com/cameri/schematics/blob/')
+HEX = re.compile(r'^[0-9a-f]{7,40}$')
 
 def git(*args):
     return subprocess.run(['git', *args], capture_output=True)
 
 in_repo = git('rev-parse', '--is-inside-work-tree').returncode == 0
 shallow = in_repo and git('rev-parse', '--is-shallow-repository').stdout.strip() == b'true'
+can_verify = in_repo and not shallow
 if not in_repo:
-    warnings.append('not a git checkout: dependency pins were not verified')
+    warnings.append('not a git checkout: dependency pins were found but not verified')
 elif shallow:
-    warnings.append('shallow clone: dependency pins were not verified (fetch the full history)')
+    warnings.append('shallow clone: dependency pins were found but not verified (fetch the full history)')
 
-pins = 0
+pins_found = 0
+pins_verified = 0
 for spec in specs:
-    text = open(spec, encoding='utf-8').read()
-    for ref in FLOAT.findall(text):
-        errors.append(f"{spec}: dependency link uses floating ref {ref!r}; pin a commit")
-    for commit, path, digest in PIN.findall(text):
-        pins += 1
-        if not in_repo or shallow:
+    for lineno, line in enumerate(open(spec, encoding='utf-8'), 1):
+        links = len(LINK.findall(line))
+        if not links:
             continue
-        if git('cat-file', '-e', commit + '^{commit}').returncode != 0:
-            errors.append(f"{spec}: pinned commit {commit} is not in this repository ({path})")
+        matches = PIN.findall(line)
+        if len(matches) != links:
+            errors.append(f"{spec}:{lineno}: malformed dependency pin; expected "
+                          "[<name> v<version>](https://github.com/cameri/schematics/blob/<commit-sha>/"
+                          "schematics/<name>/SCHEMATIC.md) `sha256:<64 hex>`")
             continue
-        shown = git('show', f'{commit}:{path}')
-        if shown.returncode != 0:
-            errors.append(f"{spec}: {path} does not exist at commit {commit}")
-            continue
-        actual = hashlib.sha256(shown.stdout).hexdigest()
-        if actual != digest:
-            errors.append(f"{spec}: sha256 mismatch for {path} at {commit[:12]}: "
-                          f"pinned {digest[:12]}, actual {actual[:12]}")
+        for name, version, ref, path, dirname, digest in matches:
+            pins_found += 1
+            if name != dirname:
+                errors.append(f"{spec}:{lineno}: pin text names {name!r} but links to {path}")
+            if not HEX.match(ref):
+                errors.append(f"{spec}:{lineno}: pin uses ref {ref!r}; pin a commit sha, not a tag or branch")
+                continue
+            if not can_verify:
+                continue
+            resolved = git('rev-parse', '--verify', '--quiet', ref + '^{commit}').stdout.decode().strip()
+            if not resolved or not resolved.startswith(ref):
+                errors.append(f"{spec}:{lineno}: pinned commit {ref} is not a commit in this repository ({path})")
+                continue
+            if git('merge-base', '--is-ancestor', resolved, 'HEAD').returncode != 0:
+                errors.append(f"{spec}:{lineno}: pinned commit {ref} is not reachable from the checked-out history ({path})")
+                continue
+            shown = git('show', f'{resolved}:{path}')
+            if shown.returncode != 0:
+                errors.append(f"{spec}:{lineno}: {path} does not exist at commit {ref}")
+                continue
+            actual = hashlib.sha256(shown.stdout).hexdigest()
+            if actual != digest:
+                errors.append(f"{spec}:{lineno}: sha256 mismatch for {path} at {ref[:12]}: "
+                              f"pinned {digest[:12]}, actual {actual[:12]}")
+                continue
+            fm = re.search(r'^version:\s*(\S+)', shown.stdout.decode('utf-8', 'replace'), re.M)
+            pinned_version = fm.group(1) if fm else None
+            if pinned_version != version:
+                errors.append(f"{spec}:{lineno}: pin text says {name} v{version} but the file at {ref[:12]} "
+                              f"is version {pinned_version}")
+                continue
+            pins_verified += 1
 
 for w in warnings:
     print('WARN: ' + w)
 if errors:
     print('\n'.join('FAIL: ' + e for e in errors))
     sys.exit(1)
+pin_status = (f"{pins_verified} pins verified" if can_verify
+              else f"{pins_found} pins found, not verified")
 print(f"catalog ok: {len(plugins)} entries, featured={featured}, "
-      f"{len(specs)} specs, {pins} pins verified")
+      f"{len(specs)} specs, {pin_status}")
 PY

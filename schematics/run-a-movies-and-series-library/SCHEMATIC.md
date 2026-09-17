@@ -120,9 +120,10 @@ halves. Any new duplicated value joins this table, not a compose line.
 
 ### Phase 0: Install dependencies in isolation
 
-1. Execute D-2's and D-3's phases separately; each acceptance set
-   green before glue.
-2. Verification: two green lists, no cross-wiring.
+1. Execute D-2's phases first (it owns the shared infrastructure), then
+   D-3's and D-4's (each registers with D-2), then D-5's; each
+   acceptance set green before glue.
+2. Verification: four green lists, no cross-wiring.
 
 ### Phase 1: Reconcile parameters
 
@@ -197,8 +198,13 @@ Decisions:
   D-3 (fetch-movies-over-usenet), D-4 (fetch-series-over-usenet), and RD-1
   (improve-docker-security) carried hashes that match no content ever
   published on `main`; they are re-pinned to the published contents at
-  `81721d8`, and the glue is due a re-read against those three contracts
-  (tracked in issue #21). Patch bump for the re-pin.
+  `81721d8`. The glue was re-read against those three contracts as
+  published (issue #21): every R-n, P-n, A-n, phase, and module reference
+  this composition makes into them resolves, and MEDIA_ROOT-derived roots,
+  category maps, and key rules agree. One drift found and fixed: Phase 0
+  still named D-2 and D-3 only ("two green lists") from before the fetching
+  half was split into fetch-over-usenet, fetch-movies-over-usenet, and
+  fetch-series-over-usenet; it now orders all four dependencies. Patch bump.
 
 Open questions:
 

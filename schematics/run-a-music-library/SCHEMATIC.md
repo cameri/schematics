@@ -205,8 +205,13 @@ Decisions:
   D-2 (fetch-music-over-usenet), RD-1 (improve-docker-security), and RD-3
   (run-a-movies-and-series-library) carried hashes that match no content
   ever published on `main`; they are re-pinned to the published contents at
-  `81721d8`, and the glue is due a re-read against those three contracts
-  (tracked in issue #21). Patch bump for the re-pin.
+  `81721d8`. The glue was re-read against those three contracts as
+  published (issue #21): R-1's reference to fetch-music-over-usenet R-1, the
+  navidrome pointer to its Q-1, the shared-downloader module, MUSIC_ROOT
+  and MUSIC_CATEGORY against its P-1/P-2, the audio category 3000 against
+  fetch-over-usenet P-6, RD-3's D-3/D-4 ownership note, and every phase
+  and acceptance reference all resolve; no drift found. Patch bump for the
+  re-pin.
 
 Open questions:
 
