@@ -1,0 +1,23 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The validator runs code from the pull request's checkout, so the job gets a
+# read-only token and no persisted credentials: nothing in it can push.
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Pin verification resolves commits in the repository's own history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate catalog, specs, and dependency pins
+        run: bash scripts/validate-catalog.sh
