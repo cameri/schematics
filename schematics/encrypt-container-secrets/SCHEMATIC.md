@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: encrypt-container-secrets
-version: 0.2.1
+version: 0.2.2
 status: stable
 spec: 1
 description: Encrypt service secrets with SOPS + age and inject them into container processes as environment variables at boot, in-memory, dual-recipient encryption, per-service key blast-radius, docker-secret wiring, and rotation without rebuilds.
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-17
 ---
 
 # Schematic: SOPS-Encrypted Secrets as Container Environment Variables
@@ -108,6 +108,11 @@ therefore decrypt nothing beyond its own secrets.
   because `sops exec-env` detects the dotenv format from the file extension.
 - Secret values are stored **unquoted** in the dotenv store; `sops exec-env`
   does not strip quotes the way a shell `source` does.
+- **The store key name is the variable name**: injection is verbatim, with no
+  mapping layer, so migrating a value out of a compose `environment:` mapping
+  means renaming the store key to what the application reads and deleting that
+  mapping. A key left under its previous name is silently unused and the
+  application starts without its value (see `modules/env-secrets.md`).
 - The wrapper invokes `sops exec-env` **without** a `--` separator (it breaks
   argument parsing).
 - Host-side value setting goes through stdin and never appears in argv or
@@ -258,6 +263,11 @@ Contract points:
 - File name ends in `.encrypted` → sops cannot infer the store type, so every
   invocation passes `--input-type dotenv --output-type dotenv`.
 - Values are stored unquoted.
+- **Each key is injected into the child process environment verbatim: the key
+  name is the variable name.** There is no mapping layer between the store and
+  the application, so a key named for where the value came from (`MOUSEHOLE_PASS`)
+  rather than for what the application reads (`MOUSEHOLE_AUTH_PASSWORD`) is
+  simply not the variable the application asks for.
 - The `sops_age__list_N__map_recipient` entries must contain both the master
   public key and the service's dedicated public key.
 
@@ -405,19 +415,55 @@ master key is absent, and nothing cleartext is on disk.
 
 Steps:
 1. `docker compose up -d <service>` (or `docker compose restart <service>`).
-2. Confirm the process environment carries the values **without printing
-   them**, count matches only:
-   `docker exec <service> sh -c 'tr "\0" "\n" < /proc/<pid>/environ | grep -c "^SOME_SECRET="'`
-   (find `<pid>` with `docker top <service>`; with `sops exec-env` the app is a
-   child of PID 1, so enumerate candidate PIDs rather than assuming PID 1).
-3. Confirm the master key is not present anywhere in the container:
-   `docker exec <service> sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null | head'`
-   → no output.
-4. Confirm no cleartext on disk: search the writable layer and volumes for a
-   substring of a known secret value → no output.
+2. Confirm the process environment carries the values **by name, not by count**.
+   A count of matching lines cannot see a value that arrived under the wrong
+   name, which is the migration failure described in `modules/env-secrets.md`:
+   the store key *is* the variable name. Name the variables the application
+   actually reads — from its configuration surface, or from the `environment:`
+   names this replaced — and compare three lists:
+
+   ```bash
+   # The store's keys (host side; names only, never the values). The `sops_`
+   # lines are the store's own metadata, not variables.
+   sops --decrypt --input-type dotenv --output-type dotenv "$ENV_FILE" \
+     | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | grep -v '^sops_' | sort -u > /tmp/store-keys.txt
+
+   # The names in the application's process environment. `sops exec-env` holds
+   # PID 1 and execs the app as a child, so find the process by the marker the
+   # wrapper exports rather than assuming a PID.
+   PID=$(docker exec <service> sh -c 'for p in /proc/[0-9]*; do [ -r "$p/environ" ] && tr "\0" "\n" < "$p/environ" | grep -q "^SOPS_AGE_KEY_FILE=" && { echo "${p#/proc/}"; break; }; done')
+   docker exec <service> sh -c "tr '\0' '\n' < /proc/$PID/environ | cut -d= -f1 | sort -u" \
+     > /tmp/container-env-names.txt
+
+   # (a) every store key reached the environment under its own name
+   comm -23 /tmp/store-keys.txt /tmp/container-env-names.txt      # prints nothing
+   # (b) every name the application reads is defined
+   for v in <APP_REQUIRED_VARS>; do grep -qx "$v" /tmp/container-env-names.txt || echo "MISSING $v"; done
+   ```
+
+   A `MISSING <name>` from (b) is the signature of a misnamed store key: the
+   value *is* in the environment, under the name it had before the migration,
+   while the application asks for the name it actually reads. Remedy: rename the
+   store key to the application's name (`scripts/sops-set-env.sh` under the new
+   name, then remove the old key) and restart — no rebuild (R-5). Do not add a
+   compose mapping to bridge the two names.
+3. Confirm the master key is not in the container: run the procedure in **A-3**.
+   It identifies the mounted key by content hash and scans the container's own
+   filesystems for the master key's bytes — nothing in it depends on a substring
+   that both key files share.
+4. Confirm no cleartext is on disk, scoped to where a leak could land (the
+   image's own files are immutable and public, and a `/` walk does not terminate
+   in a container):
+   ```bash
+   docker diff <service>          # every file this boot wrote
+   docker exec <service> sh -c 'grep -rlF "<distinctive-secret-substring>" /tmp /var/tmp /run /home /root /app 2>/dev/null'
+   ```
+   → no output from the grep, and nothing in the `docker diff` list that holds a
+   secret.
 
 Verify:
-- Step 2 exits 0 (grep found exactly the expected number of lines).
+- Step 2: (a) and (b) print nothing — every store key reached the environment
+  under its own name, and every name the application reads is defined.
 - Steps 3 and 4 produce no output.
 
 ### Phase 8: Binary secret (only if the service needs one)
@@ -446,12 +492,43 @@ encrypted source remains the only committed artifact.
 - **A-2** (covers R-2): `grep -o 'age1[a-z0-9]*' "$ENV_FILE" | sort -u` lists
   exactly two recipients: the master public key and the service's dedicated
   public key.
-- **A-3** (covers R-3): `docker exec <service> sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null'`
-  prints nothing, while
-  `docker compose config | grep "${KEY_DIR}/<service>-keys.txt"` shows the
-  dedicated key is mounted.
-- **A-4** (covers R-4): `docker exec <service> sh -c 'tr "\0" "\n" < /proc/<pid>/environ | grep -c "^SOME_SECRET="'`
-  reports the expected count, and `docker exec <service> sh -c 'grep -rl "<distinctive-secret-substring>" / 2>/dev/null'`
+- **A-3** (covers R-3): the key that is mounted is the dedicated one, and the
+  master key is not in the container — decided by **content**, not by a
+  substring that both key files contain:
+
+  ```bash
+  MOUNTED=$(docker exec <service> sha256sum /run/secrets/age-keys | cut -d' ' -f1)
+  DEDICATED_SHA=$(sha256sum "$KEY_DIR/<service>-keys.txt" | cut -d' ' -f1)
+  MASTER_SHA=$(sha256sum "$MASTER_KEY_FILE" | cut -d' ' -f1)
+
+  [ "$MOUNTED" = "$DEDICATED_SHA" ] && echo "mounted key == dedicated key"
+  [ "$MOUNTED" != "$MASTER_SHA" ]  && echo "mounted key != master key"
+
+  # The master key's bytes exist nowhere in the container's filesystems.
+  # `-path /proc -prune` is what keeps this from descending into the host's
+  # process table (the unscoped form does not terminate inside a container);
+  # `-size` filters to files that could be the key before anything is hashed,
+  # and the hash — not a substring — is what decides.
+  MASTER_SIZE=$(stat -c %s "$MASTER_KEY_FILE")
+  docker exec <service> sh -c "find / -path /proc -prune -o -path /sys -prune -o -path /dev -prune -o -type f -size ${MASTER_SIZE}c -exec sha256sum {} \; 2>/dev/null | grep -c '^${MASTER_SHA}'"
+  ```
+
+  Expected: both messages print and the last command prints `0`.
+  Independence check: `docker compose config | grep -A1 'source: <service>-age-keys'`
+  shows the dedicated key as the only key secret the service receives.
+
+  Verified in `alpine:3` (busybox `find`/`sha256sum`): `0` with no copy of the
+  master key present, `0` for a same-size file with different content, `1` when
+  a copy is planted — each in under a second. The form this replaces
+  (`docker exec <service> sh -c 'grep -rl AGE-SECRET-KEY-1 / 2>/dev/null'`) was
+  still walking `/proc` after 20 s in the same container and had *already*
+  matched the intended key file, so it could neither pass nor fail
+  unambiguously.
+- **A-4** (covers R-4): the values are in the application's process environment
+  under the expected names — Phase 7, step 2, (a) and (b) both print nothing —
+  and no cleartext is on disk, scoped to the locations a leak could land in:
+  `docker diff <service>` shows no unexpected file, and
+  `docker exec <service> sh -c 'grep -rlF "<distinctive-secret-substring>" /tmp /var/tmp /run /home /root /app 2>/dev/null'`
   prints nothing.
 - **A-5** (covers R-5): run `scripts/sops-set-env.sh` for an existing key with a
   new value, `docker restart <service>`, and A-4 still passes with the new
@@ -494,10 +571,14 @@ and confirm `/bin/sh` exists in the final layer.
 output. Fix the wrapper; no other phase is affected.
 
 **Phase 7 (verification):** if the value is absent from the process environment,
-the usual causes are, in order: wrong target name (no `.env` suffix → format
+the usual causes are, in order: **the store key is named something other than
+what the application reads** (the count-based check could not see this; the
+name diff in step 2 reports `MISSING <name>` and the fix is to rename the store
+key, see `modules/env-secrets.md`), wrong target name (no `.env` suffix → format
 misdetection), quoted value in the store, wrong key mounted (secret-name
-collision), or key file mode rejecting the container user. Check the recipient
-list first, then the secret-name namespacing, then permissions.
+collision), or key file mode rejecting the container user. Check the store key
+names first, then the recipient list, then the secret-name namespacing, then
+permissions.
 
 **Phase 8 (binary secret):** a wrong `--input-type` on either side corrupts the
 file. Detect: the decrypted file fails its consumer (e.g. `ssh -T`). Rollback:
@@ -533,6 +614,31 @@ Decisions:
   sidecar/watcher container pattern (superseded; it appears only in Removal
   context as historical), and repository-specific helper naming. The public
   contract kept intact is the in-memory decrypt + per-service key blast radius.
+- 2026-09-17: Two defects found while implementing this schematic for real, both
+  fixed here (#26):
+  - **The verbatim key-name mapping was undocumented.** `sops exec-env` injects
+    each store key verbatim, so the key name *is* the variable name, and a value
+    migrated out of a compose `environment:` mapping keeps working only if the
+    store key is renamed to what the application reads. The rule, a concrete
+    before/after, and the failure symptom now live in `modules/env-secrets.md`,
+    the Preservation List, and the dotenv-store contract; the Phase 7 check no
+    longer counts environment lines (a count cannot see a wrongly-named
+    variable) but compares the store's key names, the process environment's
+    names, and the names the application reads, with the misnamed-key case added
+    to the Phase 7 failure modes.
+  - **A-3 could not pass as written.** `docker exec <service> sh -c 'grep -rl
+    AGE-SECRET-KEY-1 / 2>/dev/null'` matches the key file that is *supposed* to
+    be mounted, so its result was ambiguous, and it walks `/proc`, where it does
+    not terminate — observed at 20 s in `alpine:3` with the intended file
+    already matched. It is replaced by a content-hash procedure: the mounted key
+    is identified by sha256 against the host's dedicated key and against the
+    master key, and the master key's bytes are searched for by digest over the
+    container's own filesystems, size-filtered and with `/proc`, `/sys` and
+    `/dev` pruned (verified in `alpine:3`: 0 / 0 for a same-size different-content
+    file / 1 when a copy is planted, each under a second). The same unbounded
+    pattern in the Phase 7 steps and in A-4 was swept: the on-disk cleartext
+    check is now scoped to the writable locations, with `docker diff` alongside
+    it.
 
 Open questions:
 
@@ -542,8 +648,10 @@ Open questions:
   image rather than parsing a comment.
 - **Q-2**: `sops exec-env` child-PID discovery for the environment check
   (`/proc/<pid>/environ`) varies with the application's process fan-out.
-  Default: enumerate PIDs and assert at least one environment carries the
-  variable, rather than hard-coding a PID.
+  Default: do not hard-code a PID — find the process that carries the marker the
+  wrapper exports (`SOPS_AGE_KEY_FILE`, see Phase 7 step 2) and read its
+  environment names. If the application fans out into several processes, run the
+  name check against each and require the names in all of them.
 - **Q-3**: Whether to commit the dedicated public keys outside the encrypted
   files (e.g. a `recipients.txt`) to make re-encryption easier for a new
   operator. Default: no, the recipient list is recoverable from the encrypted

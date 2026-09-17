@@ -4,6 +4,35 @@ The `sops exec-env` boot pattern: the container decrypts its dotenv file in
 memory at start and hands the values to the application as environment
 variables.
 
+**The key name is the variable name.** `sops exec-env` injects every key of the
+store into the child process environment **verbatim**: there is no mapping
+layer, no rename and no alias. A key named `MOUSEHOLE_PASS` reaches the
+application as `MOUSEHOLE_PASS`, so an application that reads `AUTH_PASSWORD`
+finds nothing — and reports it in its own terms ("authentication is not
+configured") long after the container logged a successful start.
+
+This bites precisely when a value is *migrated* into the store, because compose
+was doing the renaming:
+
+```yaml
+# Before — compose maps the store's name onto the application's name.
+environment:
+  AUTH_PASSWORD: ${MOUSEHOLE_PASS}   # the store holds MOUSEHOLE_PASS=…
+```
+
+```dotenv
+# After — the store key IS the variable name, and the compose entry is gone.
+# .env.encrypted:
+AUTH_PASSWORD=…
+```
+
+The rule when migrating a value: **name the store key exactly what the
+application reads**, then delete the compose `environment:` entry for it.
+Renaming the key is not optional — the entry is what used to bridge the two
+names, and the wrapper does not. Keeping both leaves two sources of truth for
+one variable (`inferred:` which one wins is decided by environment-merge order
+and is not worth depending on).
+
 ## Purpose
 
 Owns everything between "an encrypted dotenv file exists in the repository" and
@@ -33,8 +62,9 @@ comment lines (preserved by sops, ignored by exec-env).
 ## Outputs
 
 - A running application process whose environment contains the decrypted
-  values, inherited from `sops` (which holds PID 1 and execs the child with the
-  values in its environment).
+  values **under the store's key names, verbatim** (no renaming happens between
+  the store and the process), inherited from `sops` (which holds PID 1 and
+  execs the child with the values in its environment).
 - No files written: no secrets volume, no decrypted temp file, no sidecar
   container.
 - Two compose secrets mounted read-only:
@@ -71,6 +101,16 @@ decrypt happens before `exec`).
   the file, not the collision. Remedy: `P-3`-prefixed secret names (R-7).
 - Non-root container user with a `0600` mounted key: permission denied at
   boot. Remedy: `P-8`.
+- **A store key named something other than what the application reads**: the
+  value is in the environment, the container starts, and the application fails
+  its own configuration check (`authentication is not configured`) because it
+  reads the variable it expects and does not find it. Nothing in the boot path
+  errors, which is what makes this expensive: the usual cause is a value
+  migrated from a compose `environment:` mapping whose left-hand name was never
+  used as the store key. Detect: the Phase 7 name diff reports a `MISSING`
+  variable while the store defines a similarly-purposed key under another name.
+  Remedy: rename the store key to the application's name, remove the old key,
+  restart (R-5, no rebuild); do not add a compose mapping to bridge the names.
 - Decryption failure of any kind: `sops exec-env` exits non-zero and the
   application never starts (R-9), the desired failure mode, never a silent
   start with missing secrets.
@@ -80,8 +120,10 @@ decrypt happens before `exec`).
 The wrapper is idempotent by construction: every container start re-decrypts
 from the mounted ciphertext, so a restart always converges to the current file
 contents. Rebuilding the image is never required for a value change. Completion
-detection during implementation is the Phase 7 environment check, which counts
-matching environment lines rather than printing values.
+detection during implementation is the Phase 7 environment check, which
+compares **names** — the store's keys against the running process environment
+and against the names the application reads — rather than counting matches,
+because a count cannot see a value that arrived under the wrong name.
 
 ## Removal Notes
 
