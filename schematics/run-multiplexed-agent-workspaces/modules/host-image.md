@@ -12,9 +12,12 @@ is the base's entrypoint plus whichever harness a harness layer installs.
 
 ## Inputs
 
-- The base reference and its **manifest list** digest (`P-1`, `P-2`), from the
-  base's publish step (`docker buildx imagetools inspect <ref> --format
-  '{{.Manifest.Digest}}'`).
+- The base reference (`P-1`) as one complete string. For a published base it is
+  `name@sha256:<manifest list digest>`, resolved from the base's publish step
+  (`docker buildx imagetools inspect <the published ref> --format
+  '{{.Manifest.Digest}}'`); for a base built on this machine and never pushed it
+  is that base's local `name:tag`. Both are the same argument, and the digest
+  form is the required one whenever the base came from a registry.
 - The herdr version and the two release-asset SHA-256 digests (`P-3`, `P-4`,
   `P-5`), read from the release's asset list at authoring time.
 - The container runtime with BuildKit (`D-5`), and a registry to publish to
@@ -24,7 +27,7 @@ is the base's entrypoint plus whichever harness a harness layer installs.
 
 ## Outputs
 
-- One image, built `FROM ${AGENT_BASE_IMAGE}@${AGENT_BASE_DIGEST}`, carrying:
+- One image, built `FROM ${AGENT_BASE_REF}`, carrying:
   - `openssh-server`, `openssh-client`, `jq`, `util-linux` (for `setsid`), and
     `curl` when the base has none, installed in a `USER root` section that ends
     by switching back to the inherited account;
@@ -33,8 +36,9 @@ is the base's entrypoint plus whichever harness a harness layer installs.
   - `/usr/local/share/agent-host/herdr-config.toml`,
     `/usr/local/share/agent-host/plugin/{herdr-plugin.toml,agent-loop.sh,reopen-pane.sh}`,
     `/usr/local/bin/agent-host-boot`, all root-owned and world-readable;
-  - provenance labels naming the base reference, the base digest, the package
-    version, the source revision and the herdr version.
+  - provenance labels naming the base reference (which carries the digest
+    itself when it is in digest form), the package version, the source revision
+    and the herdr version.
 - Nothing else: no `EXPOSE`, no `VOLUME`, no `HEALTHCHECK`, no `ENTRYPOINT`
   change, no `USER` change, no socket mount.
 - A published reference `<P-9>/<P-10>/<P-6>:<P-7>-<P-8>`, whose digest a
@@ -45,13 +49,14 @@ is the base's entrypoint plus whichever harness a harness layer installs.
 `D-1` (the base schematic — this layer is built from its artifact and inherits
 its contract), `D-5` (Docker Engine and Compose), `D-6` (the herdr release
 archive, at build time), `D-7` (the distribution's package repositories, at
-build time), and the parameter ids `P-1` … `P-10`.
+build time), and the parameter ids `P-1`, `P-3` … `P-10` (`P-2` is retired in v0.2.0: the
+digest is the second half of `P-1`'s value in its published form).
 
 ## Failure Behavior
 
 | Condition | Result |
 |-----------|--------|
-| `AGENT_BASE_DIGEST` unset or malformed | the build fails at `FROM`, before any instruction runs |
+| `AGENT_BASE_REF` unset, or malformed — a bare name with no tag, or a digest that does not resolve | the build fails at `FROM`, before any instruction runs |
 | the herdr asset's SHA-256 does not match | the build fails at the checksum line, printing expected and observed digests, and no image is produced |
 | `TARGETARCH` is neither `amd64` nor `arm64` | the build stops with `unsupported TARGETARCH`, rather than producing an image whose herdr cannot run |
 | `setsid`, `sshd` or `jq` missing after the package install | the build fails on the `command -v` checks, not at run time |
@@ -63,8 +68,8 @@ Every build input is pinned, so rebuilding produces the same image unless an
 input was deliberately changed. The package install and the herdr download are
 single `RUN` layers with no cache to invalidate wrongly; `--no-cache` is only
 needed when the distribution's repositories have moved under an existing tag,
-and the base's digest pin is what makes that a deliberate act rather than an
-accident.
+and naming the base by a digest is what makes that a deliberate act rather than
+an accident.
 
 ## Removal Notes
 
