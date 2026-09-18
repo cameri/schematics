@@ -4,13 +4,19 @@
 # supervision, attach and persistence layers that turn it into a host for
 # several named agents.
 #
-# Build (the base must be pinned by its MANIFEST LIST digest — the `Digest:`
-# line the base's publish step reports):
+# Build (the base is named by ONE complete reference — the digest form pins it,
+# the tag form names a base built on the same machine, and neither needs the
+# other):
 #
 #   docker build -f Containerfile \
-#     --build-arg AGENT_BASE_IMAGE=<registry>/<namespace>/<name> \
-#     --build-arg AGENT_BASE_DIGEST=sha256:<manifest list digest> \
+#     --build-arg AGENT_BASE_REF=<registry>/<namespace>/<name>@sha256:<manifest list digest> \
 #     -t <registry>/<namespace>/<name>-agent-host:<version>-<commit> .
+#
+#   # a base that was built locally and never pushed — no registry, no login,
+#   # no credential, and nothing to pin
+#   docker build -f Containerfile \
+#     --build-arg AGENT_BASE_REF=<local base name>:<version>-<commit> \
+#     -t <local name>-agent-host:<version>-<commit> .
 #
 # What this layer changes, against the base's layer contract: the packages it
 # installs, and the files it adds. It does NOT change the runtime account, the
@@ -19,16 +25,14 @@
 # adds a second, optional entrance (agent-host-boot) that the deployment selects
 # at run time, leaving `docker run` on this image behaving exactly like the base.
 
-ARG AGENT_BASE_IMAGE
-ARG AGENT_BASE_DIGEST
+ARG AGENT_BASE_REF
 
-FROM ${AGENT_BASE_IMAGE}@${AGENT_BASE_DIGEST}
+FROM ${AGENT_BASE_REF}
 
 # Redeclared, and not decorative: an ARG declared before FROM is not in scope for
-# any instruction after it, so the two labels below would expand to empty strings
-# without these lines. Only FROM may consume the pre-FROM declarations.
-ARG AGENT_BASE_IMAGE
-ARG AGENT_BASE_DIGEST
+# any instruction after it, so the label below would expand to an empty string
+# without this line. Only FROM may consume the pre-FROM declaration.
+ARG AGENT_BASE_REF
 
 ARG HERDR_VERSION=0.9.0
 # The pinned pair for HERDR_VERSION, from the release API's `digest` field:
@@ -96,8 +100,7 @@ LABEL org.opencontainers.image.title="agent host (multiplexed agent workspaces)"
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}" \
-      org.opencontainers.image.base.name="${AGENT_BASE_IMAGE}" \
-      org.opencontainers.image.base.digest="${AGENT_BASE_DIGEST}" \
+      org.opencontainers.image.base.name="${AGENT_BASE_REF}" \
       dev.agent.host.herdr.version="${HERDR_VERSION}"
 
 # No EXPOSE: the SSH daemon listens inside the container and the deployment

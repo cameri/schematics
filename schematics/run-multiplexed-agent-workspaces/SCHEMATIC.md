@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-multiplexed-agent-workspaces
-version: 0.1.0
+version: 0.2.0
 status: draft
 spec: 1
 description: "An agent host: the dev base image plus a herdr multiplexer that runs one named workspace per agent, relaunches only what crashes, keeps every agent's state on bind-mounted directories, and accepts herdr --remote attach over a key-only SSH transport — harness-free, secret-free and outbound-only by default."
@@ -46,9 +46,11 @@ agent CLI and nothing else.
 - **Agent tree**: the host directory bind-mounted into the container that holds
   every agent's workspace, home and supervision state. It is the only place
   state lives.
-- **Base image**: the artifact of `build-an-agent-dev-image`, pinned by its
-  manifest list digest. Its account, entrypoint, working directory and `AGENT_*`
-  variable names are inherited by this package and never restated.
+- **Base image**: the artifact of `build-an-agent-dev-image`, named by one
+  complete reference — its manifest list digest when it was published, its local
+  tag when it was built on the same machine and never pushed. Its account,
+  entrypoint, working directory and `AGENT_*` variable names are inherited by
+  this package and never restated.
 - **Entrypoint (the base's)**: the program that runs one agent in one workspace.
   Every agent pane runs it; this package does not replace or wrap it.
 - **Harness**: the coding-agent CLI a pane runs, resolved by the base's
@@ -71,9 +73,13 @@ agent CLI and nothing else.
 - The container runtime and its builder (`docker version`, `docker buildx
   version`), and whether it can produce multi-platform manifests
   (`docker buildx ls`) — the layer inherits the base's platform set (`P-32`).
-- The **manifest digest** of the base image (`P-2`): `docker buildx imagetools
-  inspect <P-1> --format '{{.Manifest.Digest}}'`. Resolve it at build time and
-  never copy one from documentation.
+- The base reference (`P-1`) in the form this build needs. For a base that was
+  published, that is its **manifest list digest** — `docker buildx imagetools
+  inspect <the published reference> --format '{{.Manifest.Digest}}'`, resolved
+  at build time and never copied from documentation. For a base built on this
+  machine and never pushed, it is that base's local tag; there is no digest to
+  resolve, and the layer's notes say the pin is unverified rather than implying
+  one. The digest form is the one to use whenever the base came from a registry.
 - The distribution release the base was built from and whether its repositories
   still serve it — the layer installs packages from the same repositories
   (`D-7`).
@@ -189,10 +195,13 @@ agent CLI and nothing else.
 
 ## Requirements
 
-- **R-1**: The host image is built `FROM` the base image pinned by its manifest
-  list digest, adds only packages and files, and inherits the base's runtime
-  account, entrypoint, working directory and `AGENT_*` variable names unchanged.
-  It declares no port and no volume.
+- **R-1**: The host image is built `FROM` the base image named by one complete
+  reference (`P-1`): `name@sha256:<manifest list digest>` when the base came from
+  a registry — the form that pins it, and the required form in that case — and
+  `name:tag` when the base was built on the same machine and never pushed, so a
+  registry is not a prerequisite for attaching a layer. It adds only packages and
+  files, and inherits the base's runtime account, entrypoint, working directory
+  and `AGENT_*` variable names unchanged. It declares no port and no volume.
 - **R-2**: One agent is one herdr workspace, labelled with the agent id, whose
   working directory is that agent's workspace directory. The boot reconciles the
   set: every workspace carrying a configured label is closed, and exactly one per
@@ -266,7 +275,7 @@ agent CLI and nothing else.
 
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
-| D-1 | schematic | [build-an-agent-dev-image v0.1.0](https://github.com/cameri/schematics/blob/c1183507aa245bd443ce1ac48dbba1df0b4a3d31/schematics/build-an-agent-dev-image/SCHEMATIC.md) `sha256:c2fbb0496a84e5f4986954465070aa6519dec6acbc491a040cb66d36e2851b45` | The image this layer is built from and the contract every agent pane runs under: its account, entrypoint, working directory and `AGENT_*` names are inherited by R-1 through R-3 and restated nowhere | Its acceptance script green against its published reference; this build's `FROM` names its manifest digest | The build fails at `FROM`. Declared inputs are not re-created here — a missing base is a missing prerequisite, not something this package substitutes for |
+| D-1 | schematic | [build-an-agent-dev-image v0.2.0](https://github.com/cameri/schematics/blob/f8df4f262af2cf0cdbc234f9a9225b45f78dd9ca/schematics/build-an-agent-dev-image/SCHEMATIC.md) `sha256:68bd6b56d702fd8d5cb875db64aafeadb2b02c6d438d07a4463b6b734038b122` | The image this layer is built from and the contract every agent pane runs under: its account, entrypoint, working directory and `AGENT_*` names are inherited by R-1 through R-3 and restated nowhere | Its acceptance script green against its published reference; this build's `FROM` names its manifest digest | The build fails at `FROM`. Declared inputs are not re-created here — a missing base is a missing prerequisite, not something this package substitutes for |
 | D-2 | schematic | [restrict-docker-api-access v0.3.1](https://github.com/cameri/schematics/blob/d405389a80eb1bc3019ecabf312535d072b1559a/schematics/restrict-docker-api-access/SCHEMATIC.md) `sha256:7444bdd603df29c072a7f7ebf9b09dda23e8c211dd9dc55d76f9a36a6ee22c58` | Docker CLI access for agents without the socket: the deny-by-default API endpoint R-9 and R-13 require | Its own audit (`A-8` there) reports every endpoint group allowed and denied; the consuming deployment's `DOCKER_HOST` names its endpoint | Without it, agents get no Docker at all. Mounting the socket instead is refused by R-9, not offered as a fallback |
 | D-3 | schematic | [encrypt-container-secrets v0.2.2](https://github.com/cameri/schematics/blob/da0ac2334dd997588daffd404570292d50d6dca6/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:7b40f292571587b0c6a57460ab5611b2bb4104b1ea0cc6e6848dddea78a45d6a` | The credential path for whatever a caller's agents need: secrets encrypted at rest, decrypted in memory at boot, per-service keys. This package ships no credential (R-13) | Its phases green on the deployment, and a boot where the expected variable is present in the process environment | With no secrets configured, the host still boots and the agents run with whatever the image carries — for a harness layer that means it refuses to authenticate and says so itself |
 | D-4 | schematic | [run-an-llm-router v0.1.0](https://github.com/cameri/schematics/blob/c8b6290bb32ed99f5d8fbeab3d4c984fae7f9ccb/schematics/run-an-llm-router/SCHEMATIC.md) `sha256:6f1974708cd6e2fe8d8e26cd4fe51ac11b531ebad814953e23a823c5cfe06b39` | The inference endpoint an agent uses, so the set has no metered shared provider in the path. This package only names it as the thing a harness layer points at | Its `/v1` endpoint answers from the host's network; its health gate is what a client sees | The host boots and supervises normally; the agents' inference fails, and the harness reports it. Nothing in this package retries or substitutes a provider |
@@ -279,13 +288,12 @@ agent CLI and nothing else.
 
 | Id   | Name | Type | Default | Discovery | Effect |
 |------|------|------|---------|-----------|--------|
-| P-1  | `AGENT_BASE_IMAGE` | string | *(none — required at build)* | The published base reference without a tag: `<registry>/<namespace>/<name>` | What the layer is built from (R-1) |
-| P-2  | `AGENT_BASE_DIGEST` | string | *(none — required at build)* | `docker buildx imagetools inspect <P-1> --format '{{.Manifest.Digest}}'` — the manifest list digest, never a tag and never a per-platform digest | Pins the base bytes. Without it the build fails; that is the point |
+| P-1  | `AGENT_BASE_REF` | string | *(none — required at build)* | The base image as **one complete reference**: `<registry>/<namespace>/<name>@sha256:<manifest list digest>` for a published base, or `<name>:<version>-<commit>` for one built on this machine and never pushed. A single `FROM` cannot take an optional `@`, so the reference is passed whole | What the layer is built from (R-1) and, in the digest form, the pin on its bytes |
 | P-3  | `HERDR_VERSION` | string | `0.9.0` | The multiplexer's release list; pick a version whose asset digests you verified (see Applicable Context) | The herdr binary the host runs (R-11) |
 | P-4  | `HERDR_SHA256_AMD64` | string (hex) | `4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f` | The release API's `digest` for `herdr-linux-x86_64` at `P-3` | The build verifies the amd64 asset against it; a mismatch stops the build |
 | P-5  | `HERDR_SHA256_ARM64` | string (hex) | `9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2` | The release API's `digest` for `herdr-linux-aarch64` at `P-3` | As `P-4`, for arm64 |
 | P-6  | `IMAGE_NAME` | string | `agent-host` | Choose once; it is the stable human-readable half of the reference | The published image name |
-| P-7  | `IMAGE_VERSION` | string (semver) | `0.1.0` | This package's own version, bumped deliberately on every published change | The tag's version half |
+| P-7  | `IMAGE_VERSION` | string (semver) | `0.2.0` | This package's own version, bumped deliberately on every published change | The tag's version half |
 | P-8  | `GIT_COMMIT` | string | *(from discovery — no default)* | `git rev-parse --short HEAD` at build time | The tag's identity half and the `revision` label |
 | P-9  | `IMAGE_REGISTRY` | string | `ghcr.io` | The registry the implementer is authorized to push to | Where the published host image lives |
 | P-10 | `IMAGE_NAMESPACE` | string | *(from discovery — no default)* | The registry account or organization that owns the artifact | The published path `<P-9>/<P-10>/<P-6>` |
@@ -312,6 +320,11 @@ agent CLI and nothing else.
 | P-31 | `AGENT_USER` | string | *(inherited from the base image)* | The base's runtime account; the deployment names it so one place can rename it | The identity every pane runs as (R-1, R-9) |
 | P-32 | `PLATFORMS` | list | `linux/amd64,linux/arm64` | `docker buildx inspect --bootstrap` — what the builder can produce | What the published manifest covers; a subset is a decision to record |
 | P-33 | `BUILDER_NAME` | string | `agent-host-builder` | `docker buildx ls` — a multi-platform builder, or create one with the `docker-container` driver | The builder used for the published multi-platform build |
+
+`P-2` (`AGENT_BASE_DIGEST`) is retired in v0.2.0: the digest is now the second
+half of `P-1`'s value in its published form, and there is no separate argument to
+pass. Ids are **not** renumbered — every other reference in this package, in the
+catalogue and in part 3's dependency pin cites them by id.
 
 ## Modules
 
@@ -403,7 +416,9 @@ fragment publishes nothing.
 Goal: resolve every Must discover locally item and fix every parameter before
 anything is built.
 Steps:
-1. Resolve `P-2` (the base's manifest digest) and record it.
+1. Resolve `P-1` — the base's complete reference. For a published base, resolve
+   its manifest list digest and record it; for a base built locally, the tag is
+   the whole reference and there is no digest to record.
 2. Verify `P-4`/`P-5` against the release assets of `P-3`; if either differs, stop
    and pick a version whose digests you verified.
 3. Choose `P-11` (the agent ids) and create `P-30` on the host, owned by the
@@ -414,14 +429,17 @@ Steps:
 5. If Docker CLI access is wanted, deploy `D-2` first and note its endpoint —
    the deployment sets `DOCKER_HOST` and friends, never a socket mount.
 Verify: every parameter in the table has a value or an explicit default; the base
-digest resolves; `stat` on the tree matches the base's uid.
+reference resolves — with a digest recorded when the base was published, and the
+absence of one stated plainly when it was not; `stat` on the tree matches the
+base's uid.
 
 ### Phase 2: The host image
 Goal: one image satisfying R-1, R-11 and R-13, built from `skeleton/`.
 Steps:
 1. Fill `HERDR_SHA256_AMD64`/`HERDR_SHA256_ARM64` if `P-3` is not the default.
-2. Build with `--build-arg AGENT_BASE_IMAGE` and `--build-arg AGENT_BASE_DIGEST`,
-   for the platforms in `P-32`.
+2. Build with `--build-arg AGENT_BASE_REF=<the complete reference>`, for the
+   platforms in `P-32`. Nothing else about the base is passed: the reference is
+   one string in either form.
 Skip if the image with this tag already exists and its build inputs are unchanged.
 Verify: `docker image inspect <tag> --format '{{.Config.User}}
 {{.Config.WorkingDir}} {{json .Config.Entrypoint}} {{json .Config.ExposedPorts}}'`
@@ -645,6 +663,7 @@ limits of the artifact, not gaps to be filled in later by the same script:
 | Phase | What can fail | Detection | Recovery |
 |-------|---------------|-----------|----------|
 | 1 | The base digest resolves to a per-platform digest rather than a manifest list | the other platform's build fails with `no matching manifest` | re-resolve with `imagetools inspect --format '{{.Manifest.Digest}}'` |
+| 1 | The base was built locally and never published, so `P-1` carries a tag and there is no digest to resolve | not a failure: the build proceeds and the reference is the tag | record that the base is unpinned (`R-1` names the tag form as supported) and re-pin to the digest form when the base is published. Do not invent a digest, and do not claim the pin |
 | 1 | The tree is owned by a different uid than the base's account | the boot refuses naming the directory, or the first write fails | `chown` the host directory to the base's account id, then re-run |
 | 2 | A herdr asset digest no longer matches | the build fails at the checksum line | pick a released version whose digests you verified; do not relax the check |
 | 2 | `setsid`, `sshd` or `jq` missing after the package install | the build's own `command -v` checks | fix the package list, never the runtime check |
@@ -783,6 +802,18 @@ Decisions:
   can be allowed to create and start while being denied attach — the host this
   package was verified on is one. `docker create` + `start` + `logs` + `rm` works
   in both worlds.
+
+- 2026-09-18 — **The base is named by one reference, not by a name plus a
+  digest.** A single `FROM` cannot take an optional `@`, so the previous pair
+  (`AGENT_BASE_IMAGE` + `AGENT_BASE_DIGEST`) made a registry a prerequisite: a
+  builder with a locally built base could not attach a layer at all. `P-1`
+  `AGENT_BASE_REF` carries whichever form the base is in — the digest form stays
+  the required one whenever the base came from a registry, and is what pins the
+  bytes. The consequence for provenance labels: `org.opencontainers.image.base.digest`
+  is gone rather than filled with a tag, because filling it honestly would need
+  the optional second argument this change removes; `...base.name` carries the
+  whole reference, digest included in the form that has one. `P-2` is retired and
+  ids are not renumbered.
 
 Open questions:
 

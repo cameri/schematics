@@ -6,24 +6,38 @@
 # rules it encodes are a contract between two artifacts rather than a build
 # recipe.
 #
-# Build it with:
+# Build it two ways, with one argument either way:
 #
 #   docker build -f Containerfile.layer \
-#     --build-arg AGENT_DEV_BASE=<registry>/<namespace>/<name> \
-#     --build-arg AGENT_DEV_BASE_DIGEST=sha256:<manifest list digest> \
-#     -t <your-tag> .
+#     --build-arg AGENT_DEV_BASE_REF=<registry>/<namespace>/<name>@sha256:<manifest list digest> \
+#     -t <your-tag> .                       # published base — pin the digest
+#
+#   docker build -f Containerfile.layer \
+#     --build-arg AGENT_DEV_BASE_REF=<local name>:<version>-<commit> \
+#     -t <your-tag> .                       # locally built base — the tag is the reference
 
-## The Two Build Arguments
+## The Base Reference
 
-| Argument | Value |
-|----------|-------|
-| `AGENT_DEV_BASE` | The published base reference without a tag: `<registry>/<namespace>/<name>`. |
-| `AGENT_DEV_BASE_DIGEST` | The base's **manifest list digest** — the `Digest:` line that `docker buildx imagetools inspect` prints for the published reference. |
+One build argument, `AGENT_DEV_BASE_REF`, carrying a complete image reference.
+Both forms below are complete; a single `FROM` cannot take an optional `@`, so
+the reference is passed whole rather than assembled from two arguments:
+
+| Form | Value | When |
+|------|-------|------|
+| Digest | `<registry>/<namespace>/<name>@sha256:<manifest list digest>` | Whenever the base came from a registry. This is the *only* form that pins: a digest cannot move, and the manifest list digest resolves correctly on every platform. |
+| Tag | `<name>:<version>-<commit>` | When the base was built on this machine and never pushed. No registry, no namespace, no login, no credential — and no pin, which the layer's own notes must say rather than imply. |
 
 Pin the manifest list digest, never a tag and never a per-platform digest. A
 tag moves; a per-platform digest pins one architecture and makes the other
 architecture's build fail with `no matching manifest`. The manifest list digest
-is the only pin that resolves correctly on both platforms.
+is the only pin that resolves correctly on both platforms. When a base is
+unpublished there is no digest to pin — say the pin is unverified instead of
+claiming it, and re-pin to the digest form the moment the base is published.
+
+A layer needs no BuildKit: the instructions a layer adds (`RUN`, `USER`,
+`ENV`, `COPY`, `HEALTHCHECK`) are all understood by the classic builder, and the
+template carries no `# syntax=` directive that would demand otherwise. Add one
+deliberately if your install step wants `RUN --mount=type=cache`.
 
 ## What a Layer May Change
 
@@ -48,13 +62,17 @@ is the only pin that resolves correctly on both platforms.
 
 ## Why This Shape
 
-- **`FROM` by digest, not by tag.** The base image is versioned by a digest a
-  reviewer can see and re-resolve; the dependency is visible in one line rather
-  than implied by a build that happened to pull the right tag.
+- **One complete reference, `FROM` it as it comes.** Two arguments (a name plus
+  a digest) cannot express an unpublished base — a single `FROM` has no optional
+  `@` — so the layer would simply be unbuildable on a machine with no registry.
+  Passing the whole reference keeps the dependency visible in one line at both
+  ends of the lifecycle: `name:tag` locally, `name@sha256:<manifest list
+  digest>` when the base was published, with the digest form required whenever
+  the base came from a registry.
 - **`USER root` for the install, then `USER ${AGENT_USER}`.** Installing needs
   root; running never does. Using the inherited `AGENT_USER` rather than the
-  literal name means a deployment that renames the account edits one build
-  argument instead of every layer.
+  literal name means a deployment that renames the account edits its base
+  instead of every layer.
 - **The install step fails on purpose when unfilled.** A layer image with no
   harness would build, publish, and then refuse to start an agent — a failure
   that belongs in the build, not in production.
@@ -64,8 +82,8 @@ is the only pin that resolves correctly on both platforms.
 ## Validation
 
 ```
-docker build -f Containerfile.layer --build-arg AGENT_DEV_BASE=<ref> \
-  --build-arg AGENT_DEV_BASE_DIGEST=<digest> -t <tag> .          # exits 0
+docker build -f Containerfile.layer --build-arg AGENT_DEV_BASE_REF=<ref> \
+  -t <tag> .                                                    # exits 0
 docker image inspect <tag> \
   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
                                                 # the base's account, workspace, and entrypoint

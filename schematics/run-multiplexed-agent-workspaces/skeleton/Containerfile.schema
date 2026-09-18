@@ -6,8 +6,7 @@
 #
 # | Argument | Value |
 # |----------|-------|
-# | `AGENT_BASE_IMAGE` | The base reference without a tag: `<registry>/<namespace>/<name>`. |
-# | `AGENT_BASE_DIGEST` | The base's **manifest list** digest — the `Digest:` line the base's publish step prints. A tag moves; a per-platform digest pins one architecture and breaks the other's build. |
+# | `AGENT_BASE_REF` | The base image as **one complete reference**, in either form: `<registry>/<namespace>/<name>@sha256:<manifest list digest>` for a base that was published, or `<name>:<version>-<commit>` for one built on this machine and never pushed. A single `FROM` cannot take an optional `@`, so the reference is passed whole rather than assembled from a name and a digest. Use the digest form whenever the base came from a registry — a tag moves, and a per-platform digest breaks the other architecture's build. |
 # | `HERDR_SHA256_AMD64` | The publisher's SHA-256 for the `linux-x86_64` release asset at `HERDR_VERSION` (`P-4`). |
 # | `HERDR_SHA256_ARM64` | The same for `linux-aarch64` (`P-5`). |
 #
@@ -18,12 +17,18 @@
 # build at `sha256sum -c`, which is the intended refusal rather than a step to
 # work around.
 #
-# The base labels are worth their two lines: `AGENT_BASE_IMAGE` and
-# `AGENT_BASE_DIGEST` are declared before `FROM`, where only `FROM` can read
-# them, so the `org.opencontainers.image.base.*` labels need the redeclaration
-# after it. Without that, both labels are empty strings in a built image — a
-# defect no local check can see here, since building the layer needs a builder
-# this package's verification machine does not have.
+# The base label is worth its line: `AGENT_BASE_REF` is declared before `FROM`,
+# where only `FROM` can read it, so `org.opencontainers.image.base.name` needs
+# the redeclaration after it. Without that, the label is an empty string in a
+# built image — a defect no local check can see here, since building the layer
+# needs a builder this package's verification machine does not have.
+#
+# There is no `org.opencontainers.image.base.digest` label any more, and its
+# absence is the honest consequence of one reference: filling it would need a
+# second argument that is optional exactly when the base was never published,
+# which is the second argument this change removes. When the reference is the
+# digest form, `...base.name` carries the digest itself; when it is a tag there
+# is no digest to state, and putting a tag in a digest label would be a lie.
 #
 # ## What this layer may and may not change
 #
@@ -56,21 +61,21 @@
 #
 # ## Validation
 #
-# The arguments with no default — `AGENT_BASE_IMAGE` and `AGENT_BASE_DIGEST` —
-# are the only two the build command passes. `HERDR_VERSION` and both checksums
-# already default to the pinned release, so a build either matches that release
-# or stops at `sha256sum -c`.
+# The argument with no default — `AGENT_BASE_REF` — is the only one the build
+# command passes. `HERDR_VERSION` and both checksums already default to the
+# pinned release, so a build either matches that release or stops at
+# `sha256sum -c`.
 #
 # ```
 # docker build -f Containerfile \
-#   --build-arg AGENT_BASE_IMAGE=<ref> --build-arg AGENT_BASE_DIGEST=<digest> \
+#   --build-arg AGENT_BASE_REF=<ref> \
 #   -t agent-host:verify .                                          # exits 0
 # docker image inspect agent-host:verify \
 #   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
 #   # the base's account, working directory and entrypoint, unchanged
 # docker image inspect agent-host:verify \
-#   --format '{{index .Config.Labels "org.opencontainers.image.base.digest"}}'
-#   # the base's manifest digest, not the empty string the redeclaration prevents
+#   --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}'
+#   # the complete base reference, not the empty string the redeclaration prevents
 # docker run --rm agent-host:verify                                 # the base's refusal, exit 78
 # docker image inspect agent-host:verify --format '{{json .Config.ExposedPorts}}'  # null
 # ```
