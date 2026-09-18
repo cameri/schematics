@@ -117,6 +117,24 @@ failure behaviour). Installing a runtime from a vendor's install script instead
 would break R-9 — a piped install script is architecture-specific, unverified and
 unpinnable.
 
+Two things bite a current npm, and both are why the install step is written the
+way it is:
+
+- A global install does **not** run the package's own install script on a current
+  npm unless it is allowed, and for these CLIs that script is what places the
+  platform-specific binary. The step allows it by writing the setting before the
+  install (`npm config set allow-scripts=<package>`), which is what npm itself
+  suggests and which behaves correctly on both npm families: a version that knows
+  the setting honours it, and one that predates it runs the script anyway. It
+  cannot be a command-line flag alone — the flag was measured to be accepted and
+  silently ineffective on one npm, leaving an install that looks complete and is
+  not.
+- A base image that already carries the same CLI on PATH **shadows** the layer's
+  install. The version recorded in the image is the layer's; `command -v` may
+  answer with the base's. The layer reports that difference in the acceptance
+  output rather than assuming the two agree, and a layer that must be the only
+  source of its CLI belongs on a base that ships none.
+
 ## What the install step must not do
 
 | Forbidden | Why |

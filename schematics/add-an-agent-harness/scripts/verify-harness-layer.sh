@@ -35,15 +35,19 @@
 # Inputs (environment; none of these is written anywhere):
 #   IMAGE                this layer's image. Optional: when unset, the script
 #                        builds it (see BASE_IMAGE / BASE_PACKAGE_DIR).
-#   BASE_IMAGE           a locally present base image to build the layer over
-#                        and to compare the inherited contract against
-#                        (default: containers-agent-sandbox:latest)
+#   BASE_IMAGE           a locally present image to build the layer over and to
+#                        compare the inherited contract against. No default: an
+#                        agent-host image is the deployment's own, and naming one
+#                        here would name the author's. When it is set, the
+#                        script also synthesizes a stand-in base from the base
+#                        package's own entrypoint (see BASE_PACKAGE_DIR) so the
+#                        entrypoint rows are exercised for real. When it is not,
+#                        every row that needs a built image skips with that
+#                        reason printed.
 #   BASE_PACKAGE_DIR     the base schematic's package directory
 #                        (default: ../build-an-agent-dev-image). Its
-#                        skeleton/entrypoint.sh is copied into a synthesized
-#                        stand-in base when no real base is available, so the
-#                        entrypoint rows are real. A-2 and A-3 report a SKIP
-#                        when it is missing too.
+#                        skeleton/entrypoint.sh is what the stand-in base above
+#                        is built from.
 #   HARNESS              P-1: the CLI to build and check (default: claude)
 #   ROUTER_BASE_URL      P-3 (default: http://llm-router:4000/v1)
 #   ROUTER_CREDENTIAL_ENV P-4 (default: ROUTER_API_KEY)
@@ -83,7 +87,7 @@
 set -u
 
 IMAGE="${IMAGE:-}"
-BASE_IMAGE="${BASE_IMAGE:-containers-agent-sandbox:latest}"
+BASE_IMAGE="${BASE_IMAGE:-}"
 BASE_PACKAGE_DIR="${BASE_PACKAGE_DIR:-}"
 HARNESS="${HARNESS:-claude}"
 ROUTER_BASE_URL="${ROUTER_BASE_URL:-http://llm-router:4000/v1}"
@@ -160,17 +164,17 @@ body() {
     fi
 
     # --- the harness the layer installed (H-4) ---------------------------
-    if command -v "$HARNESS_CMD" >/dev/null 2>&1; then
-        bp "H-4 the ${HARNESS_CMD} CLI is on PATH for this account"
-        V="$("$HARNESS_CMD" --version 2>&1)"
+    if command -v "$CHECK_CMD" >/dev/null 2>&1; then
+        bp "H-4 the ${CHECK_CMD} CLI is on PATH for this account"
+        V="$("$CHECK_CMD" --version 2>&1)"
         if [ -n "$V" ]; then
-            bp "H-4 ${HARNESS_CMD} --version answers: ${V}"
+            bp "H-4 ${CHECK_CMD} --version answers: ${V}"
             emit cli_version "$V"
         else
-            bf "H-4 ${HARNESS_CMD} --version produced nothing"
+            bf "H-4 ${CHECK_CMD} --version produced nothing"
         fi
     else
-        bf "H-4 ${HARNESS_CMD} is not on PATH for this account"
+        bf "H-4 ${CHECK_CMD} is not on PATH for this account"
     fi
 
     # --- the recorded install (H-7) --------------------------------------
@@ -187,12 +191,12 @@ body() {
 
     # --- the CLI's configuration (H-8, H-9, H-11) ------------------------
     CONF=""
-    [ -n "${HARNESS_HOME:-}" ] && CONF="$HARNESS_HOME/$CONF_NAME"
+    [ -n "${HARNESS_HOME:-}" ] && CONF="$HARNESS_HOME/$CHECK_CONF"
     if [ -z "$CONF" ] || [ ! -r "$CONF" ]; then
         bf "H-8 no readable configuration at ${CONF:-<unset>}"
     else
         cp "$CONF" "$OUT/config.copy" 2>/dev/null || true
-        if [ "$HARNESS" = "claude" ]; then
+        if [ "$CHECK_HARNESS" = "claude" ]; then
             if command -v python3 >/dev/null 2>&1; then
                 if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CONF" 2>/dev/null; then
                     bp "H-8 the configuration parses as JSON"
@@ -285,14 +289,15 @@ fi
 
 command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || usage_error "no $CONTAINER_RUNTIME on PATH"
 [ -d "$SKELETON" ] || usage_error "no skeleton directory at $SKELETON"
-CONF_NAME="settings.json"
-[ "$HARNESS" = "claude" ] || CONF_NAME="config.toml"
-HARNESS_CMD="$HARNESS"
+CHECK_CONF="settings.json"
+[ "$HARNESS" = "claude" ] || CHECK_CONF="config.toml"
+CHECK_CMD="$HARNESS"
 : "${RUN_HOST_DIR:=$PACKAGE_HOST_DIR/.verify-run}"
 : "${RUN_LOCAL_DIR:=$RUN_HOST_DIR}"
-RUN_DIR="$RUN_HOST_DIR"
-OUT_HOST="$RUN_HOST_DIR/out"
-OUT_LOCAL="$RUN_LOCAL_DIR/out"
+RUN_DIR="$RUN_LOCAL_DIR"      # where this script reads and writes
+RUN_HOST="$RUN_HOST_DIR"      # what containers bind: the runtime resolves this
+OUT_HOST="$RUN_HOST/out"
+OUT_LOCAL="$RUN_DIR/out"
 # The account the base image runs as. Read from the image rather than assumed:
 # a layer must return to whatever account the base declares, and this script
 # builds over more than one.
@@ -300,15 +305,16 @@ BASE_USER="$(rt image inspect "$BASE_IMAGE" --format '{{.Config.User}}' 2>/dev/n
 : "${BASE_USER:=root}"
 [ -n "$CONTAINER_USER" ] || CONTAINER_USER="$BASE_USER"
 : "${HARNESS_HOME:=/home/$CONTAINER_USER/.$HARNESS}"
-rm -rf "$RUN_DIR"; mkdir -p "$OUT_HOST" || usage_error "cannot create $RUN_DIR"
-[ "$OUT_LOCAL" = "$OUT_HOST" ] || mkdir -p "$OUT_LOCAL"
+rm -rf "$OUT_LOCAL" 2>/dev/null || true
+mkdir -p "$OUT_LOCAL" || usage_error "cannot create $OUT_LOCAL"
+[ "$OUT_LOCAL" = "$OUT_HOST" ] || mkdir -p "$OUT_HOST" 2>/dev/null || true
 
 CREATED=""
 cleanup() {
     for c in $CREATED; do rt rm -f "$c" >/dev/null 2>&1; done
     if [ "$KEEP" != "1" ]; then
         rt image rm -f "${LAYER_TAG:-}" >/dev/null 2>&1 || true
-        rm -rf "${BASE_STANDIN:-}" >/dev/null 2>&1 || true
+        rt image rm -f "${BASE_STANDIN:-}" >/dev/null 2>&1 || true
     fi
 }
 LAYER_TAG=""
@@ -316,15 +322,48 @@ BASE_STANDIN=""
 trap cleanup EXIT INT TERM
 
 BUILD_LOG="$RUN_DIR/build.log"
-BASE_STANDIN="$RUN_DIR/base.standin"
+STANDIN_LOG="$RUN_DIR/standin.log"
+BASE_STANDIN="harness-layer-verify-base:$$"
 STANDIN_OK=0
 LAYER_TAG="harness-layer-verify:$$"
 
 printf 'verify-harness-layer: harness=%s base=%s\n' "$HARNESS" "$BASE_IMAGE"
 
+# --- H-13: the shipped Containerfile, read as text. These rows need no image,
+# --- so they run first and always, including on a host with no usable builder.
+static_rows() {
+    if grep -qE '(curl|wget)[^|]*\|[[:space:]]*(ba)?sh' "$SKELETON/Containerfile"; then
+        fail "H-13 the Containerfile pipes a download into a shell"
+    else
+        pass "H-13 the Containerfile pipes nothing into a shell"
+    fi
+    if grep -qE 'npm install[^;]*@latest' "$SKELETON/Containerfile"; then
+        fail "H-13 the Containerfile installs a floating tag"
+    elif grep -q '\${PKG}@\${V}' "$SKELETON/Containerfile"; then
+        pass "H-13 the install is version-resolved"
+    else
+        fail "H-13 no version-resolved install line found"
+    fi
+    if grep -qE '^[[:space:]]*(ENTRYPOINT|CMD|WORKDIR)' "$SKELETON/Containerfile"; then
+        fail "H-13 the layer declares an ENTRYPOINT, CMD or WORKDIR"
+    else
+        pass "H-13 the layer declares no ENTRYPOINT, CMD or WORKDIR of its own"
+    fi
+    if grep -qE 'supervisord|s6-svscan|runsvdir|nginx|httpd|[[:space:]]listen[[:space:]]' "$SKELETON/Containerfile"; then
+        fail "H-12 the Containerfile starts a service or a listener"
+    else
+        pass "H-12 the Containerfile starts no service and opens no listener"
+    fi
+}
+static_rows
+
 # --- a base to build over ------------------------------------------------
-if rt image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+BASE_PRESENT="not set"
+if [ -z "$BASE_IMAGE" ]; then
+    note "BASE_IMAGE is unset: there is no image to build this layer over"
+elif rt image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
     note "using the local image $BASE_IMAGE as the base"
+    BASE_PRESENT="present"
     BASE_REF="$BASE_IMAGE"
     if [ -n "$BASE_PACKAGE_DIR" ] && [ -f "$BASE_PACKAGE_DIR/skeleton/entrypoint.sh" ]; then
         # A faithful stand-in: the base package's own entrypoint, placed where
@@ -338,28 +377,32 @@ COPY entrypoint.sh /usr/local/bin/agent-entrypoint
 RUN chmod 0755 /usr/local/bin/agent-entrypoint
 ENV AGENT_USER=$CONTAINER_USER \\
     AGENT_WORKSPACE_DIR=/workspace
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]
 USER $CONTAINER_USER
 EOF
         cp "$BASE_PACKAGE_DIR/skeleton/entrypoint.sh" "$RUN_DIR/entrypoint.sh"
-        if build -q -t "$BASE_STANDIN" -f "$RUN_DIR/Containerfile.base" "$RUN_DIR" >>"$BUILD_LOG" 2>&1; then
+        if build -q -t "$BASE_STANDIN" -f "$RUN_DIR/Containerfile.base" "$RUN_DIR" >"$STANDIN_LOG" 2>&1; then
             BASE_REF="$BASE_STANDIN"
             STANDIN_OK=1
             note "synthesized a stand-in base from $BASE_PACKAGE_DIR/skeleton/entrypoint.sh (account $CONTAINER_USER)"
-        elif build_refused "$BUILD_LOG"; then
-            note "the runtime refused the builder, so no stand-in base could be built (see $BUILD_LOG)"
+        elif build_refused "$STANDIN_LOG"; then
+            note "the runtime refused the builder, so no stand-in base could be built"
         else
-            note "could not synthesize a stand-in base; the entrypoint rows will skip"
+            note "the stand-in base did not build; its own last line:"
+            note "  $(grep -vE '^(Step |---> |Removing |DEPRECATED|BuildKit| *$)' "$STANDIN_LOG" 2>/dev/null | tail -1)"
         fi
     fi
 else
+    BASE_PRESENT="absent locally"
     note "no local image $BASE_IMAGE"
 fi
 
 if [ -z "$IMAGE" ]; then
     if [ "$STANDIN_OK" != "1" ]; then
-        skip "H-1..H-12 no image could be built here: no agent-host image is available locally and no stand-in base could be synthesized"
-        note "the two reasons, in order: $BASE_IMAGE is not present, and either BASE_PACKAGE_DIR does not carry skeleton/entrypoint.sh or the runtime refused the builder"
-        note "supply BASE_IMAGE (a locally present agent-host image) or a usable builder; the static rows above ran regardless"
+        skip "H-0..H-12 no image could be built here: no agent-host image is available locally and no stand-in base could be synthesized"
+        note "what happened: $BASE_IMAGE was ${BASE_PRESENT:-not inspected}; the stand-in base is built from ${BASE_PACKAGE_DIR}/skeleton/entrypoint.sh; the line above is what its build said"
+        note "supply a locally present BASE_IMAGE, a builder that can run, and the base package; the static rows above ran regardless"
         printf '\nchecks=%s failures=%s skips=%s\n' "$CHECKS" "$FAILURES" "$SKIPS"
         [ "$FAILURES" -eq 0 ] && exit 0 || exit 1
     fi
@@ -378,7 +421,7 @@ if [ -z "$IMAGE" ]; then
         pass "H-0 the layer builds over the base (log: $BUILD_LOG)"
     elif build_refused "$BUILD_LOG"; then
         WHY="$(grep -m1 -E 'booting buildkit|authorization denied|administrative policy|requires BuildKit|not supported by the legacy builder' "$BUILD_LOG" | tr -d '\r')"
-        skip "H-0..H-11 no image could be built here: the runtime refused the build"
+        skip "H-0..H-12 no image could be built here: the runtime refused the build"
         note "reported by the runtime: ${WHY:-see $BUILD_LOG}"
         note "every row needing an image built from this layer skips for that environment reason, not because the package is wrong; the static rows above still ran"
         printf '\nchecks=%s failures=%s skips=%s\n' "$CHECKS" "$FAILURES" "$SKIPS"
@@ -395,7 +438,7 @@ else
 fi
 
 # --- H-6: an unknown harness id stops the build --------------------------
-if rt build -t "$RUN_DIR/nowhere" -f "$SKELETON/Containerfile" \
+if build -t "harness-layer-verify-enum:$$" -f "$SKELETON/Containerfile" \
     --build-arg "AGENT_BASE_REF=$BASE_REF" \
     --build-arg "AGENT_HARNESS_ID=definitely-not-a-harness" \
     "$SKELETON" >"$RUN_DIR/enum.log" 2>&1; then
@@ -428,42 +471,26 @@ else
     fail "H-12 platform differs from the base: layer=${HW:-?} base=${BW:-?}"
 fi
 
-# --- H-13: the shipped Containerfile, read as text -----------------------
-if grep -qE '(curl|wget)[^|]*\|[[:space:]]*(ba)?sh' "$SKELETON/Containerfile"; then
-    fail "H-13 the Containerfile pipes a download into a shell"
-else
-    pass "H-13 the Containerfile pipes nothing into a shell"
-fi
-if grep -qE 'npm install[^;]*@latest' "$SKELETON/Containerfile"; then
-    fail "H-13 the Containerfile installs a floating tag"
-elif grep -q '\${PKG}@\${V}' "$SKELETON/Containerfile"; then
-    pass "H-13 the install is version-resolved"
-else
-    fail "H-13 no version-resolved install line found"
-fi
-if grep -qE '^[[:space:]]*(ENTRYPOINT|CMD|WORKDIR)' "$SKELETON/Containerfile"; then
-    fail "H-13 the layer declares an ENTRYPOINT, CMD or WORKDIR"
-else
-    pass "H-13 the layer declares no ENTRYPOINT, CMD or WORKDIR of its own"
-fi
-
 # --- containers ----------------------------------------------------------
 run_container() {
-    # $1 name, $2 harness value for AGENT_HARNESS ('' = unset), rest: args
+    # $1 name, $2 harness value for AGENT_HARNESS ('' = unset), rest: the
+    # container's command, passed to the harness by the inherited entrypoint.
     c="$1"; h="$2"; shift 2
     rt rm -f "$c" >/dev/null 2>&1
-    set -- \
-        create --name "$c" --label org.testcontainers=true \
+    set -- create --name "$c" --label org.testcontainers=true \
+        --user "$CONTAINER_USER" \
         -v "$PACKAGE_HOST_DIR:/verify-pkg:ro" \
-        -v "$RUN_DIR:/verify-out" \
-        -e "HARNESS=$HARNESS" -e "HARNESS_HOME=$HARNESS_HOME" \
-        -e "CONF_NAME=$CONF_NAME" -e "HARNESS_CMD=$HARNESS_CMD" \
+        -v "$RUN_HOST/out:/verify-out" \
+        -e "CHECK_HARNESS=$HARNESS" -e "HARNESS_HOME=$HARNESS_HOME" \
+        -e "CHECK_CONF=$CHECK_CONF" -e "CHECK_CMD=$CHECK_CMD" \
         -e "ROUTER_BASE_URL=$ROUTER_BASE_URL" -e "HARNESS_MODEL_ALIAS=$HARNESS_MODEL_ALIAS" \
         -e "HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW" \
-        "$@"
-    if [ -n "$CONTAINER_USER" ]; then set -- "$@" --user "$CONTAINER_USER"; fi
-    set -- "$@" -e "AGENT_HARNESS=$h" "$LAYER_TAG"
-    rt "$@" >/dev/null 2>&1 || return 1
+        -e "AGENT_HARNESS=$h" \
+        "$LAYER_TAG" "$@"
+    if ! rt "$@" >"$RUN_DIR/create-$c.log" 2>&1; then
+        note "docker create for $c failed: $(tail -1 "$RUN_DIR/create-$c.log")"
+        return 1
+    fi
     CREATED="$CREATED $c"
     return 0
 }
@@ -483,7 +510,7 @@ else
 fi
 
 # H-3/H-4/H-5: the real CLI through the entrypoint, with an argument.
-if run_container hl-cli "$HARNESS_CMD" --version; then
+if run_container hl-cli "$CHECK_CMD" --version; then
     rt start hl-cli >/dev/null 2>&1
     RC="$(rt wait hl-cli 2>/dev/null)"
     LOG="$(rt logs hl-cli 2>&1)"
@@ -494,8 +521,8 @@ if run_container hl-cli "$HARNESS_CMD" --version; then
         fail "H-4 no version string from the CLI: $(printf '%s' "$LOG" | head -2 | tr '\n' ' ')"
     fi
     case "$TOP" in
-        *"$HARNESS_CMD"*) pass "H-3 the harness is the container's process: $TOP" ;;
-        *) skip "H-3 docker top did not report the process (unsupported here); logged output came from $HARNESS_CMD" ;;
+        *"$CHECK_CMD"*) pass "H-3 the harness is the container's process: $TOP" ;;
+        *) skip "H-3 docker top did not report the process (unsupported here); logged output came from $CHECK_CMD" ;;
     esac
     if [ "$RC" = "0" ]; then
         pass "H-5 the harness's exit status is the container's (0)"
@@ -547,7 +574,7 @@ if run_container hl-body "/verify-pkg/scripts/verify-harness-layer.sh" --inside 
             *) skip "H-5 could not read PID 1's command line inside the container (pid1='${PID1:-}')" ;;
         esac
         RV="$(sed -n 's/^recorded_version=//p' "$E")"
-        BUILDV="$(grep -oE 'installing [^ ]+@[^ ]+' "$BUILD_LOG" | tail -1 | sed 's/.*@//')"
+        BUILDV="$(grep -E '^add-an-agent-harness: installing .*@[0-9]' "$BUILD_LOG" | tail -1 | sed 's/.*@//;s/ as.*//')"
         if [ -n "$RV" ]; then
             if [ -n "$BUILDV" ]; then
                 [ "$RV" = "$BUILDV" ] \
@@ -556,6 +583,13 @@ if run_container hl-body "/verify-pkg/scripts/verify-harness-layer.sh" --inside 
             else
                 skip "H-7 the build log was not captured (supplied IMAGE); recorded version: $RV"
             fi
+        fi
+        # A base image that already carries this CLI on PATH shadows the one the
+        # layer installed, which is worth saying out loud rather than failing:
+        # the record is the layer's install, the answer below may be another's.
+        CLI_V="$(sed -n 's/^cli_version=//p' "$E" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        if [ -n "$CLI_V" ] && [ -n "$RV" ] && [ "$CLI_V" != "$RV" ]; then
+            note "the CLI on PATH reports '$CLI_V' while the layer installed $RV: the base image already carried a copy"
         fi
         # H-8: the credential variable is per harness — the Claude CLI reads
         # ANTHROPIC_AUTH_TOKEN from the process environment and its settings file

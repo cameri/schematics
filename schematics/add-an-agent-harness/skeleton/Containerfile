@@ -69,6 +69,7 @@ RUN set -eu; \
     fi; \
     V="${HARNESS_PACKAGE_VERSION:-$(npm view "${PKG}" version)}"; \
     printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness"; \
+    npm config set "allow-scripts=${PKG}" --location=user >/dev/null 2>&1 || true; \
     npm install --global --no-audit --no-fund "${PKG}@${V}"; \
     npm cache clean --force >/dev/null 2>&1 || true; \
     mkdir -p /usr/local/share/agent-harness "${HARNESS_HOME}"; \

@@ -386,8 +386,11 @@ real container built from this layer.
 the harness: that needs a router serving a real alias and a real credential, which
 is the deployment's test (D-2's own acceptance rows cover the router side). No row
 proves the CLI's own behaviour inside a workspace — that belongs to the harness.
-And the platform claim is per-platform: a row reports the platform it ran on, and
-nothing here asserts a platform nobody built.
+The platform claim is per-platform: a row reports the platform it ran on, and
+nothing here asserts a platform nobody built. And on a base image that already
+carries the same CLI on PATH, H-4 answers with *that* copy's version rather than
+the layer's install; the run says so, and the case of a base that ships no harness
+is stated rather than measured.
 
 ## Failure Modes and Rollback
 
