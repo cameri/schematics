@@ -22,7 +22,7 @@ container, in its project" are different grants:
   `Privileged`, no `CapAdd`, no `Devices`, no `SecurityOpt`, no `VolumesFrom`,
   no host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
   `CgroupnsMode`), no `UsernsMode`, and no mount whose source is neither a
-  volume name nor a path inside `P-15`.
+  volume name nor a path inside `P-15` or inside a root named by `P-16`.
 - **R-16** — a volume create may not carry `DriverOpts`, and its driver must be
   `local` (or unset). `DriverOpts: {type: none, o: bind, device: /}` makes a
   project-named volume the host filesystem.
@@ -106,8 +106,8 @@ so the plugin release decides the language version:
 
 | Plugin image | Embedded OPA | Result |
 |--------------|--------------|--------|
-| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 78 probe rows decides as specified |
-| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 78 probe rows |
+| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 86 probe rows decides as specified |
+| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 86 probe rows |
 | `openpolicyagent/opa-docker-authz-v2:0.8` | v0.30.0 | does **not** load — `import rego.v1` is rejected |
 
 The embedded versions are read from each release's own `go.mod` at its tag
@@ -121,7 +121,7 @@ plugin's engine proves nothing about the plugin.
 
 ## Placeholders
 
-`agent.rego` is a template: six tokens must be substituted from the Parameters
+`agent.rego` is a template: seven tokens must be substituted from the Parameters
 table before deployment, and the deployed file must be checked for leftovers.
 A leftover is a silent full-access bug, not a cosmetic one: `is_sandbox` then
 never matches a real client, so the sandbox is classified as a host user and
@@ -165,6 +165,23 @@ limitations):
   is treated as a host user and allowed everything. The CA must sign sandbox
   certificates only for `P-4`; a second certificate signed by the same CA with a
   different CN is a host-equivalent credential.
+- **The accepted bind roots are a deployment decision, not a discovery.** `P-15`
+  plus `P-16` is the entire set of host paths a create may bind, so a host whose
+  stacks keep their data outside the project directory needs each extra root
+  named in `P-16` before those containers can be created at all. Each root is a
+  prefix grant: naming a directory accepts its subtree, naming a file accepts
+  that file alone, and a `..` segment is refused under every root. An empty
+  `P-16` is the default and accepts nothing beyond the project directory; an
+  unsubstituted token yields no root, so the failure direction is a denied
+  create.
+- **A client that cannot `exec` or `attach` has a smaller vocabulary than the
+  Docker CLI suggests.** `docker run` fails after its create succeeds (the attach
+  is refused), so `docker create` + `docker start` and `docker compose up -d` are
+  the working forms; a build needs `DOCKER_BUILDKIT=0`, because BuildKit's
+  `POST /grpc` is denied and its builder container is refused by the
+  project-name rules; and tooling that reaches a container through `docker exec`
+  stops working by design. Those are decisions, and the client reports them as
+  such (`authorization denied by plugin <P-14>`).
 - **The mount check is only as good as the plugin's filesystem view.** A
   managed-plugin install mounts only the policy directory into the plugin, so
   `Resolved` is empty for project paths and the check falls back to the raw
@@ -178,7 +195,7 @@ limitations):
 ## Dependencies
 
 - D-1, D-3, D-4 (from SCHEMATIC.md)
-- Parameters P-3, P-4, P-9, P-12, P-15 (P-11 is not read by this policy)
+- Parameters P-3, P-4, P-9, P-12, P-15, P-16 (P-11 is not read by this policy)
 
 ## Failure Behavior
 

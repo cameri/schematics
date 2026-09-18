@@ -15,6 +15,10 @@ package docker.authz
 #                                "/srv/compose/backend-services"
 #   TESTCONTAINERS_LABEL_KEY   → P-12 label key, e.g. "org.testcontainers"
 #   TESTCONTAINERS_LABEL_VALUE → P-12 label value, e.g. "true"
+#   EXTRA_BIND_ROOTS           → P-16 extra accepted bind roots, as a
+#                                comma-separated list of absolute directories,
+#                                e.g. "/srv/media,/srv/downloads"; empty when
+#                                the project directory is the only boundary
 #
 # (P-11 BUILDKIT_PREFIX is not read by any rule — see SCHEMATIC.md's Decisions.
 # The leftover-token check in the package still greps for it, so a copy carrying
@@ -283,6 +287,15 @@ bind_ok(src) if {
 	in_project_path(src)
 }
 
+# A host path inside one of the deployment's accepted extra roots (P-16), with no
+# traversal segment. A root is a prefix grant, so it is matched as a directory
+# path or as a whole path, never as a substring, and a root of "/" is dropped
+# rather than accepted: naming it would make this gate decorative.
+bind_ok(src) if {
+	is_string(src)
+	in_extra_root(src)
+}
+
 in_project_path(p) if {
 	not traversal(p)
 	project_dir == p
@@ -292,6 +305,32 @@ in_project_path(p) if {
 	not traversal(p)
 	startswith(p, concat("", [project_dir, "/"]))
 }
+
+# A root matched exactly: this is how a single file is named (a known_hosts, a
+# socket), without granting the directory that holds it.
+in_extra_root(p) if {
+	not traversal(p)
+	some root in extra_roots
+	root == p
+}
+
+in_extra_root(p) if {
+	not traversal(p)
+	some root in extra_roots
+	startswith(p, concat("", [root, "/"]))
+}
+
+# P-16 as a list: absolute directories this deployment accepts as bind sources
+# beyond the project directory, comma-separated in the template. A trailing "/"
+# or "/**" is accepted and means the directory itself. An empty value — the
+# default, and what an unsubstituted token leaves behind — yields no root, so
+# the project directory stays the only boundary.
+extra_roots := [root |
+	some entry in split("EXTRA_BIND_ROOTS", ",")
+	root := trim_suffix(trim_suffix(trim_space(entry), "/"), "/**")
+	root != "/"
+	startswith(root, "/")
+]
 
 traversal(p) if {
 	some segment in split(p, "/")
