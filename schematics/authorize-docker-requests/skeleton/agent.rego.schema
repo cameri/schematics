@@ -215,6 +215,14 @@ that grants a bind proves nothing about the default deployment.
 | same, `Binds: ["<P-15>/src:/app/src"]` | allow — a host path inside `<P-15>` |
 | same, `Binds: ["<P-3>_data:/var/lib/data"]` | allow — a named volume |
 | same, `HostConfig.Mounts: [{Type:"volume", Source:"<P-3>_data", Target:"/data"}]` | allow |
+| same, `HostConfig.Mounts: [{Type:"volume", Source:"fresh-name", Target:"/host", VolumeOptions:{DriverConfig:{Name:"local", Options:{type:"none", o:"bind", device:"/"}}}}]` | deny — the mount's own driver options are a bind of `/`: the daemon applies them when it creates the named volume, and the local driver then binds the device. The same capability R-16 refuses at `/volumes/create` |
+| same, that row with `device:"/etc"` | deny — any non-empty option set, not only `/` |
+| same, that row with `device:"<P-15>"` | deny — fail-closed on purpose: options naming a path *inside* the project directory are refused too, because a gate that accepted them would be maintaining a copy of the local driver's option grammar |
+| same, `HostConfig.Mounts: [{Type:"volume", Source:"fresh-name", Target:"/host", VolumeOptions:{DriverConfig:{Name:"evil"}}}]` | deny — a driver other than the local one, with no options at all |
+| same, `HostConfig.Mounts: [{Type:"volume", Source:"fresh-name", Target:"/host", VolumeOptions:{DriverConfig:{Name:"local", Options:{}}}}]` | allow — an explicitly empty option set is no options |
+| same, `HostConfig.Mounts: [{Type:"volume", Source:"fresh-name", Target:"/host", VolumeOptions:{}}]` | allow — `VolumeOptions` that names no driver and passes no options |
+| same, `Binds: ["<P-3>_data:/data"]`, `HostConfig.VolumeDriver: "evil"` | deny — the legacy `Binds` route takes its driver from this field, and another driver's volume is one the policy cannot see the contents of |
+| same, `Binds: ["<P-3>_data:/data"]`, `HostConfig.VolumeDriver: "local"` | allow — naming the local driver is what the absent field means |
 | same, `HostConfig.Mounts: [{Type:"bind", Source:"<P-15>/x", Target:"/x"}]` | allow |
 | same, `HostConfig.Mounts: [{Source:"<P-15>/x", Target:"/x"}]` (no `Type`) | allow — an untyped entry is treated as a bind |
 | same, `HostConfig.Mounts: [{Source:"/etc", Target:"/etc"}]` (no `Type`) | deny |

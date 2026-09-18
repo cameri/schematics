@@ -176,6 +176,20 @@ testcontainers_container if {
 safe_container_config if {
 	not host_access_config
 	not unsafe_bind
+	not legacy_volume_driver
+}
+
+# The legacy `Binds` route selects its driver here rather than per mount: a
+# `Binds` source that is not an absolute path is a volume name, and the daemon
+# creates that volume with this driver. Only the local driver, or none, is
+# accepted — the same choice `volume_driver_ok` makes for a volume create's own
+# `Driver`, and for the same reason: another driver's volume is one this policy
+# cannot see the contents of.
+legacy_volume_driver if {
+	driver := object.get(host_config, "VolumeDriver", "")
+	is_string(driver)
+	driver != ""
+	driver != "local"
 }
 
 host_access_config if {
@@ -341,6 +355,34 @@ project_dir := trim_suffix("PROJECT_DIR_PATH", "/")
 
 mount_ok(m) if {
 	m.Type == "volume"
+	not volume_driver_options(m)
+	volume_driver_local(m)
+}
+
+# `VolumeOptions.DriverConfig.Options` on a container's *own* mount is the same
+# capability R-16 refuses at the volume-create endpoint, one door along: the
+# daemon passes those options to the volume's driver when it creates the named
+# volume (a fresh name carries them), and the local driver's `type: none`,
+# `o: bind`, `device: /` then performs that bind when the container mounts the
+# volume. Any non-empty option object is refused, rather than accepting the
+# options a bind needs: the option set the local driver honours is not a list
+# this gate should be maintaining a copy of. Presence tests are `object.get`
+# chains, for the reason R-16's `volume_driver_ok` records — a builtin on a
+# missing field fails the rule instead of falling through.
+volume_driver_options(m) if {
+	driver := object.get(object.get(m, "VolumeOptions", {}), "DriverConfig", {})
+	options := object.get(driver, "Options", {})
+	is_object(options)
+	count(options) > 0
+}
+
+# Only the local driver, or none at all: a mount that names another driver asks
+# for a volume whose contents this policy cannot see, which is not a volume this
+# gate can call safe.
+volume_driver_local(m) if {
+	driver := object.get(object.get(m, "VolumeOptions", {}), "DriverConfig", {})
+	name := object.get(driver, "Name", "")
+	name in {"", "local"}
 }
 
 mount_ok(m) if {
