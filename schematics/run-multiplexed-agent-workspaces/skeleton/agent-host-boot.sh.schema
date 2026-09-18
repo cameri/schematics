@@ -1,0 +1,96 @@
+# agent-host-boot.sh.schema
+#
+# Companion document for `agent-host-boot.sh`, the program the deployment names
+# as the container's entrypoint.
+#
+# ## Environment contract
+#
+# | Variable | Required | Default | Meaning |
+# |----------|----------|---------|---------|
+# | `AGENT_IDS` | yes | — | The agents this host runs, comma-separated. Each id becomes one herdr workspace (label = id), one workspace directory, one home, one roster line. |
+# | `AGENT_TREE` | no | `/agents` | Container path of the bind-mounted tree. Per agent: `<tree>/<id>/workspace` and `<tree>/<id>/home`. |
+# | `AGENT_STATE_ROOT` | no | `<AGENT_TREE>/.state` | Per-agent supervision state (stop markers, logs). Inside the tree, so a stop survives a container restart. |
+# | `HERDR_SESSION` | no | `agents` | herdr's named session. Exported, so every child — the server and every pane — resolves the same one. |
+# | `XDG_CONFIG_HOME` | no | `$HOME/.config` | The herdr config root. Exported, and written into the SSH daemon's `SetEnv` in the same run, so the two can never disagree. |
+# | `AGENT_ENTRYPOINT` | no | `/usr/local/bin/agent-entrypoint` | The base image's entrypoint — what each pane runs for its agent. |
+# | `AGENT_PLUGIN_ROOT` | no | `/usr/local/share/agent-host/plugin` | Where the manifest and the two scripts live. |
+# | `AGENT_PLUGIN_ID`, `AGENT_PANE_ENTRYPOINT` | no | `agent-respawn`, `agent` | The plugin and pane ids used when opening panes. |
+# | `AGENT_HERDR_CONFIG_TEMPLATE` | no | `/usr/local/share/agent-host/herdr-config.toml` | Installed to the config root when it has no `config.toml`. |
+# | `AGENT_SSH_ENABLE` | no | `1` | Whether to bring up the SSH daemon. |
+# | `AGENT_SSH_PORT`, `AGENT_SSH_LISTEN` | no | `2222`, `127.0.0.1` | Port and bind address. The loopback default is the isolation posture: reachable from outside only when the deployment publishes it. |
+# | `AGENT_SSHD_DIR`, `AGENT_SSH_AUTHORIZED_KEYS` | no | `<AGENT_TREE>/.sshd`, `<dir>/authorized_keys` | Host key, config, pid and authorized keys. The default sits **inside the mounted tree**, which is what makes the host identity stable across recreates; a value outside it loses the key with the container. |
+# | `AGENT_BOOT_FOREGROUND` | no | `1` | `1`: exec the herdr client, so the container's process is the session. `0`: reconcile and exit — the mode the acceptance script uses. |
+#
+# ## Order, and why it is this order
+#
+# 1. **Contract and tree** — every id validated, every directory created and
+#    checked writable, before anything is started. A host that cannot write an
+#    agent's workspace must refuse, not start an agent that will fail later. The
+#    id charset is the base's (`[A-Za-z0-9._-]`, first character alphanumeric,
+#    64 characters): the id becomes a workspace label, a directory name and a log
+#    name, so separators, whitespace and control characters are refused here.
+# 2. **Configuration** — the packaged `config.toml` is installed only when the
+#    root has none, so an operator's own file is never overwritten.
+# 3. **SSH daemon** — the `SetEnv` line takes the same `XDG_CONFIG_HOME` and
+#    `HERDR_SESSION` this process exports, from the same variables, in the same
+#    run. Its config is validated with `sshd -t` before it is used; a running
+#    daemon is HUP-reloaded rather than duplicated.
+# 4. **Server** — `setsid herdr server` starts it as its own session leader,
+#    which is the `detached_server_daemon` property `herdr --remote` checks
+#    before attaching. If a server for the session already runs, nothing is
+#    started. The script then reads the server's own session and logs a warning
+#    if it is not its own leader — a host that will accept local clients but
+#    refuse remote attach.
+# 5. **Plugin** — linked from the packaged root if `plugin list` does not name it.
+# 6. **Workspaces** — for each agent id, in the order given: close every existing
+#    workspace labelled with that id, create one with the agent's workspace as
+#    cwd and the id as its label, append the roster line *before* opening the
+#    pane (the wrapper reads the roster the moment it starts), then open the
+#    agent pane and close the workspace's shell pane. The inventory it closes
+#    against is read, not assumed: a `workspace list` that fails or comes back in
+#    an unexpected shape refuses rather than reading as "nothing to close", which
+#    would create a second workspace with the same label — and after the create
+#    the label count is read back, so a close that silently failed is a refusal
+#    too. An agent whose stop marker is present keeps its shell pane and gets no
+#    agent pane: attaching shows a shell in the agent's workspace, not a pruned
+#    workspace, and the operator has somewhere to remove the marker.
+# 7. **Session** — `exec herdr --session <HERDR_SESSION>`: the container's
+#    process becomes a client of the session it brought up.
+#
+# ## Idempotency
+#
+# Re-running is the normal case — every container start runs it again. The
+# server and the daemon are left alone when they are already up; the config
+# template is not re-installed over an existing file; the roster is rewritten
+# from scratch (it is derived state, and a stale line is a wrong agent); each
+# agent's workspace is closed and recreated, which is how the desired set is
+# enforced. Nothing accumulates except herdr's own session state and the
+# per-agent supervision state.
+#
+# ## Failure behaviour
+#
+# Every refusal exits 78 with one line on stderr prefixed `agent-host-boot: `:
+# empty `AGENT_IDS`; an id with a character outside the charset or longer than
+# 64; an unwritable tree, workspace directory **or home directory**; `herdr`,
+# `jq` or `setsid` missing from `PATH`; the entrypoint or plugin root missing;
+# the config template missing when no `config.toml` exists; `sshd` missing while
+# SSH is enabled, or rejecting the generated configuration; the herdr session
+# not coming up within 15 seconds; a workspace list that cannot be read or comes
+# back in an unexpected shape; a workspace that cannot be created or whose id
+# cannot be read; more or fewer than one workspace carrying an agent's label
+# after reconciliation.
+#
+# Two conditions are warnings, not refusals, because the host is still usable:
+# a herdr server that is not its own session leader (remote attach will demand a
+# restart), and an empty `authorized_keys` (key-only auth will reject every
+# connection). Both are printed at boot.
+#
+# ## Validation
+#
+# ```
+# sh -n agent-host-boot.sh
+# AGENT_IDS=a,b AGENT_TREE=/tmp/t AGENT_BOOT_FOREGROUND=0 sh agent-host-boot.sh   # exits 0
+# herdr workspace list | jq -r '.result.workspaces[].label'                       # a, then b
+# ps -o pid=,sid= -C herdr                                                        # server: pid == sid
+# ssh <target> 'echo $XDG_CONFIG_HOME $HERDR_SESSION; herdr session list --json'   # parity, session running
+# ```

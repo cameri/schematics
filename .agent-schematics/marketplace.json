@@ -393,6 +393,33 @@
         "media",
         "automation"
       ]
+    },
+    {
+      "name": "run-multiplexed-agent-workspaces",
+      "description": "An agent host: the dev base image plus a herdr multiplexer that runs one named workspace per agent, relaunches only what crashes, keeps every agent's state on bind-mounted directories, and accepts herdr --remote attach over a key-only SSH transport — harness-free, secret-free and outbound-only by default.",
+      "source": "./schematics/run-multiplexed-agent-workspaces",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "composes": [
+        "build-an-agent-dev-image",
+        "restrict-docker-api-access",
+        "encrypt-container-secrets",
+        "run-an-llm-router"
+      ],
+      "keywords": [
+        "sandbox",
+        "agent",
+        "multiplexer",
+        "herdr",
+        "workspaces",
+        "supervision",
+        "ssh",
+        "persistence",
+        "infrastructure"
+      ]
     }
   ]
 }

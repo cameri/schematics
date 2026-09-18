@@ -1,0 +1,76 @@
+# Containerfile.schema
+#
+# Companion document for `Containerfile`, the build of the agent host image.
+#
+# ## The build arguments that matter
+#
+# | Argument | Value |
+# |----------|-------|
+# | `AGENT_BASE_IMAGE` | The base reference without a tag: `<registry>/<namespace>/<name>`. |
+# | `AGENT_BASE_DIGEST` | The base's **manifest list** digest — the `Digest:` line the base's publish step prints. A tag moves; a per-platform digest pins one architecture and breaks the other's build. |
+# | `HERDR_SHA256_AMD64` | The publisher's SHA-256 for the `linux-x86_64` release asset at `HERDR_VERSION` (`P-4`). |
+# | `HERDR_SHA256_ARM64` | The same for `linux-aarch64` (`P-5`). |
+#
+# The two checksum arguments default to the pinned pair for `HERDR_VERSION` —
+# the same two values `P-4` and `P-5` carry — so the build command below runs as
+# written. They are not free parameters to be filled in: they move **with**
+# `HERDR_VERSION`, and a version bump whose digests were not re-read stops the
+# build at `sha256sum -c`, which is the intended refusal rather than a step to
+# work around.
+#
+# The base labels are worth their two lines: `AGENT_BASE_IMAGE` and
+# `AGENT_BASE_DIGEST` are declared before `FROM`, where only `FROM` can read
+# them, so the `org.opencontainers.image.base.*` labels need the redeclaration
+# after it. Without that, both labels are empty strings in a built image — a
+# defect no local check can see here, since building the layer needs a builder
+# this package's verification machine does not have.
+#
+# ## What this layer may and may not change
+#
+# | May | Why it is in this layer's hands |
+# |-----|---------------------------------|
+# | the packages it installs | `openssh-server`, `openssh-client`, `jq` and `util-linux` are what the multiplexer, the attach transport and the JSON parsing need. |
+# | the files it adds | the herdr binary at a pinned version, the plugin, the configuration template, the boot program. |
+# | an optional `HEALTHCHECK` | Declared as none: a host's readiness is its herdr session, which the acceptance script checks directly rather than through a container health probe that would have to re-derive it. |
+#
+# | Must not change | Why |
+# |-----------------|-----|
+# | the runtime account | Its name, ids and home are the base's contract; every agent pane runs as that account. |
+# | the entrypoint | `docker run <this image>` must behave exactly like the base: one agent, one workspace, the base's refusals. The host's own process is named by the deployment (`compose.service.yaml`), not by this image. |
+# | the working directory | Consumers mount agent workspaces deliberately; the image default stays the base's. |
+# | the `AGENT_*` variable names | They are the seam every harness layer writes through. |
+# | any `EXPOSE`, `VOLUME` or socket mount | The image opens no port and mounts nothing: which port is published, and where the Docker API is reached, are the deployment's decisions. A socket mount in the image would hand every agent host root. |
+#
+# ## Reproducibility
+#
+# The base is pinned by manifest digest, herdr by version plus the publisher's
+# per-asset SHA-256 checked into the build, and the package set comes from the
+# base's own distribution repositories. A rebuild is the same image unless one
+# of those three inputs was changed on purpose, which is what makes the layer's
+# own tag meaningful.
+#
+# The version and both checksums are defaults carried from the release the
+# package was verified against, not values to discover at build time:
+# `HERDR_VERSION` (`P-3`) and the two digests (`P-4`, `P-5`) are one pin with
+# three fields.
+#
+# ## Validation
+#
+# The arguments with no default — `AGENT_BASE_IMAGE` and `AGENT_BASE_DIGEST` —
+# are the only two the build command passes. `HERDR_VERSION` and both checksums
+# already default to the pinned release, so a build either matches that release
+# or stops at `sha256sum -c`.
+#
+# ```
+# docker build -f Containerfile \
+#   --build-arg AGENT_BASE_IMAGE=<ref> --build-arg AGENT_BASE_DIGEST=<digest> \
+#   -t agent-host:verify .                                          # exits 0
+# docker image inspect agent-host:verify \
+#   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
+#   # the base's account, working directory and entrypoint, unchanged
+# docker image inspect agent-host:verify \
+#   --format '{{index .Config.Labels "org.opencontainers.image.base.digest"}}'
+#   # the base's manifest digest, not the empty string the redeclaration prevents
+# docker run --rm agent-host:verify                                 # the base's refusal, exit 78
+# docker image inspect agent-host:verify --format '{{json .Config.ExposedPorts}}'  # null
+# ```

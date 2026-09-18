@@ -1,0 +1,28 @@
+# herdr plugin: one agent process per pane, under a crash-only wrapper.
+#
+# herdr links this manifest from the plugin root and runs the two commands
+# below. `HERDR_PLUGIN_ROOT` is injected by herdr and points at the directory
+# this file lives in, so the commands stay independent of where the plugin was
+# installed.
+#
+# The pane command does NOT launch the agent directly. It launches the wrapper,
+# which becomes the pane's process and launches the agent as its child, so an
+# agent that dies does not take its pane with it: the wrapper relaunches it in
+# place. The [[events]] hook is the fallback for the case the wrapper cannot
+# handle — the wrapper itself being killed, which closes the pane.
+id = "agent-respawn"
+name = "agent-respawn"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+platforms = ["linux"]
+description = "Runs each agent as a herdr plugin pane's process under a wrapper that relaunches only after a crash, with a crash-loop bound and a per-agent stop marker; a pane.exited hook reopens the pane when the wrapper itself dies."
+
+[[panes]]
+id = "agent"
+title = "agent"
+placement = "tab"
+command = ["sh", "-lc", "exec sh \"$HERDR_PLUGIN_ROOT/agent-loop.sh\""]
+
+[[events]]
+on = "pane.exited"
+command = ["sh", "-lc", "exec sh \"$HERDR_PLUGIN_ROOT/reopen-pane.sh\""]
