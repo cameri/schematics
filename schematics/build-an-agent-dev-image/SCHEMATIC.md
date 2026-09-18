@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: build-an-agent-dev-image
-version: 0.1.0
+version: 0.2.0
 status: draft
 spec: 1
 description: "The dev base image of a sandboxed coding agent: a digest-pinned distribution image that boots one agent in one workspace from an environment contract, runs as a fixed non-root account, and carries the Docker CLI, git, and build tooling — harness-free and secret-free, so a per-harness layer pins it by digest and adds only its CLI."
 created: 2026-09-14
-updated: 2026-09-14
+updated: 2026-09-18
 ---
 
 # Schematic: Build an Agent Dev Image
@@ -261,15 +261,23 @@ digest it pins, not the luck of last week's build.
   `linux/arm64`, validating the target architecture at build time and failing
   loudly for anything else. The two platforms MUST be publishable as one
   manifest list.
-- **R-12**: The published image MUST be identifiable: tag `<P-10>-<P-11>`
+- **R-12**: Publishing MUST be one supported outcome of the build, not the point
+  of it. When a version is published it MUST be identifiable: tag `<P-10>-<P-11>`
   (version plus the commit that produced it), plus provenance labels for
-  version, revision, source, and base digest. A consumer MUST be able to obtain
-  the manifest list digest of a published version, and that digest is what a
-  layer pins.
-- **R-13**: A layer MUST be able to build `FROM` the base pinned by manifest
-  digest, add only a harness CLI and `ENV AGENT_HARNESS`, and inherit every
-  other guarantee — same account, same entrypoint, same environment contract —
-  without restating any of them.
+  version, revision, source, and the base digest it was built from. A consumer
+  MUST be able to obtain the manifest list digest of a published version, and
+  that digest is what a layer pins. When the image is not published, its
+  provenance MUST still be readable from its own labels: a locally built image is
+  a first-class artifact, and no registry, namespace, login or credential is
+  required either to produce one or to consume it.
+- **R-13**: A layer MUST be able to build `FROM` the base in either of the two
+  forms a complete image reference takes — `name@sha256:<manifest list digest>`
+  when the base was published, `name:tag` when it was built on the same machine
+  and never pushed — and it MUST add only a harness CLI and `ENV AGENT_HARNESS`,
+  inheriting every other guarantee (same account, same entrypoint, same
+  environment contract) without restating any of them. A registry is optional:
+  its absence MUST NOT be a prerequisite for either form, and the digest form
+  MUST be used whenever the base came from one.
 - **R-14**: The base image MUST declare no exposed port, no volume, no health
   check, and no `CMD`. At run time it MUST start exactly one process (the
   harness, per `R-2`) and open no listening socket.
@@ -349,7 +357,7 @@ Implementation-specific binding notes:
 |-----|------|------|------------|-----------|-------------------|
 | D-1 | system | Docker Engine with BuildKit and Buildx (`docker buildx version` exits 0) | Builds the image, supplies `TARGETARCH`, and produces the manifest list (R-11) | `docker version`, `docker buildx version` | Hard fail before Phase 2: without BuildKit there is no supported architecture-validated build, and without Buildx no multi-platform artifact |
 | D-2 | system | Outbound HTTPS at build time to the distribution's package repositories and the Docker CLI's own package repository | Installs the declared toolchain (R-8) from the pinned distribution | The first build's package step | Hard fail: the build stops with the repository's error. Do not substitute an unreviewed source (R-10) |
-| D-3 | system | A container registry the implementer may push to, and credentials for it | Publishing (R-12) — the act that turns a local image into something a layer can pin | `docker login <P-7>`, then a test push of any small image | Degrade: Phases 1–3 and the whole acceptance script still pass against the local image; Phase 4 (publish) cannot complete, and the base stays unpinnable until it does |
+| D-3 | system | *(optional)* A container registry the implementer may push to, and credentials for it | Publishing (R-12) — one supported outcome of the build, not a prerequisite for any other phase. Without it the base reference a layer consumes is the local `name:tag` (R-13) | `docker login <P-7>`, then a test push of any small image. No registry at all is a normal state, not a failure | Degrade, by design: Phases 1–3, Phase 5's local form, and every acceptance row except the published-reference ones still pass. What is lost is the digest pin: a layer can attach to the local base, but it cannot pin it until Phase 4 runs |
 | D-4 | system | A native `linux/arm64` machine or CI runner (or a CI service that provides one) | Verifying the second platform honestly — see `modules/publishing-and-pinning.md` | `uname -m` on the candidate machine; the CI service's runner documentation | Degrade: publish the arm64 manifest anyway and record the verification basis as *unverified* in the deployment's notes. An emulated build is not a verification |
 
 There is deliberately **no `schematic`-kind dependency**: this package is the
@@ -435,9 +443,9 @@ disk.
 **Layer contract** (how the next part of the set attaches):
 
 ```dockerfile
-ARG AGENT_DEV_BASE
-ARG AGENT_DEV_BASE_DIGEST
-FROM ${AGENT_DEV_BASE}@${AGENT_DEV_BASE_DIGEST}   # manifest list digest
+ARG AGENT_DEV_BASE_REF                             # ONE complete reference
+FROM ${AGENT_DEV_BASE_REF}                         # name:tag                          — built locally
+                                                   # name@sha256:<manifest list digest> — published
 USER root                                          # install only
 RUN … install the harness CLI, pinned and verified …
 USER ${AGENT_USER}                                 # back to the inherited account
@@ -449,7 +457,7 @@ ENV AGENT_HARNESS=<cli>                            # the only line the base need
 change. A layer that satisfies it inherits R-1 through R-15 without restating
 any of them.
 
-**Publishing interface** (what the base offers the rest of the set):
+**Reference interface** (what the base offers the rest of the set):
 
 ```
 docker buildx build --builder <P-13> --platform <P-12> \
@@ -463,6 +471,27 @@ docker buildx imagetools inspect <P-7>/<P-8>/<P-9>:<P-10>-<P-11>
 
 The inspection's top-level `Digest:` is the value every layer pins. Per
 platform digests are recorded for the audit trail, never pinned by consumers.
+
+Drop `--push` (and the registry in the tag) and the same build leaves the same
+image in the local daemon, which is all a layer needs:
+
+```
+docker buildx build --builder <P-13> --platform <P-12> \
+  --build-arg BASE_DISTRO_DIGEST=<P-2> \
+  --build-arg IMAGE_VERSION=<P-10> --build-arg GIT_COMMIT=<P-11> \
+  --build-arg IMAGE_SOURCE=<the package's own repository URL> \
+  -f Containerfile -t <any local name>:<P-10>-<P-11> .
+
+docker image inspect <any local name>:<P-10>-<P-11> \
+  --format '{{index .Config.Labels "org.opencontainers.image.version"}} {{index .Config.Labels "org.opencontainers.image.revision"}}'
+```
+
+Provenance is not lost by skipping the registry: the labels are in the image, so
+`docker image inspect` answers the same questions `imagetools inspect` would —
+minus the digest, which exists only once the image is published. A layer built
+`FROM` the local reference inherits those labels like any other base, and a
+deployment that later publishes the same build re-tags the same bytes rather than
+rebuilding them.
 
 ## Implementation Phases
 
@@ -529,7 +558,9 @@ Verify: `0 failed` in the script's summary.
 
 ### Phase 4: Publish the two-platform manifest
 
-Goal: a published reference a layer can pin (R-12).
+Goal: a published reference a layer can pin (R-12) — optional, and the only
+phase that needs a registry or a login. Phase 5 verifies the layer contract with
+or without it.
 
 Steps:
 1. Create or select a multi-platform builder (`P-13`) if the default Docker
@@ -544,20 +575,24 @@ version is a deliberate act (`P-10` bump).
 Verify: `docker buildx imagetools inspect` lists both platforms, and the
 published manifest digest is written down where consumers will find it.
 
-### Phase 5: Attach the first layer (conditional, recommended)
+### Phase 5: Attach the first layer (recommended)
 
-Goal: prove the layer contract against the published artifact — the only test
-that the digest pin works end to end.
+Goal: prove the layer contract end to end — with the digest form when Phase 4
+ran, and with the local form when it did not.
 
 Steps:
 1. Copy `skeleton/Containerfile.layer` into a layer's build context and fill
    the two placeholders: the harness installation and `AGENT_HARNESS`.
-2. Build it with `AGENT_DEV_BASE_DIGEST` set to the digest recorded in Phase 4.
+2. Build it with `AGENT_DEV_BASE_REF` set to `name@sha256:<manifest list
+   digest>` when Phase 4 produced a published reference, or to the local
+   `name:tag` when the base was never pushed. Both are one complete reference;
+   neither form needs the other.
 3. Run the layer image with `AGENT_ID` set and confirm the harness starts as
    PID 1 in the workspace.
 
-Skip condition: `D-3` unmet (no registry) — then build the layer `FROM` the
-local image by tag instead, and record that the digest pin is unverified.
+Skip condition: none. The local form needs no registry, no login and no
+credential, so a run that has only the local image still exercises everything
+here except the digest pin — and says that rather than claiming the pin.
 Verify: the layer's `Config.User` and `Config.Entrypoint` are identical to the
 base's, and the run starts the harness.
 
@@ -641,8 +676,9 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   start an agent, because it ships no harness.
 - **A-9** (covers R-2): a stub harness that exits `7` makes the container exit
   `7`. expected: the harness's status, unchanged.
-- **A-10** (covers R-13): two throwaway layers, both built `FROM` the base by
-  digest and adding only a CLI plus `AGENT_HARNESS`. The first restates
+- **A-10** (covers R-13): two throwaway layers, both built `FROM` a locally
+  tagged base — the form that needs no registry, no login and no credential —
+  and adding only a CLI plus `AGENT_HARNESS`. The first restates
   nothing — no `USER`, no `WORKDIR`, no `ENTRYPOINT` — and must have the
   base's `Config.User`, `Config.WorkingDir`, and `Config.Entrypoint`, and a
   run of it must start the harness as PID 1 and exit 0. The second is the form
@@ -694,6 +730,18 @@ IMAGE=<local tag> PUBLISHED_IMAGE=<P-7>/<P-8>/<P-9>:<P-10>-<P-11> \
   before installing anything from that repository, and the failure is
   identifiably this failure. (Run with `BUILD=1`; skipped otherwise, because
   the check needs the build.)
+- **A-17** (covers R-12, R-13): the shipped layer template itself attaches to a
+  locally tagged base. The script copies `skeleton/Containerfile.layer` into a
+  build context, replaces its deliberately failing install step with a trivial
+  one, and builds it with `AGENT_DEV_BASE_REF` set to the local reference — the
+  same string a published base would carry in its digest form. expected: the
+  build exits 0, and the resulting image has the base's `Config.User`,
+  `Config.WorkingDir` and `Config.Entrypoint`. What this proves: the template's
+  single `FROM` accepts a local reference, so attaching a layer needs no
+  registry, no login and no credential. What it does not prove: that nothing
+  else in the build reached the network — no row here cuts it off — and the
+  digest form is the same build with a different string, which is A-12's
+  territory and skips without `PUBLISHED_IMAGE`.
 
 ## Failure Modes and Rollback
 
@@ -812,6 +860,17 @@ Decisions:
   recorded value and fails on a mismatch (A-16). The cost is stated in the
   Failure Modes table: a vendor key rotation fails the build until the recorded
   fingerprint is updated deliberately, which is the intended behaviour.
+- 2026-09-18 — **A base reference is one complete reference, and a locally built
+  base is first-class.** The earlier two-argument form (an image name plus a
+  digest) made a registry a prerequisite: a single `FROM` cannot take an optional
+  `@`, so a builder without a registry could not attach a layer at all. One
+  reference that is either `name:tag` or `name@sha256:<manifest list digest>`
+  removes that, and the digest form is *required* whenever the base came from a
+  registry — the pin is not weakened, it is just no longer the only way to be a
+  base. Provenance survives the local form in the image's own labels (R-12), and
+  `docker image inspect` answers what `imagetools inspect` would except for the
+  digest, which only exists once the image is published. Whoever builds the
+  schematic owns their registry, if they use one at all; this package names none.
 
 Open questions:
 
