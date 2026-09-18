@@ -12,10 +12,13 @@ starting or supervising the agent process inside the workspace (see
 
 ## Inputs
 
-- `AGENT_IDS` (`P-11`): the agents this host runs, comma-separated. Each id must
-  match the base's charset for an agent id — `[A-Za-z0-9._-]`, first character
-  alphanumeric, at most 64 characters — because the id becomes a workspace label,
-  a directory name, a state directory name and a log name.
+- `AGENT_IDS` (`P-11`): the agents this host runs, comma-separated and each named
+  once. Each id must match the base's charset for an agent id — `[A-Za-z0-9._-]`,
+  first character alphanumeric, at most 64 characters — because the id becomes a
+  workspace label, a directory name, a state directory name and a log name. The
+  raw value must have no leading, trailing or doubled comma: the split that reads
+  the list drops a trailing delimiter, so `a,` arrives as the single id `a` and a
+  value that names two agents would boot one.
 - `AGENT_TREE` (`P-12`): the container path of the mounted tree, under which each
   agent gets `<tree>/<id>/workspace` and `<tree>/<id>/home`.
 - The herdr binary and a running session (`P-3`, `P-14`), and the linked plugin.
@@ -61,6 +64,8 @@ parameters `P-11` … `P-14`, plus `P-16` (the entrypoint the pane runs).
 |-----------|----------|
 | `AGENT_IDS` empty | refusal, exit 78, naming the variable |
 | an id outside the charset, or over 64 characters | refusal, exit 78, naming the id and the rule |
+| a leading, trailing or doubled comma in the list | refusal, exit 78, naming the value — the empty entry is checked against the raw value, because the split cannot see one at the end of the list |
+| an id that appears twice | refusal, exit 78, naming the id — a second pass would close the workspace the first pass created and write a second roster row for that agent |
 | a workspace directory that cannot be created or is not writable by the account | refusal, exit 78, naming the directory — a host that cannot write an agent's workspace must not start an agent that will fail later |
 | `herdr workspace create` fails | refusal, exit 78, with herdr's own output |
 | the created workspace id cannot be parsed | refusal, exit 78, with the raw output — the roster cannot be written without it |

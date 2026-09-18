@@ -707,6 +707,34 @@ STUB
         && pass "A-20: the refusal happened before any workspace was touched ($LABELS_AFTER unchanged)" \
         || fail "A-20: the refused boot changed the workspace set ($LABELS_BEFORE -> $LABELS_AFTER)"
 
+    # Two values the split that reads AGENT_IDS cannot police: `a,` arrives as
+    # the single field `a`, so a list that names one agent and then an unnamed
+    # second one boots one agent and reports success; and `a,a` is two
+    # iterations of the same id, so the reconciliation closes the workspace the
+    # first pass created, creates another and writes a second roster row that
+    # names an agent whose first workspace is gone. Each is refused against the
+    # value it was given, before any workspace is touched.
+    for BAD_CASE in 'a,|has an empty entry' 'a,a|appears more than once'; do
+        BAD_IDS="${BAD_CASE%%|*}"
+        BAD_WANT="${BAD_CASE#*|}"
+        LABELS_BEFORE=$(herdr workspace list 2>/dev/null | jq -r '[.result.workspaces[]?.label] | sort | join(",")')
+        OUT=$(AGENT_TREE="$TREE" AGENT_IDS="$BAD_IDS" AGENT_STATE_ROOT="$STATE_ROOT" \
+            sh "$BOOT" 2>&1)
+        RC=$?
+        case "$OUT" in
+            *"$BAD_WANT"*)
+                [ "$RC" = "78" ] \
+                    && pass "A-20: the boot refuses AGENT_IDS=$BAD_IDS, exit 78, naming the value and why it names no agent ($BAD_WANT)" \
+                    || fail "A-20: the boot refused AGENT_IDS=$BAD_IDS with exit $RC rather than 78" ;;
+            *)
+                fail "A-20: the boot accepted AGENT_IDS=$BAD_IDS (exit $RC: $OUT); the agent set it derives from that value is not the one the operator named" ;;
+        esac
+        LABELS_AFTER=$(herdr workspace list 2>/dev/null | jq -r '[.result.workspaces[]?.label] | sort | join(",")')
+        [ "$LABELS_BEFORE" = "$LABELS_AFTER" ] \
+            && pass "A-20: AGENT_IDS=$BAD_IDS was refused before any workspace was touched ($LABELS_AFTER unchanged)" \
+            || fail "A-20: the refused AGENT_IDS=$BAD_IDS boot changed the workspace set ($LABELS_BEFORE -> $LABELS_AFTER)"
+    done
+
     # An unreadable inventory must refuse, not read as "nothing to close": that
     # reading creates a second workspace with the agent's label.
     REAL_HERDR=$(command -v herdr)
