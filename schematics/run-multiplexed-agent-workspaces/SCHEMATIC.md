@@ -585,6 +585,23 @@ limits of the artifact, not gaps to be filled in later by the same script:
 | 5 | An agent's state is missing after a recreate | A-10 fails | the tree was not mounted, or the deployment mounted a different host directory; `docker inspect` shows what was mounted |
 | 6 | The published image cannot be pulled back by a deployment | the pull fails | the tag is append-only: publish a new version rather than overwriting the old one |
 | any | The host boots but an agent never appears | the workspace exists with only a shell pane | read the supervision log under `P-13`; the pane's own exit is recorded there before the fallback hook acts |
+| 3–4 | A `pane_exited` event is delivered for a workspace the boot itself closed and recreated | the fallback hook acts after reconciliation: `reopen.log` names a recreated workspace, and a second wrapper can start for one agent | not silent and not unbounded: the reconciliation marker suppresses the hook while the boot works, the reopen bound (`P-26`…`P-28`) stops a loop, and every agent id ends up with exactly one pane; the acceptance script reads its agent's pid from the process's own environment, so its own kill cannot land on a wrapper |
+
+**On the ordering of pane events.** herdr emits `pane_exited` for every pane the
+boot's reconciliation closes, and an event queued while the reconciliation marker
+existed can be delivered after the boot removes it — the two are not ordered. The
+hook then sees a workspace whose pane is gone, one the boot has already replaced,
+and may open a pane in a recreated workspace. Three things keep that from being
+harmful: the marker covers the reconciliation window, the reopen bound ends a
+repeat, and the end state is one pane per agent id in the workspace the roster
+names. It is **not a proven defect in a live deployment**: it was seen under the
+acceptance battery's own pace, where the boot, the reconcile and the injection
+follow each other inside a second, and nothing there measures a duplicate agent
+process. The separate defect that run did expose — a stale pid file whose pid had
+been reused by a wrapper, which the check's kill path then killed — is fixed in
+`scripts/verify-agent-host.sh`, which confirms the pid against the process's own
+environment first. Whether the hook should instead ignore an event for a
+workspace whose pane the boot closed itself is **Q-5**.
 
 **Rollback.** Every phase is reversible in the order it was applied. Stop and
 remove the host container first — that ends the agents, the server and the
@@ -715,3 +732,12 @@ Open questions:
   (`mem_limit`, `pids_limit`). The package sets none: a host with two agents and
   a host with twenty differ by one parameter, and a default limit would be a
   guess presented as a recommendation.
+- **Q-5**: Should the fallback hook ignore a `pane_exited` event for a workspace
+  whose pane the boot itself closed? Default: no — see *On the ordering of pane
+  events* under Failure Modes. The event stream is not ordered against the boot's
+  own closes, so an event queued during reconciliation can arrive after the
+  marker is removed and make the hook act on a workspace the boot already
+  replaced. Ignoring those events needs the boot to record the workspaces it
+  closed and the hook to drop exactly those, which trades a bounded oddity for a
+  durable list that must itself be reconciled; a deployment that sees duplicate
+  pane opens across boots is the evidence that would settle it.
