@@ -20,9 +20,11 @@
 #     --build-arg HARNESS_HOME=/home/user/.claude \
 #     -f Containerfile -t <name>:<tag> .
 #
-# Nothing here needs BuildKit: no cache mounts, no heredocs, no --link, and no
-# build-platform variables, so `DOCKER_BUILDKIT=0 docker build` produces the
-# same image as the default builder.
+# This file needs no BuildKit: no cache mounts, no heredocs, no --link, and no
+# build-platform variables, so the legacy builder builds it exactly as the
+# default one does. That is a property of this file, not of the build path — the
+# image it builds on is the base's, and whatever the base's own Containerfile
+# requires to produce that image still applies.
 
 # One complete base reference: `name:tag` for an image built locally,
 # `name@sha256:<manifest list digest>` for a published one.
@@ -54,7 +56,7 @@ RUN set -eu; \
       codex)  PKG='@openai/codex';              CLI='codex';  TPL='codex-config.toml';    CONF='config.toml';    CRED="${ROUTER_CREDENTIAL_ENV}" ;; \
       *) printf '%s\n' "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex" >&2; exit 78 ;; \
     esac; \
-    for pair in "ROUTER_BASE_URL=${ROUTER_BASE_URL}" "HARNESS_MODEL_ALIAS=${HARNESS_MODEL_ALIAS}" "HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW}" "HARNESS_HOME=${HARNESS_HOME}"; do \
+    for pair in "ROUTER_BASE_URL=${ROUTER_BASE_URL}" "HARNESS_MODEL_ALIAS=${HARNESS_MODEL_ALIAS}" "HARNESS_FAST_ALIAS=${HARNESS_FAST_ALIAS}" "HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW}" "HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS}" "HARNESS_HOME=${HARNESS_HOME}"; do \
       name="${pair%%=*}"; value="${pair#*=}"; \
       if [ -z "${value}" ]; then \
         printf '%s\n' "add-an-agent-harness: ${name} is required and was not set" >&2; exit 78; \

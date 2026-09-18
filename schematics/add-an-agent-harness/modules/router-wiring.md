@@ -119,10 +119,11 @@ the router is down, every harness fails — loudly, at the client, naming the
 endpoint. That is preferable to a silent fallback that bills a different provider
 and reports a different model.
 
-A role the deployment does not care about may be left at the CLI's default, and
-`P-6` is empty by default. That is a real gap, not a neutral choice: an unset
-small/fast role leaves the CLI pointing at a built-in model name the router
-probably does not serve. Set `P-6` whenever the CLI has a second role.
+A role the deployment does not care about is still a route, and `P-6` is required
+at build for that reason. An unset small/fast role leaves the CLI pointing at a
+built-in model name the router probably does not serve, and nothing in the layer
+would say so: the request would simply never reach the router. Where a harness has
+no second role — the `codex` arm — the parameter is unused and no key is written.
 
 ## Because the configuration is written at build time
 

@@ -192,11 +192,11 @@ the base's entrypoint refuses when the variable names nothing.
 | P-1  | `AGENT_HARNESS_ID` | enum: `claude` \| `codex` | *(required at build)* | The CLI this deployment's agents run. Each value is a real implementation; omp, OpenCode and Cursor CLI are non-goals with a documented extension procedure | Selects the CLI installed, the configuration template used, and the value of `AGENT_HARNESS` (R-2, R-4) |
 | P-2  | `AGENT_BASE_REF` | string | *(required at build)* | The agent-host image: `name:tag` when it was built locally, `name@sha256:<manifest list digest>` when it was published. Discovery: the deployment's own build or pull step | The `FROM` reference of this layer, and therefore the whole inherited contract (R-1) |
 | P-3  | `ROUTER_BASE_URL` | URL | `http://llm-router:4000/v1` | `run-an-llm-router`'s `P-13`, whose default is built from its `P-1 ROUTER_SERVICE_NAME` and `P-2 ROUTER_PORT`: an OpenAI-compatible base URL ending in `/v1` | The endpoint the harness sends inference requests to (R-6) |
-| P-4  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The name of the environment variable the deployment injects the router credential into. The *name* is configuration; the value comes from `encrypt-container-secrets` (D-3) | The variable name the configuration reads the credential from. No value is ever written to a file (R-6, R-8) |
+| P-4  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The name of the environment variable the deployment injects the router credential into. The *name* is configuration; the value comes from `encrypt-container-secrets` (D-3) | The variable name the configuration reads the credential from. No value is ever written to a file (R-6, R-8). **It has no effect for the `claude` harness**: that CLI reads its bearer token from `ANTHROPIC_AUTH_TOKEN` — a fixed name, because that variable is the one that sets the `Authorization: Bearer` header the router reads — so the install arm uses that name regardless of this parameter, and the deployment's secret store must carry the credential under it. The layer records which variable the harness it installed actually reads at `/usr/local/share/agent-harness/credential-env`; for the `codex` harness the value is this parameter |
 | P-5  | `HARNESS_MODEL_ALIAS` | string | *(required at build)* | An alias from the router's `P-10 ALIAS_SET` — what the router is configured to serve to this deployment | The model id the harness sends for its primary role. A value the router does not serve fails per request at the client (R-6, R-7) |
-| P-6  | `HARNESS_FAST_ALIAS` | string | *(empty)* | A second alias from the same set, for the CLI's background/small-task role where the CLI has one | The model id the harness sends for background work. Empty leaves the CLI's own default, which may name a model the router does not serve |
+| P-6  | `HARNESS_FAST_ALIAS` | string | *(required at build)* | A second alias from the same set, for the CLI's background/small-task role where the CLI has one | The model id the harness sends for background work. Required rather than optional: an unset small/fast role leaves the CLI pointing at a built-in model name the router probably does not serve, and the failure is a request that never reaches the router. Where the harness has no such role — the `codex` arm — the parameter is unused and no key is written |
 | P-7  | `HARNESS_CONTEXT_WINDOW` | integer | *(required at build)* | The context window, in tokens, of the model `P-5` resolves to. The router does not report it, so the operator declares it | Written into the CLI's configuration in the field that CLI uses, so its compaction heuristics match the real window |
-| P-8  | `HARNESS_MAX_OUTPUT_TOKENS` | integer | *(empty)* | The maximum output tokens of the model `P-5` resolves to, where the operator's provider documents one | Written where the CLI supports it. Where a CLI has no such setting, the parameter is unused and the module says so |
+| P-8  | `HARNESS_MAX_OUTPUT_TOKENS` | integer | *(required at build)* | The maximum output tokens of the model `P-5` resolves to, where the operator's provider documents one | Written where the CLI supports it. The `codex` arm has no such key, so the parameter is unused there and the module says so rather than writing a plausible field the CLI would ignore |
 | P-9  | `HARNESS_HOME` | path (in-container) | `${HOME}/.<cli>` | The directory the CLI keeps its configuration and session state in. The CLI's own relocation variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) is set to this value | Where the CLI reads its configuration, and what a deployment bind-mounts to keep session state across recreates |
 | P-10 | `HARNESS_PACKAGE_VERSION` | string | *(empty — resolved at build)* | The exact version to install. Empty resolves it from the registry at build time (`npm view <package> version`); set it to reproduce an earlier build | Pins the CLI version. The resolved value is recorded in the image either way (R-5) |
 
@@ -354,9 +354,14 @@ real container built from this layer.
   a file naming the exact version installed, and that version equal to the one the
   build log resolved.
 - **H-8** (covers R-6): read the CLI's configuration inside the image. expected:
-  it parses in the CLI's own format, and it names `P-3` as the endpoint, `P-4` as
-  the credential *variable*, and `P-5` as the model — for every role the
-  configuration sets.
+  it parses in the CLI's own format; it names `P-3` as the endpoint and `P-5` as
+  the model for every role the configuration sets; and it carries the credential
+  *variable* the harness it installed actually reads — `P-4` for the `codex`
+  arm, whose provider block names it as `env_key`, and for the `claude` arm a file
+  that names no credential at all, because that CLI reads `ANTHROPIC_AUTH_TOKEN`
+  from the environment. Which name applies is recorded in the image at
+  `/usr/local/share/agent-harness/credential-env`, and the row reads it there
+  rather than assuming one harness's answer for both.
 - **H-9** (covers R-7): the same file read as text. expected: no provider endpoint
   other than `P-3` appears, and no second provider block exists. A configuration
   that could fall back to another provider fails this row.
