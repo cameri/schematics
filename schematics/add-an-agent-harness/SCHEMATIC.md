@@ -3,7 +3,7 @@ name: add-an-agent-harness
 version: 0.1.0
 status: draft
 spec: 1
-description: "A thin harness layer: the agent-host image plus exactly one coding-agent CLI and its configuration, wired to a local LLM router by model alias, with no credential in the image."
+description: "An agent harness layer — the agent-host image plus exactly one coding-agent CLI and its configuration, wired to a local LLM router by model alias: the CLI becomes the container's process through the inherited entrypoint, its model ids come from the router's alias set with the context window and output limit the router does not report declared beside them, its version is resolved at build time and recorded in the image, and no credential exists anywhere in the image."
 created: 2026-09-18
 updated: 2026-09-18
 ---
@@ -179,7 +179,7 @@ the base's entrypoint refuses when the variable names nothing.
 | Id   | Kind      | What | Why needed | Discovery | Failure behaviour |
 |------|-----------|------|------------|-----------|-------------------|
 | D-1  | schematic | [run-multiplexed-agent-workspaces v0.1.0](https://github.com/cameri/schematics/blob/1e536425433309b70de4bdc158860ce1c58084d0/schematics/run-multiplexed-agent-workspaces/SCHEMATIC.md) `sha256:b9bac5275ab0c53e6759ec5e491ee94d374c8e36275892fec3c638c0dbd3bac9` | The image this layer is built on, and the contract an agent pane runs under: its account, entrypoint, working directory and `AGENT_*` names are inherited by R-1 and restated nowhere. That package's `P-17 AGENT_HARNESS` is exactly the parameter this layer sets, and its `D-1` carries the dev base image edge | Its acceptance script green, then this layer's acceptance script green against an image built from it | The layer cannot be built: there is no image to derive from. Nothing in this package substitutes for it |
-| D-2  | schematic | [run-an-llm-router v0.1.0](https://github.com/cameri/schematics/blob/c8b6290bb32ed99f5d8fbeab3d4c984fae7f9ccb/schematics/run-an-llm-router/SCHEMATIC.md) `sha256:6f1974708cd6e2fe8d8e26cd4fe51ac11b531ebad814953e23a823c5cfe06b39` | The inference endpoint the harness is wired to, by alias (R-6, R-7). Its `modules/client-wiring.md` defines the wire contract this package's templates implement, and its `P-10 ALIAS_SET` is the only set of model ids a client may send | Its `/v1` endpoint answers from the container's network and its alias list is readable from its configuration | The harness starts and every request fails at the client. That is the intended failure: R-7 forbids a fallback provider, so a router outage is visible rather than absorbed |
+| D-2  | schematic | [run-an-llm-router v0.1.0](https://github.com/cameri/schematics/blob/c8b6290bb32ed99f5d8fbeab3d4c984fae7f9ccb/schematics/run-an-llm-router/SCHEMATIC.md) `sha256:6f1974708cd6e2fe8d8e26cd4fe51ac11b531ebad814953e23a823c5cfe06b39` | The inference endpoint the harness is wired to, by alias (R-6, R-7). Its own client-wiring document defines the wire contract this package's templates implement, and its `P-10 ALIAS_SET` is the only set of model ids a client may send | Its `/v1` endpoint answers from the container's network and its alias list is readable from its configuration | The harness starts and every request fails at the client. That is the intended failure: R-7 forbids a fallback provider, so a router outage is visible rather than absorbed |
 | D-3  | schematic | [encrypt-container-secrets v0.2.2](https://github.com/cameri/schematics/blob/da0ac2334dd997588daffd404570292d50d6dca6/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:7b40f292571587b0c6a57460ab5611b2bb4104b1ea0cc6e6848dddea78a45d6a` | The credential path: the harness's credential is encrypted at rest and decrypted in memory at boot, exposed to the process as an environment variable. This package ships no credential (R-8) | Its phases green on the deployment, and a boot in which the credential variable is present in the harness's environment | The harness starts with no credential and fails its first request with the provider's own error; the CLI names the missing variable |
 | D-4  | system    | Docker Engine with Compose v2, and a builder that can build from the base image | Builds this layer's image and runs it for the acceptance rows | `docker compose version` exits 0; the base image is present locally or pullable | Hard fail at Phase 2: no image, no rows |
 | D-5  | system    | Network access to the package registry at build time | Resolves and installs the CLI version (R-5) | The install step's own output: `npm view <package> version` | Hard fail at the install step, naming the package it could not resolve. Do not substitute a mirror or a vendored copy of the CLI |
@@ -250,7 +250,7 @@ Four facts, in the CLI's own shape: the base URL (`P-3`), the credential
 variable's name (`P-4`, presented as a bearer token), the model alias (`P-5`),
 and the model metadata the CLI can accept (`P-7`, `P-8`). The wire contract
 itself — what a client must be told, and how it proves it is using the router —
-belongs to `run-an-llm-router`'s `modules/client-wiring.md` (D-2).
+belongs to the router package's `client-wiring.md` (D-2).
 
 ## Implementation Phases
 
@@ -263,7 +263,7 @@ Steps:
 1. Read the agent-host image's `SCHEMATIC.md` (D-1) and the base image package it
    depends on: the account, the entrypoint, the `AGENT_*` names, the refusals,
    the default workspace.
-2. Read the router's `modules/client-wiring.md` (D-2) and note the alias set.
+2. Read the router package's `client-wiring.md` (D-2) and note the alias set.
 3. Write down the two values that are not in either package: the context window
    and maximum output tokens of the model `P-5` resolves to.
 
