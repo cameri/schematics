@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # Layer template — an image that adds ONE harness CLI to the dev base image.
 #
 # Copy this file next to your layer's build context, fill the two placeholders
@@ -7,23 +5,31 @@
 # about the base changes: the runtime account, the standard entrypoint, the
 # working directory, and the whole run contract are inherited, not restated.
 #
-# Build (the base must be pinned by its MANIFEST LIST digest, which is what the
-# publish step of the base reports as `Digest:`):
+# Build it with ONE build argument, which is a complete image reference — the
+# same string at either end of the lifecycle:
 #
+#   # A base that was published: pin its MANIFEST LIST digest, which is what
+#   # the base's publish step reports as `Digest:`. Use this form whenever the
+#   # base came from a registry.
 #   docker build -f Containerfile.layer \
-#     --build-arg AGENT_DEV_BASE=<registry>/<namespace>/<name> \
-#     --build-arg AGENT_DEV_BASE_DIGEST=sha256:<manifest list digest> \
+#     --build-arg AGENT_DEV_BASE_REF=<registry>/<namespace>/<name>@sha256:<manifest list digest> \
 #     -t <registry>/<namespace>/<name>-<harness>:<version>-<commit> .
+#
+#   # A base built on this machine and never pushed: the tag is the whole
+#   # reference. No registry, no login, no credential — and the published form
+#   # above can be used later without changing this file.
+#   docker build -f Containerfile.layer \
+#     --build-arg AGENT_DEV_BASE_REF=<local name>:<version>-<commit> \
+#     -t <local name>-<harness>:<version>-<commit> .
 #
 # What a layer may change: the packages it installs, the harness CLI, its
 # default configuration, an optional CMD, and an optional HEALTHCHECK.
 # What a layer must not change: Config.User, the ENTRYPOINT, WORKINGDIR, and
 # the AGENT_* variable names — consumers of the base rely on them.
 
-ARG AGENT_DEV_BASE
-ARG AGENT_DEV_BASE_DIGEST
+ARG AGENT_DEV_BASE_REF
 
-FROM ${AGENT_DEV_BASE}@${AGENT_DEV_BASE_DIGEST}
+FROM ${AGENT_DEV_BASE_REF}
 
 # Installing the CLI needs root; running it never does. This layer switches to
 # root for the install and back to the base's account before it ends, so the
