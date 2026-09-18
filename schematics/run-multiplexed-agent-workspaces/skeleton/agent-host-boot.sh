@@ -70,6 +70,21 @@ command -v setsid >/dev/null 2>&1 || refuse "setsid is not on PATH; the herdr se
 mkdir -p "$AGENT_TREE" || refuse "cannot create the agent tree $AGENT_TREE"
 [ -w "$AGENT_TREE" ] || refuse "the agent tree $AGENT_TREE is not writable by $(id -un); a bind mount owned by another uid needs the same uid as this account"
 
+# The split below cannot see an empty entry at the end of the list: `a,` yields
+# the single field `a` (a trailing delimiter produces no field at all), so a
+# value that names one agent and then an unnamed second one would boot one agent
+# and report success. A doubled comma does reach the `''` case, but only that
+# case, so the raw value is what decides emptiness — checked here, once, where
+# the whole value is still in hand.
+case "$AGENT_IDS" in
+    ,*|*,|*,,*) refuse "AGENT_IDS '$AGENT_IDS' has an empty entry: a leading, trailing or repeated comma names no agent" ;;
+esac
+
+# The id list is a set: a repeated id would reconcile that agent twice, and the
+# second pass would close the workspace the first pass created, create another
+# and append a second roster row — one agent named twice, its first row pointing
+# at a workspace that no longer exists.
+SEEN=""
 OLD_IFS="$IFS"
 IFS=','
 for ID in $AGENT_IDS; do
@@ -79,6 +94,10 @@ for ID in $AGENT_IDS; do
         *[!A-Za-z0-9._-]*) refuse "agent id '$ID' contains a character outside [A-Za-z0-9._-]; it becomes a workspace label, a directory name and a log name" ;;
         [!A-Za-z0-9]*) refuse "agent id '$ID' must start with a letter or digit" ;;
     esac
+    case " $SEEN " in
+        *" $ID "*) refuse "agent id '$ID' appears more than once in AGENT_IDS '$AGENT_IDS'" ;;
+    esac
+    SEEN="$SEEN $ID"
     LENGTH=$(printf '%s' "$ID" | wc -c | tr -d ' ')
     [ "$LENGTH" -le 64 ] || refuse "agent id '$ID' is $LENGTH characters long; the limit is 64"
     WORKSPACE_DIR="$AGENT_TREE/$ID/workspace"

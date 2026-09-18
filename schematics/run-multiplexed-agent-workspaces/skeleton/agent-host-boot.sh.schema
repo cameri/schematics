@@ -70,8 +70,9 @@
 # ## Failure behaviour
 #
 # Every refusal exits 78 with one line on stderr prefixed `agent-host-boot: `:
-# empty `AGENT_IDS`; an id with a character outside the charset or longer than
-# 64; an unwritable tree, workspace directory **or home directory**; `herdr`,
+# empty `AGENT_IDS`; a value with a leading, trailing or doubled comma, or one
+# that names an id twice; an id with a character outside the charset or longer
+# than 64; an unwritable tree, workspace directory **or home directory**; `herdr`,
 # `jq` or `setsid` missing from `PATH`; the entrypoint or plugin root missing;
 # the config template missing when no `config.toml` exists; `sshd` missing while
 # SSH is enabled, or rejecting the generated configuration; the herdr session

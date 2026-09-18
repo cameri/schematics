@@ -289,7 +289,7 @@ agent CLI and nothing else.
 | P-8  | `GIT_COMMIT` | string | *(from discovery — no default)* | `git rev-parse --short HEAD` at build time | The tag's identity half and the `revision` label |
 | P-9  | `IMAGE_REGISTRY` | string | `ghcr.io` | The registry the implementer is authorized to push to | Where the published host image lives |
 | P-10 | `IMAGE_NAMESPACE` | string | *(from discovery — no default)* | The registry account or organization that owns the artifact | The published path `<P-9>/<P-10>/<P-6>` |
-| P-11 | `AGENT_IDS` | list | *(none — required at run)* | The agents this host should run; each id must match `[A-Za-z0-9._-]`, start alphanumerically, and be at most 64 characters | The workspace set, one per id, and the roster (R-2) |
+| P-11 | `AGENT_IDS` | list | *(none — required at run)* | The agents this host should run, comma-separated; no leading, trailing or doubled comma, and each id named once, matching `[A-Za-z0-9._-]`, starting alphanumerically, at most 64 characters | The workspace set, one per id, and the roster (R-2) |
 | P-12 | `AGENT_TREE` | path (in-container) | `/agents` | The path the deployment mounts the tree at; keep it unless two mounts collide | Per-agent `<P-12>/<id>/workspace` and `<P-12>/<id>/home` (R-3, R-7) |
 | P-13 | `AGENT_STATE_ROOT` | path (in-container) | `<P-12>/.state` | Inside the tree, so supervision state survives a recreate | Per-agent `loop.log`, `stop` and launch timestamps (R-5) |
 | P-14 | `HERDR_SESSION` | string | `agents` | Any name; it is the session an attach targets and the value the SSH `SetEnv` must carry | The named herdr session the host runs and attaches to (R-8) |
@@ -593,14 +593,18 @@ read as a run that found nothing wrong:
   publishes nothing and leaves the daemon on the loopback address, or it does
   both halves of opening inbound — a published port with no `AGENT_SSH_LISTEN`
   fails, because that forward reaches an address nothing listens on.
-- **A-20** (covers R-12): three bad inputs, each of which must stop the program
+- **A-20** (covers R-12): five bad inputs, each of which must stop the program
   that reads it with exit `78` and one line naming the value, and none of which
   may leave the host altered: a roster row whose home column is empty (the
   wrapper); a home directory the account cannot write (the boot, which must
-  refuse before it touches the workspace set); and a `workspace list` that fails
-  (the boot, which must refuse rather than read the failure as "nothing to close"
-  and create a second workspace with the same label — the workspace labels are
-  compared before and after).
+  refuse before it touches the workspace set); an `AGENT_IDS` with a leading,
+  trailing or doubled comma, and one that names the same id twice (the boot,
+  which must refuse both — the split that reads the list cannot see a trailing
+  delimiter, so the first would arrive as a one-agent value, and the second
+  would reconcile that id twice and leave the roster naming it twice); and a
+  `workspace list` that fails (the boot, which must refuse rather than read the
+  failure as "nothing to close" and create a second workspace with the same
+  label — the workspace labels are compared before and after).
 - **A-21** (covers R-5, R-6): with the agent crash-looping, a stop marker written
   **while the wrapper sleeps out its backoff**. expected: the wrapper stops at the
   end of that sleep with no further launch, and the log names the marker as the
@@ -644,7 +648,7 @@ limits of the artifact, not gaps to be filled in later by the same script:
 | 1 | The tree is owned by a different uid than the base's account | the boot refuses naming the directory, or the first write fails | `chown` the host directory to the base's account id, then re-run |
 | 2 | A herdr asset digest no longer matches | the build fails at the checksum line | pick a released version whose digests you verified; do not relax the check |
 | 2 | `setsid`, `sshd` or `jq` missing after the package install | the build's own `command -v` checks | fix the package list, never the runtime check |
-| 3 | The boot refuses on a bad id | exit 78, one line naming the id | fix `AGENT_IDS`; ids are labels, directory names and log names |
+| 3 | The boot refuses on a bad id or a malformed list | exit 78, one line naming the id or the value | fix `AGENT_IDS`; ids are labels, directory names and log names, a trailing comma reads as one agent, and a repeated id gives that agent a second roster row |
 | 3 | The herdr session does not come up in 15 s | the refusal names the server log path | read that log: a port, a config root or a permission problem is in it |
 | 3 | The plugin pane cannot be opened | the boot keeps the shell pane and logs why | attach and run `herdr plugin list` and `herdr plugin pane open` by hand; the shell pane is the fallback the boot preserved |
 | 4 | A killed agent does not return | A-4 fails; the pane is gone or the log has no relaunch line | check that `agent-loop.sh` is the pane's process, and that the roster has a line for the workspace |
