@@ -2,9 +2,9 @@
 # Acceptance checks for the agent dev base image.
 #
 # Implements the mechanical checks of SCHEMATIC.md's Verification and
-# Acceptance section (A-1 … A-16; A-12 only when PUBLISHED_IMAGE names a
+# Acceptance section (A-1 … A-17; A-12 only when PUBLISHED_IMAGE names a
 # published ref) against a built image. It touches nothing outside Docker: it
-# builds two throwaway layer images, creates one named volume, runs one
+# builds three throwaway layer images, creates one named volume, runs one
 # short-lived probe container, and removes all of it when it is done. Safe to
 # re-run.
 #
@@ -85,6 +85,7 @@ cleanup() {
         docker image rm "$LAYER_TAG" >/dev/null 2>&1 || true
         docker image rm "$LAYER_TAG-plain" >/dev/null 2>&1 || true
         docker image rm "$LAYER_TAG-bad-key" >/dev/null 2>&1 || true
+        docker image rm "$LAYER_TAG-template" >/dev/null 2>&1 || true
     fi
     rm -rf "$WORK"
 }
@@ -331,6 +332,32 @@ fi
 [ "$(docker image inspect "$LAYER_TAG" --format '{{json .Config.Entrypoint}}')" = "[\"$EXPECTED_ENTRYPOINT\"]" ] \
     && pass "A-10 a layer never has to redeclare the entrypoint" \
     || fail "A-10 layer entrypoint is $(docker image inspect "$LAYER_TAG" --format '{{json .Config.Entrypoint}}')"
+
+# A-17 (R-12, R-13): the SHIPPED layer template attaches to a base that was
+# never published — one build argument, one complete reference, no registry,
+# no login, no credential. The template's install step fails on purpose, so
+# this copy neutralizes that one line; the FROM, the account switch and the
+# ENV are the file as shipped.
+TEMPLATE="$SELF_DIR/../skeleton/Containerfile.layer"
+if [ -f "$TEMPLATE" ]; then
+    sed 's|^    exit 1$|    true|' "$TEMPLATE" > "$WORK/Containerfile.template"
+    grep -q '^    true$' "$WORK/Containerfile.template" \
+        || usage_error "A-17 could not neutralize the template's intentional failure step"
+    docker build -f "$WORK/Containerfile.template" \
+        --build-arg "AGENT_DEV_BASE_REF=$IMAGE" -t "$LAYER_TAG-template" "$WORK" >/dev/null 2>&1 \
+        && pass "A-17 the shipped layer template builds FROM a locally tagged base: one build argument, one complete reference, no registry" \
+        || fail "A-17 the shipped layer template did not build FROM the local reference $IMAGE"
+    template_config="$(docker image inspect "$LAYER_TAG-template" \
+        --format "{{.Config.User}}|{{.Config.WorkingDir}}|{{json .Config.Entrypoint}}" 2>/dev/null)"
+    [ "$template_config" = "$EXPECTED_USER|$EXPECTED_WORKDIR|[\"$EXPECTED_ENTRYPOINT\"]" ] \
+        && pass "A-17 a layer built by the shipped template inherits the base's account, working directory, and entrypoint" \
+        || fail "A-17 template layer config is '$template_config', expected '$EXPECTED_USER|$EXPECTED_WORKDIR|[\"$EXPECTED_ENTRYPOINT\"]'"
+    grep -q '^# syntax=' "$TEMPLATE" \
+        && fail "A-17 the template carries a '# syntax=' directive, which would make every layer build require BuildKit" \
+        || pass "A-17 the template demands no BuildKit (no '# syntax=' directive), so a layer builds on a legacy-builder host"
+else
+    skip "A-17 the shipped layer template is absent at $TEMPLATE"
+fi
 
 # A-6: the happy path — default id, explicit id, argument pass-through, cwd,
 # and the harness as PID 1.
