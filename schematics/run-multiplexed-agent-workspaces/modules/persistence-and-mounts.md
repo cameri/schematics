@@ -27,7 +27,7 @@ home or workspace — it guarantees the mount, not the contents.
     <agent id>/workspace/     the agent's working directory — what it edits
     <agent id>/home/          the agent's HOME — where its session state lives
     .state/                   supervision state per agent, plus herdr's own server log
-    sshd/                     host key, sshd_config, authorized_keys, pid file
+    .sshd/                    host key, sshd_config, authorized_keys, pid file
     .config/                  the herdr config root, when the deployment mounts it here
   ```
 
@@ -40,7 +40,9 @@ home or workspace — it guarantees the mount, not the contents.
   where it was. This is what makes a stopped host cheap and a restarted host
   indistinguishable from the one that was running.
 - A stable SSH host identity across recreates, because the host key is a file in
-  the mounted tree rather than a fresh key per container.
+  the mounted tree rather than a fresh key per container: `AGENT_SSHD_DIR`
+  (`P-21`) defaults to `<AGENT_TREE>/.sshd`, so the identity is a consequence of
+  the mount rather than of a second mount the deployment has to remember.
 
 ## Dependencies
 

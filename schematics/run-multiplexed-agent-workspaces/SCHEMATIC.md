@@ -298,8 +298,8 @@ agent CLI and nothing else.
 | P-17 | `AGENT_HARNESS` | string | *(unset by this layer; a harness layer sets it)* | The CLI name or absolute path the base's entrypoint resolves | What an agent actually runs. Unset, the base's entrypoint refuses with its own code and message (R-10) |
 | P-18 | `AGENT_SSH_ENABLE` | 0 or 1 | `1` | Whether this host should accept remote attach at all | Starts or omits the SSH daemon (R-8) |
 | P-19 | `AGENT_SSH_PORT` | integer | `2222` | A free port on the host, and the port the deployment publishes | The daemon's port and the port an attach targets |
-| P-20 | `AGENT_SSH_LISTEN` | address | `127.0.0.1` | The address attach should reach: the loopback default keeps inbound closed; a routed or tunnel address makes it reachable | What the daemon binds, and therefore the default posture (R-9) |
-| P-21 | `AGENT_SSHD_DIR` | path (in-container) | `$HOME/.sshd` | A mounted directory when the host identity must survive a recreate | Host key, `sshd_config`, pid file (R-7, R-8) |
+| P-20 | `AGENT_SSH_LISTEN` | address | `127.0.0.1` | The address attach should reach: the loopback default keeps inbound closed; a routed or tunnel address makes it reachable | What the daemon binds, and therefore the default posture (R-9). Publishing a port without moving this reaches nothing — the two are one decision |
+| P-21 | `AGENT_SSHD_DIR` | path (in-container) | `<P-12>/.sshd` | Inside the mounted tree, so the host identity survives a recreate; a path outside it works and throws the key away with the container | Host key, `sshd_config`, pid file (R-7, R-8) |
 | P-22 | `AGENT_SSH_AUTHORIZED_KEYS` | path (in-container) | `<P-21>/authorized_keys` | The file holding the attaching client's public key(s) | Key-only authentication: an empty file rejects every connection (R-8) |
 | P-23 | `AGENT_CRASH_LIMIT` | integer | `3` | How many rapid relaunches a broken agent should get before the host stops hammering | The wrapper's backoff threshold (R-5) |
 | P-24 | `AGENT_CRASH_WINDOW` | seconds | `5` | The window those launches are counted in | As `P-23` |
@@ -490,6 +490,21 @@ starts one container, drives a real herdr inside it, reads what that container
 reports, removes it, starts a second one on the same mounted tree, and prints
 `PASS`/`FAIL`/`SKIP` per row with the evidence.
 
+The battery is also its own subject, because a run that executes nothing must not
+read as a run that found nothing wrong:
+
+- the in-container half prints one `BODY-RESULT` line as its last act, and the
+  driver fails the run when that line is absent;
+- the line's count must clear a floor (`EXPECTED_BODY_CHECKS`, default 30), so a
+  half that ran almost nothing fails rather than contributing zero failures;
+- the half's exit status must agree with its own report — a non-zero exit with no
+  failures recorded is a failure, not a pass;
+- `USE_PACKAGE_FILES` selects **sources only** (the boot program, the plugin, the
+  config template). The package is mounted read-only and the script runs from it
+  in both modes, so `USE_PACKAGE_FILES=0` cannot produce a run in which the
+  verifier itself is missing; on an image that carries the packaged boot, image
+  mode runs the same rows against the image's copies instead of the package's.
+
 - **A-1** (covers R-1): `docker image inspect` reports the base's account and
   working directory, and `null` for `ExposedPorts`. expected: the base's values,
   unchanged by the layer.
@@ -516,7 +531,9 @@ reports, removes it, starts a second one on the same mounted tree, and prints
 - **A-8** (covers R-14): `kill -9` the pane's own process (the wrapper, not the
   agent). expected: the `pane.exited` hook opens a new agent pane — in the same
   workspace, or in a recreated one with the same label when the cascade already
-  closed it — and the agent runs again.
+  closed it — and the agent runs again; the workspace ends with exactly one pane,
+  the agent's, so a recreated workspace does not keep the root shell pane the
+  create came with.
 - **A-9** (covers R-8, R-9): inside the host, an SSH session to the daemon.
   expected: `XDG_CONFIG_HOME` and `HERDR_SESSION` are the server's own values;
   `herdr session list --json` reports the real session running; the workspace
@@ -524,10 +541,19 @@ reports, removes it, starts a second one on the same mounted tree, and prints
   authentication is off; the installed `sshd_config` binds the address the
   deployment asked for; the shipped boot fragment defaults that address to the
   loopback, and the shipped compose fragment publishes no port.
+  Sub-rows: `scripts/check-remote-attach.sh` reports the host's attach side
+  healthy, and probes **the address the installed `sshd_config` binds** — the
+  same script run against a second daemon bound to this container's own
+  (non-loopback) address must report that address, not the loopback, so a
+  deployment that points `AGENT_SSH_LISTEN` at a routed address is not called
+  broken. And a published port with no `AGENT_SSH_LISTEN` is a failure: opening
+  remote attach is two edits, checked as a pair.
 - **A-10** (covers R-7): remove the container, start a new one on the same
   mounted tree. expected: the files the agent left in its home are still there
   and the agent's session continues from them; the host re-establishes its
-  workspace and pane; the host key file still exists.
+  workspace and pane; the SSH host key sits **inside the mounted tree** and
+  carries the same fingerprint before and after, which is what keeps a client's
+  `known_hosts` entry valid.
 - **A-11** (covers R-9): the account and uid of the agent process, read from the
   process itself. expected: the account the deployment names in `EXPECTED_USER`
   (the base's, in a real deployment), and never root.
@@ -547,10 +573,43 @@ reports, removes it, starts a second one on the same mounted tree, and prints
   prints a top-level digest. expected: both platforms and a list digest.
   *(Skipped without `PUBLISHED_IMAGE`: it inspects a published reference, which
   does not exist until Phase 6. An emulated build is not evidence for it.)*
+- **A-17** (covers R-1, R-11): the shipped `Containerfile`, read as text. Every
+  variable its post-`FROM` instructions expand — the `LABEL`s, `USER`,
+  `WORKDIR`, `ENV` and the rest Docker substitutes in — must be declared **after**
+  `FROM`, or carried as an `ENV` by the base image's own `Containerfile`. An
+  `ARG` declared before `FROM` is out of scope after it, so a label that names one
+  expands to the empty string. *(Static, because the layer cannot be built on the
+  verification machine: this applies the scoping rule to the text instead of
+  reading the built image's labels. That is weaker than building it, and A-17
+  says so rather than implying a build happened.)*
+- **A-18** (covers R-11): the `Containerfile` carries no `<sha256 …>`
+  placeholder, and its default `HERDR_SHA256_AMD64`/`HERDR_SHA256_ARM64` are
+  exactly the digests `P-4`/`P-5` record. expected: one pin with three fields —
+  version and both digests — so the build command the file's own header
+  documents runs as written. *(Static: the digests' correctness against the
+  publisher's release is a build-time matter; what is checked here is that the
+  shipped file and the spec do not disagree about them.)*
+- **A-19** (covers R-9): the shipped compose fragment. expected: either it
+  publishes nothing and leaves the daemon on the loopback address, or it does
+  both halves of opening inbound — a published port with no `AGENT_SSH_LISTEN`
+  fails, because that forward reaches an address nothing listens on.
+- **A-20** (covers R-12): three bad inputs, each of which must stop the program
+  that reads it with exit `78` and one line naming the value, and none of which
+  may leave the host altered: a roster row whose home column is empty (the
+  wrapper); a home directory the account cannot write (the boot, which must
+  refuse before it touches the workspace set); and a `workspace list` that fails
+  (the boot, which must refuse rather than read the failure as "nothing to close"
+  and create a second workspace with the same label — the workspace labels are
+  compared before and after).
+- **A-21** (covers R-5, R-6): with the agent crash-looping, a stop marker written
+  **while the wrapper sleeps out its backoff**. expected: the wrapper stops at the
+  end of that sleep with no further launch, and the log names the marker as the
+  reason. This is the case the marker exists for — stopping a crash loop — and a
+  check made only before the loop misses it there.
 
 ### What this package does not prove
 
-Three claims belong to this set and no test in the package settles them. They are
+Four claims belong to this set and no test in the package settles them. They are
 limits of the artifact, not gaps to be filled in later by the same script:
 
 - **The client half of attach.** A-9 proves the server side — the daemon, the
@@ -566,6 +625,16 @@ limits of the artifact, not gaps to be filled in later by the same script:
 - **The published reference.** A-16 needs an image that has been pushed with both
   platforms; until a deployment publishes one, the manifest claim rests on the
   build, not on an inspection.
+- **The layer builds, and what it builds to.** Nothing here builds the image:
+  A-17 and A-18 apply Dockerfile scoping and pin agreement to the shipped text
+  because the verification machine has no builder, and the acceptance run
+  exercises the host against an image that is not a layer over the base the
+  package pins. The labels A-17 protects, the checksum that stops a drifted
+  build, and the layer's own `FROM` resolving at all are therefore reasoned, not
+  observed. A machine with BuildKit closes this with one `docker build` and the
+  `image inspect` lines `Containerfile.schema` gives; until then this package
+  says which of its claims were not run rather than letting a green run imply
+  them.
 
 ## Failure Modes and Rollback
 

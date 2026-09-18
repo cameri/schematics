@@ -18,7 +18,7 @@
 # | `AGENT_HERDR_CONFIG_TEMPLATE` | no | `/usr/local/share/agent-host/herdr-config.toml` | Installed to the config root when it has no `config.toml`. |
 # | `AGENT_SSH_ENABLE` | no | `1` | Whether to bring up the SSH daemon. |
 # | `AGENT_SSH_PORT`, `AGENT_SSH_LISTEN` | no | `2222`, `127.0.0.1` | Port and bind address. The loopback default is the isolation posture: reachable from outside only when the deployment publishes it. |
-# | `AGENT_SSHD_DIR`, `AGENT_SSH_AUTHORIZED_KEYS` | no | `$HOME/.sshd`, `<dir>/authorized_keys` | Host key, config, pid and authorized keys. Mount this directory to keep the host identity stable across recreates. |
+# | `AGENT_SSHD_DIR`, `AGENT_SSH_AUTHORIZED_KEYS` | no | `<AGENT_TREE>/.sshd`, `<dir>/authorized_keys` | Host key, config, pid and authorized keys. The default sits **inside the mounted tree**, which is what makes the host identity stable across recreates; a value outside it loses the key with the container. |
 # | `AGENT_BOOT_FOREGROUND` | no | `1` | `1`: exec the herdr client, so the container's process is the session. `0`: reconcile and exit — the mode the acceptance script uses. |
 #
 # ## Order, and why it is this order
@@ -46,10 +46,14 @@
 #    workspace labelled with that id, create one with the agent's workspace as
 #    cwd and the id as its label, append the roster line *before* opening the
 #    pane (the wrapper reads the roster the moment it starts), then open the
-#    agent pane and close the workspace's shell pane. An agent whose stop marker
-#    is present keeps its shell pane and gets no agent pane: attaching shows a
-#    shell in the agent's workspace, not a pruned workspace, and the operator has
-#    somewhere to remove the marker.
+#    agent pane and close the workspace's shell pane. The inventory it closes
+#    against is read, not assumed: a `workspace list` that fails or comes back in
+#    an unexpected shape refuses rather than reading as "nothing to close", which
+#    would create a second workspace with the same label — and after the create
+#    the label count is read back, so a close that silently failed is a refusal
+#    too. An agent whose stop marker is present keeps its shell pane and gets no
+#    agent pane: attaching shows a shell in the agent's workspace, not a pruned
+#    workspace, and the operator has somewhere to remove the marker.
 # 7. **Session** — `exec herdr --session <HERDR_SESSION>`: the container's
 #    process becomes a client of the session it brought up.
 #
@@ -67,12 +71,14 @@
 #
 # Every refusal exits 78 with one line on stderr prefixed `agent-host-boot: `:
 # empty `AGENT_IDS`; an id with a character outside the charset or longer than
-# 64; an unwritable tree or workspace directory; `herdr`, `jq` or `setsid`
-# missing from `PATH`; the entrypoint or plugin root missing; the config
-# template missing when no `config.toml` exists; `sshd` missing while SSH is
-# enabled, or rejecting the generated configuration; the herdr session not
-# coming up within 15 seconds; a workspace that cannot be created or whose id
-# cannot be read.
+# 64; an unwritable tree, workspace directory **or home directory**; `herdr`,
+# `jq` or `setsid` missing from `PATH`; the entrypoint or plugin root missing;
+# the config template missing when no `config.toml` exists; `sshd` missing while
+# SSH is enabled, or rejecting the generated configuration; the herdr session
+# not coming up within 15 seconds; a workspace list that cannot be read or comes
+# back in an unexpected shape; a workspace that cannot be created or whose id
+# cannot be read; more or fewer than one workspace carrying an agent's label
+# after reconciliation.
 #
 # Two conditions are warnings, not refusals, because the host is still usable:
 # a herdr server that is not its own session leader (remote attach will demand a

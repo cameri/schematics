@@ -11,9 +11,19 @@
 # | `HERDR_SHA256_AMD64` | The publisher's SHA-256 for the `linux-x86_64` release asset at `HERDR_VERSION` (`P-4`). |
 # | `HERDR_SHA256_ARM64` | The same for `linux-aarch64` (`P-5`). |
 #
-# The two checksum arguments are placeholders in the shipped file and the build
-# **fails until they are filled**: `sha256sum -c` matches nothing a placeholder
-# can supply, so an unhashed multiplexer cannot be baked in by accident.
+# The two checksum arguments default to the pinned pair for `HERDR_VERSION` —
+# the same two values `P-4` and `P-5` carry — so the build command below runs as
+# written. They are not free parameters to be filled in: they move **with**
+# `HERDR_VERSION`, and a version bump whose digests were not re-read stops the
+# build at `sha256sum -c`, which is the intended refusal rather than a step to
+# work around.
+#
+# The base labels are worth their two lines: `AGENT_BASE_IMAGE` and
+# `AGENT_BASE_DIGEST` are declared before `FROM`, where only `FROM` can read
+# them, so the `org.opencontainers.image.base.*` labels need the redeclaration
+# after it. Without that, both labels are empty strings in a built image — a
+# defect no local check can see here, since building the layer needs a builder
+# this package's verification machine does not have.
 #
 # ## What this layer may and may not change
 #
@@ -39,25 +49,28 @@
 # of those three inputs was changed on purpose, which is what makes the layer's
 # own tag meaningful.
 #
-# The version and both checksums are **fill-in parameters**, not defaults: the
-# shipped placeholders are rejected by the build, so a deployment cannot pin a
-# herdr it has not hashed.
+# The version and both checksums are defaults carried from the release the
+# package was verified against, not values to discover at build time:
+# `HERDR_VERSION` (`P-3`) and the two digests (`P-4`, `P-5`) are one pin with
+# three fields.
 #
 # ## Validation
 #
-# Fill `HERDR_SHA256_AMD64` and `HERDR_SHA256_ARM64` first — in the
-# Containerfile or through the two `--build-arg`s below: they ship as
-# placeholders and `sha256sum -c` fails the build while they stand. `HERDR_VERSION`
-# already defaults to the version this package was verified against (`P-3`).
+# The arguments with no default — `AGENT_BASE_IMAGE` and `AGENT_BASE_DIGEST` —
+# are the only two the build command passes. `HERDR_VERSION` and both checksums
+# already default to the pinned release, so a build either matches that release
+# or stops at `sha256sum -c`.
 #
 # ```
 # docker build -f Containerfile \
 #   --build-arg AGENT_BASE_IMAGE=<ref> --build-arg AGENT_BASE_DIGEST=<digest> \
-#   --build-arg HERDR_SHA256_AMD64=<sha256> --build-arg HERDR_SHA256_ARM64=<sha256> \
 #   -t agent-host:verify .                                          # exits 0
 # docker image inspect agent-host:verify \
 #   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
 #   # the base's account, working directory and entrypoint, unchanged
+# docker image inspect agent-host:verify \
+#   --format '{{index .Config.Labels "org.opencontainers.image.base.digest"}}'
+#   # the base's manifest digest, not the empty string the redeclaration prevents
 # docker run --rm agent-host:verify                                 # the base's refusal, exit 78
 # docker image inspect agent-host:verify --format '{{json .Config.ExposedPorts}}'  # null
 # ```

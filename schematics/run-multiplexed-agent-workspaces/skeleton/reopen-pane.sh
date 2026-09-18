@@ -20,6 +20,9 @@
 #     the same cwd and label before the pane is reopened.
 #   * the roster is rewritten with the new workspace id whenever a workspace is
 #     recreated, so agent-loop.sh resolves the same agent from it.
+#   * a recreated workspace comes with a root shell pane; it is closed once the
+#     agent pane is open, so the workspace has the same shape as one the boot
+#     created.
 #   * crash-loop bound: more than AGENT_REOPEN_LIMIT reopens inside
 #     AGENT_REOPEN_WINDOW seconds sleep AGENT_REOPEN_BACKOFF seconds first, so
 #     a pane that cannot stay alive cannot spin.
@@ -102,9 +105,17 @@ CREATED=$("$HERDR_BIN" workspace create --cwd "$WORKSPACE_DIR" --label "$AGENT_I
 if [ $? -ne 0 ]; then
     refuse "cannot recreate the workspace for agent $AGENT_ID: $CREATED"
 fi
-NEW_WS=$(printf '%s' "$CREATED" | sed -n 's/.*"workspace":{[^}]*"workspace_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-[ -n "$NEW_WS" ] || NEW_WS=$(printf '%s' "$CREATED" | sed -n 's/.*"workspace_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+# The create response is parsed with jq, not with a pattern: its `root_pane`
+# object holds nested objects of its own (`scroll`, for one), so a
+# non-nesting pattern stops at the wrong brace and reads nothing. jq is
+# guaranteed on this host — the boot program refuses without it — and the same
+# parse is what the boot uses.
+NEW_WS=$(printf '%s' "$CREATED" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
 [ -n "$NEW_WS" ] || refuse "recreated the workspace for agent $AGENT_ID but could not read its id from: $CREATED"
+# A created workspace comes with a root shell pane, which the boot closes as
+# soon as the agent pane is up. A recreated one must end in the same shape, or
+# the workspace drifts one pane wider on every recreate.
+NEW_ROOT_PANE=$(printf '%s' "$CREATED" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
 log "recreated workspace $NEW_WS for agent $AGENT_ID (was $WS_ID)"
 
 TMP="$ROSTER.tmp.$$"
@@ -113,5 +124,8 @@ awk -F'\t' -v OFS='\t' -v old="$WS_ID" -v new="$NEW_WS" '{ if ($1 == old) $1 = n
 
 OPEN_OUT=$("$HERDR_BIN" plugin pane open --plugin "$PLUGIN_ID" --entrypoint "$PANE_ENTRYPOINT" --workspace "$NEW_WS" 2>&1)
 [ $? -eq 0 ] || refuse "cannot reopen the agent pane in recreated workspace $NEW_WS: $OPEN_OUT"
+if [ -n "$NEW_ROOT_PANE" ]; then
+    "$HERDR_BIN" pane close "$NEW_ROOT_PANE" >/dev/null 2>&1 || true
+fi
 log "reopened the agent pane in recreated workspace $NEW_WS (agent $AGENT_ID)"
 exit 0

@@ -11,8 +11,10 @@ verifies an SSH daemon, nothing more.
 ## Inputs
 
 - `AGENT_SSH_ENABLE`, `AGENT_SSH_PORT`, `AGENT_SSH_LISTEN` (`P-18` … `P-20`).
-- `AGENT_SSHD_DIR` and `AGENT_SSH_AUTHORIZED_KEYS` (`P-21`, `P-22`) — both inside
-  a mounted directory when the host identity must survive a recreate.
+- `AGENT_SSHD_DIR` and `AGENT_SSH_AUTHORIZED_KEYS` (`P-21`, `P-22`) — inside
+  the mounted tree by default, which is what keeps the host identity across a
+  recreate; a deployment that points them at `$HOME` moves the identity into the
+  container's writable layer and loses it on the next recreate.
 - `XDG_CONFIG_HOME` and `HERDR_SESSION` (`P-14`, `P-15`): the values the herdr
   server is started with, and therefore the values the SSH sessions must carry.
 - `sshd` from the image's package set (`D-1`'s layer, built by `host-image.md`).

@@ -24,9 +24,20 @@ ARG AGENT_BASE_DIGEST
 
 FROM ${AGENT_BASE_IMAGE}@${AGENT_BASE_DIGEST}
 
+# Redeclared, and not decorative: an ARG declared before FROM is not in scope for
+# any instruction after it, so the two labels below would expand to empty strings
+# without these lines. Only FROM may consume the pre-FROM declarations.
+ARG AGENT_BASE_IMAGE
+ARG AGENT_BASE_DIGEST
+
 ARG HERDR_VERSION=0.9.0
-ARG HERDR_SHA256_AMD64=<sha256 of herdr-linux-x86_64 for HERDR_VERSION>
-ARG HERDR_SHA256_ARM64=<sha256 of herdr-linux-aarch64 for HERDR_VERSION>
+# The pinned pair for HERDR_VERSION, from the release API's `digest` field:
+# herdr-linux-x86_64 and herdr-linux-aarch64 respectively. They are defaults, not
+# placeholders — the build command in this file's header runs as written — and
+# they move together with HERDR_VERSION: a version bump whose digests were not
+# re-read fails at the checksum line, which is the intended refusal.
+ARG HERDR_SHA256_AMD64=4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f
+ARG HERDR_SHA256_ARM64=9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2
 ARG IMAGE_VERSION=0.0.0
 ARG GIT_COMMIT=unknown
 ARG IMAGE_SOURCE=https://example.invalid/agent-host

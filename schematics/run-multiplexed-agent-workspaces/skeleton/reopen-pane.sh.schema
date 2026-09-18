@@ -25,7 +25,7 @@
 # | the agent's stop marker exists | exit 0 — a deliberate stop is never undone by a fallback path |
 # | more than `AGENT_REOPEN_LIMIT` reopens inside `AGENT_REOPEN_WINDOW` seconds | sleep `AGENT_REOPEN_BACKOFF` first |
 # | `plugin pane open` succeeds | exit 0 |
-# | it fails naming a missing workspace | recreate the workspace with the agent's cwd and label, rewrite the roster line with the new workspace id, open the pane |
+# | it fails naming a missing workspace | recreate the workspace with the agent's cwd and label, rewrite the roster line with the new workspace id, open the pane, then close the root shell pane the create came with |
 # | it fails any other way | exit 0 after logging: the workspace exists, so this is not the hook's failure to repair |
 #
 # ## Why the workspace may be gone

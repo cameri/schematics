@@ -41,6 +41,10 @@
 #                      that read the tree directly. Set it when the container
 #                      runtime's filesystem is not this script's (default:
 #                      TREE_HOST_DIR)
+#   BASE_PACKAGE_DIR   the base schematic's package directory, for the one check
+#                      that has to know which variables the base carries as ENV
+#                      (default: the sibling build-an-agent-dev-image directory).
+#                      A-17 reports a skip when it is not there.
 #   PACKAGE_HOST_DIR   the same package, expressed as a path the container
 #                      runtime resolves on ITS host. Needed only when this
 #                      script runs somewhere the runtime does not share a
@@ -48,7 +52,17 @@
 #                      outside daemon (default: this script's own package dir)
 #   USE_PACKAGE_FILES  1 = run the boot program, plugin and config template from
 #                      this package (the verification mode: it tests the shipped
-#                      files) ; 0 = use the copies inside IMAGE (default: 1)
+#                      files) ; 0 = use the copies inside IMAGE (default: 1).
+#                      This switch selects the SOURCES only: the package is
+#                      mounted, and this script runs from it, in both modes. A
+#                      mode in which the script itself cannot run would report
+#                      every in-container row as absent and count no failures —
+#                      the mode, not the host, would be the thing measured.
+#   EXPECTED_BODY_CHECKS  how many rows the in-container half must report
+#                      (default: 30). The body prints one `BODY-RESULT` line as
+#                      its last act; the driver requires it and requires the
+#                      count to clear this floor, so a half that executes
+#                      nothing fails the run instead of passing it
 #   CONTAINER_RUNTIME  docker CLI name             (default: docker)
 #   CONTAINER_USER     run the probe containers as this account. Unset uses the
 #                      image's own USER, which is what a layer built from the
@@ -90,6 +104,8 @@ CONTAINER_USER="${CONTAINER_USER:-}"
 KEEP="${KEEP:-0}"
 STUB_ENTRYPOINT="${STUB_ENTRYPOINT:-0}"
 AGENT_ENTRYPOINT="${AGENT_ENTRYPOINT:-}"
+EXPECTED_BODY_CHECKS="${EXPECTED_BODY_CHECKS:-30}"
+BASE_PACKAGE_DIR="${BASE_PACKAGE_DIR:-}"
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_DIR="$(cd "$SELF_DIR/.." && pwd)"
@@ -114,12 +130,17 @@ body() {
     TREE="${AGENT_TREE:-/agents}"
     PROBE="$TREE/.probe"
     XDG="${XDG_CONFIG_HOME:-$TREE/.config}"
-    SSHD_DIR="${AGENT_SSHD_DIR:-$TREE/sshd}"
+    SSHD_DIR="${AGENT_SSHD_DIR:-$TREE/.sshd}"
     STATE_ROOT="${AGENT_STATE_ROOT:-$TREE/.state}"
     PORT="${AGENT_SSH_PORT:-2222}"
+    SSHD_BIN=$(command -v sshd || echo /usr/sbin/sshd)
     HOST_USER="$(id -un)"
     export AGENT_TREE="$TREE" AGENT_IDS="$AGENT_IDS" HERDR_SESSION="$HERDR_SESSION"
-    export XDG_CONFIG_HOME="$XDG" AGENT_SSHD_DIR="$SSHD_DIR" AGENT_STATE_ROOT="$STATE_ROOT"
+    # AGENT_SSHD_DIR is deliberately NOT exported: the boot's own default is what
+    # puts the SSH material inside the mounted tree, and the checks below read it
+    # from where that default says it is. Exporting it here would verify the
+    # value this script passed rather than the shipped default.
+    export XDG_CONFIG_HOME="$XDG" AGENT_STATE_ROOT="$STATE_ROOT"
     export AGENT_SSH_PORT="$PORT" AGENT_SSH_LISTEN="${AGENT_SSH_LISTEN:-127.0.0.1}"
     export AGENT_SSH_AUTHORIZED_KEYS="$PROBE/authorized_keys"
     export AGENT_BOOT_FOREGROUND=0 PROBE_DIR="$PROBE"
@@ -457,11 +478,34 @@ STUB
         else
             fail "A-8: killing the wrapper left no agent pane (was $PANE_BEFORE, now '${PANE_NOW:-none}')"
         fi
+        # A workspace the hook had to recreate comes with a root shell pane; the
+        # boot closes that pane, so a recreated workspace must end in the same
+        # shape — one pane, the agent's — or every recreate widens it by one.
+        TOTAL_PANES=$(herdr pane list --workspace "${WS_NOW:-$WS1}" 2>/dev/null | jq -r '[.result.panes[]?] | length' 2>/dev/null)
+        AGENT_PANES=$(agent_pane_of "${WS_NOW:-$WS1}")
+        if [ "${TOTAL_PANES:-0}" = "1" ] && [ "$AGENT_PANES" = "1" ]; then
+            pass "A-8: the workspace holds exactly one pane, the agent's ($TOTAL_PANES pane, $AGENT_PANES labelled agent)"
+        else
+            fail "A-8: workspace ${WS_NOW:-$WS1} holds ${TOTAL_PANES:-?} pane(s), $AGENT_PANES of them the agent's; a recreated workspace is left with its root shell pane when this is 2"
+        fi
     else
         fail "A-8: no agent-loop.sh process found to kill; the pane is not running the wrapper"
     fi
 
     # --- the SSH parity triad (R-8) -------------------------------------------
+    # Where the material lives is part of the claim: under the mounted tree, so
+    # it is the same key after a recreate and a client's known_hosts entry stays
+    # valid. A key under $HOME is inside the container's writable layer and is
+    # regenerated with it.
+    case "$SSHD_DIR" in
+        "$TREE"/*) HOST_KEY_IN_TREE=1 ;;
+        *) HOST_KEY_IN_TREE=0 ;;
+    esac
+    if [ "$HOST_KEY_IN_TREE" = "1" ] && [ -f "$SSHD_DIR/ssh_host_ed25519_key" ]; then
+        pass "A-10: the SSH host key lives inside the mounted tree ($SSHD_DIR/ssh_host_ed25519_key), so a recreate keeps the host identity"
+    else
+        fail "A-10: the SSH host key is at $SSHD_DIR/ssh_host_ed25519_key, outside the mounted tree $TREE; a recreate regenerates it and every client's known_hosts entry breaks"
+    fi
     SSHD_PID=$(cat "$SSHD_DIR/sshd.pid" 2>/dev/null || echo "")
     if [ -n "$SSHD_PID" ] && kill -0 "$SSHD_PID" 2>/dev/null; then
         pass "A-9: the SSH daemon is running (pid $SSHD_PID)"
@@ -510,6 +554,191 @@ STUB
         *) fail "A-9: the agent workspaces are not visible over SSH" ;;
     esac
 
+    # --- the operator's attach diagnostic, against the real host -------------
+    DIAG=$(AGENT_TREE="$TREE" AGENT_SSHD_DIR="$SSHD_DIR" AGENT_SSH_PORT="$PORT" \
+        sh "$PACKAGE_DIR/scripts/check-remote-attach.sh" 2>&1)
+    note "$(printf '%s' "$DIAG" | grep -E '^(FAIL|SKIP)|RESULT:' | tr '\n' ' ')"
+    case "$DIAG" in
+        *"probing $LISTEN_WANTED"*)
+            case "$DIAG" in
+                *'RESULT: all OK'*) pass "A-9: the diagnostic probes the address the daemon binds ($LISTEN_WANTED) and reports the host's attach side healthy" ;;
+                *)
+                    fail "A-9: the diagnostic reported a failure against a host the rows above call healthy: $(printf '%s' "$DIAG" | grep '^FAIL' | sed 's/^FAIL: //' | tr '\n' ' ')" ;;
+            esac ;;
+        *)
+            fail "A-9: the diagnostic did not probe the address the daemon binds ($LISTEN_WANTED)" ;;
+    esac
+
+    # --- the diagnostic against a daemon bound to a routed address -----------
+    # AGENT_SSH_LISTEN may name a routed or tunnel address; a healthy daemon then
+    # refuses a probe of 127.0.0.1, and a diagnostic that hardcodes the loopback
+    # calls that host broken. A second sshd on its own port, bound to this
+    # container's own address, is the configuration that tells the two apart.
+    ROUTED_ADDR=""
+    if command -v ip >/dev/null 2>&1; then
+        ROUTED_ADDR=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    fi
+    [ -n "$ROUTED_ADDR" ] || ROUTED_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ -z "$ROUTED_ADDR" ]; then
+        skip "A-9: this container has no non-loopback address, so a daemon bound to a routed address cannot be exercised here"
+    else
+        ROUTED_DIR="$PROBE/sshd-routed"
+        rm -rf "$ROUTED_DIR"
+        mkdir -p "$ROUTED_DIR" && chmod 700 "$ROUTED_DIR"
+        sed -e "s|^Port .*|Port 2223|" \
+            -e "s|^ListenAddress .*|ListenAddress $ROUTED_ADDR|" \
+            -e "s|^PidFile .*|PidFile $ROUTED_DIR/sshd.pid|" \
+            "$SSHD_DIR/sshd_config" >"$ROUTED_DIR/sshd_config"
+        chmod 600 "$ROUTED_DIR/sshd_config"
+        # sshd daemonizes and writes its pid file after the fork, so the file is
+        # polled for rather than assumed; its own output is kept, because a start
+        # that fails here is a diagnosis, not a number.
+        ROUTED_ERR=$("$SSHD_BIN" -t -f "$ROUTED_DIR/sshd_config" 2>&1; "$SSHD_BIN" -f "$ROUTED_DIR/sshd_config" 2>&1)
+        i=0
+        while [ "$i" -lt 10 ]; do
+            [ -s "$ROUTED_DIR/sshd.pid" ] && break
+            i=$((i + 1))
+            sleep 1
+        done
+        if [ -s "$ROUTED_DIR/sshd.pid" ]; then
+            DIAG_ROUTED=$(AGENT_TREE="$TREE" AGENT_SSHD_DIR="$ROUTED_DIR" AGENT_SSH_PORT=2223 \
+                sh "$PACKAGE_DIR/scripts/check-remote-attach.sh" 2>&1)
+            case "$DIAG_ROUTED" in
+                *"probing $ROUTED_ADDR"*)
+                    case "$DIAG_ROUTED" in
+                        *"does not accept a connection"*)
+                            fail "A-9: a daemon bound to $ROUTED_ADDR was reported refused — the diagnostic probed an address this daemon does not bind" ;;
+                        *) pass "A-9: a daemon bound to the routed address $ROUTED_ADDR is reported reachable; the diagnostic probed that address, not the loopback" ;;
+                    esac ;;
+                *)
+                    fail "A-9: the diagnostic did not name the routed address $ROUTED_ADDR a healthy daemon binds" ;;
+            esac
+            kill "$(cat "$ROUTED_DIR/sshd.pid" 2>/dev/null)" 2>/dev/null || true
+        else
+            fail "A-9: could not start a second sshd bound to $ROUTED_ADDR to test the routed-address probe: $ROUTED_ERR"
+        fi
+    fi
+
+    # --- the stop marker, written while the wrapper sleeps -------------------
+    # The marker is the escape hatch an operator reaches for when an agent is
+    # crash-looping, which is exactly when the wrapper is inside its backoff
+    # sleep. A check made only before the loop misses it there.
+    rm -f "$STATE_ROOT/$first_id/stop"
+    printf 'crashloop\n' >"$PROBE/mode"
+    if [ -z "${WRAPPERS:-}" ]; then
+        skip "A-21: no wrapper process is running, so the marker-while-sleeping path cannot be exercised"
+    else
+        BACKOFFS_BEFORE=$(grep -c 'backing off' "$STATE_ROOT/$first_id/loop.log" 2>/dev/null || echo 0)
+        i=0
+        while [ "$i" -lt $(( BACKOFF_WANTED + 10 )) ]; do
+            [ "$(grep -c 'backing off' "$STATE_ROOT/$first_id/loop.log" 2>/dev/null || echo 0)" -gt "$BACKOFFS_BEFORE" ] && break
+            i=$((i + 1))
+            sleep 1
+        done
+        STARTS_AT_MARKER=$(starts_of "$first_id")
+        : >"$STATE_ROOT/$first_id/stop"
+        i=0
+        while [ "$i" -lt $(( BACKOFF_WANTED + 15 )) ]; do
+            pgrep -f 'agent-loop.sh' >/dev/null 2>&1 || break
+            i=$((i + 1))
+            sleep 1
+        done
+        if pgrep -f 'agent-loop.sh' >/dev/null 2>&1; then
+            fail "A-21: the wrapper was still running $(( BACKOFF_WANTED + 15 ))s after the stop marker was written; it relaunches through the marker"
+        elif [ "$(starts_of "$first_id")" != "$STARTS_AT_MARKER" ]; then
+            fail "A-21: the wrapper launched the agent again ($STARTS_AT_MARKER -> $(starts_of "$first_id")) after the stop marker was written during its backoff"
+        else
+            pass "A-21: a stop marker written during the crash-loop backoff stops the wrapper at the end of that sleep, with no further launch"
+        fi
+        grep -q 'stop marker .* is present: not starting' "$STATE_ROOT/$first_id/loop.log" 2>/dev/null \
+            && pass "A-21: the supervision log names the marker as the reason it did not start the agent" \
+            || fail "A-21: the supervision log does not record the marker winning over a launch"
+        rm -f "$STATE_ROOT/$first_id/stop"
+    fi
+
+    # --- refusals: a bad input stops a program, naming it (R-12) -------------
+    # The roster's own contract says a column is never empty; the wrapper reads
+    # column 4 into the agent's HOME. The id comes from the roster the boot wrote
+    # rather than from the live workspace list: by this point the agent may be
+    # stopped, with no workspace left to read a label from, and the wrapper only
+    # needs a row it can find.
+    ROSTER_FILE="$XDG/herdr/plugins/config/${AGENT_PLUGIN_ID:-agent-respawn}/roster.tsv"
+    RS_ID=$(awk -F'\t' -v id="$first_id" '$2 == id { print $1; exit }' "$ROSTER_FILE" 2>/dev/null)
+    ROSTER_COPY="$PROBE/roster-empty-home.tsv"
+    printf '# workspace_id\tagent_id\tworkspace_dir\thome_dir\n' >"$ROSTER_COPY"
+    printf '%s\t%s\t%s\t\n' "$RS_ID" "$first_id" "$TREE/$first_id/workspace" >>"$ROSTER_COPY"
+    if [ -z "$RS_ID" ]; then
+        skip "A-20: $ROSTER_FILE has no row for agent $first_id to copy, so the empty-home-column refusal cannot be exercised here"
+    else
+        OUT=$(HERDR_WORKSPACE_ID="$RS_ID" AGENT_ROSTER_FILE="$ROSTER_COPY" AGENT_STATE_ROOT="$PROBE/state-refuse" \
+            AGENT_ENTRYPOINT=/bin/true HERDR_PLUGIN_STATE_DIR="$PROBE/plugin-state" \
+            sh "$PACKAGE_DIR/skeleton/agent-loop.sh" 2>&1)
+        RC=$?
+        case "$OUT" in
+            *'no home directory in column 4'*)
+                [ "$RC" = "78" ] \
+                    && pass "A-20: the wrapper refuses a roster row with an empty home column, exit 78, naming the column" \
+                    || fail "A-20: the wrapper refused the empty home column with exit $RC rather than 78" ;;
+            *)
+                fail "A-20: the wrapper accepted a roster row with an empty home column (exit $RC: $OUT); HOME would be empty for the agent" ;;
+        esac
+    fi
+
+    # A home the account cannot write fails the harness later, in the agent's own
+    # output; the boot is where it can be named.
+    BAD_TREE="$PROBE/tree-unwritable"
+    rm -rf "$BAD_TREE"
+    mkdir -p "$BAD_TREE/unwritable/home" "$BAD_TREE/unwritable/workspace"
+    chmod 500 "$BAD_TREE/unwritable/home"
+    LABELS_BEFORE=$(herdr workspace list 2>/dev/null | jq -r '[.result.workspaces[]?.label] | sort | join(",")')
+    OUT=$(AGENT_TREE="$BAD_TREE" AGENT_IDS=unwritable AGENT_STATE_ROOT="$BAD_TREE/.state" \
+        sh "$BOOT" 2>&1)
+    RC=$?
+    case "$OUT" in
+        *"$BAD_TREE/unwritable/home"*)
+            [ "$RC" = "78" ] \
+                && pass "A-20: the boot refuses a home directory the account cannot write, exit 78, naming the path" \
+                || fail "A-20: the boot refused the unwritable home with exit $RC rather than 78" ;;
+        *)
+            fail "A-20: the boot did not refuse an unwritable home directory (exit $RC: $OUT)" ;;
+    esac
+    LABELS_AFTER=$(herdr workspace list 2>/dev/null | jq -r '[.result.workspaces[]?.label] | sort | join(",")')
+    [ "$LABELS_BEFORE" = "$LABELS_AFTER" ] \
+        && pass "A-20: the refusal happened before any workspace was touched ($LABELS_AFTER unchanged)" \
+        || fail "A-20: the refused boot changed the workspace set ($LABELS_BEFORE -> $LABELS_AFTER)"
+
+    # An unreadable inventory must refuse, not read as "nothing to close": that
+    # reading creates a second workspace with the agent's label.
+    REAL_HERDR=$(command -v herdr)
+    SHIM_DIR="$PROBE/shim"
+    rm -rf "$SHIM_DIR"
+    mkdir -p "$SHIM_DIR"
+    cat >"$SHIM_DIR/herdr" <<SHIM
+#!/bin/sh
+if [ "\${1:-} \${2:-}" = "workspace list" ]; then
+    printf 'herdr: cannot list workspaces: the server is not answering\n' >&2
+    exit 1
+fi
+exec $REAL_HERDR "\$@"
+SHIM
+    chmod 0755 "$SHIM_DIR/herdr"
+    LABELS_BEFORE="$LABELS_AFTER"
+    OUT=$(PATH="$SHIM_DIR:$PATH" AGENT_TREE="$TREE" AGENT_IDS="$AGENT_IDS" AGENT_STATE_ROOT="$STATE_ROOT" \
+        sh "$BOOT" 2>&1)
+    RC=$?
+    case "$OUT" in
+        *'cannot list workspaces'*)
+            [ "$RC" = "78" ] \
+                && pass "A-20: the boot refuses when the workspace inventory cannot be read, exit 78, naming the call" \
+                || fail "A-20: the boot refused an unreadable inventory with exit $RC rather than 78" ;;
+        *)
+            fail "A-20: the boot did not refuse an unreadable workspace inventory (exit $RC: $OUT)" ;;
+    esac
+    LABELS_AFTER=$(herdr workspace list 2>/dev/null | jq -r '[.result.workspaces[]?.label] | sort | join(",")')
+    [ "$LABELS_BEFORE" = "$LABELS_AFTER" ] \
+        && pass "A-20: the boot created no second workspace while the inventory was unknown ($LABELS_AFTER)" \
+        || fail "A-20: the inventory failure left a duplicate workspace ($LABELS_BEFORE -> $LABELS_AFTER)"
+
     return 0
 }
 
@@ -525,15 +754,16 @@ driver() {
 
     PACKAGE_HOST_DIR="${PACKAGE_HOST_DIR:-$PACKAGE_DIR}"
     TREE_HOST_DIR="${TREE_HOST_DIR:-$PWD/agent-host-verify}"
-    # USER_ARGS is empty unless the deployment names the account at run time;
-    # PKG_ARGS is the read-only mount this script's own package is verified from.
+    # USER_ARGS is empty unless the deployment names the account at run time.
+    # PKG_ARGS mounts this package read-only, and it is mounted in BOTH modes:
+    # in package mode it is where the boot program, plugin and config template
+    # come from, and in image mode it is still where this script itself lives.
+    # Leaving it out of image mode made the in-container half unable to open
+    # itself, which read as a run with no failures — measuring the mode rather
+    # than the host.
     USER_ARGS=""
     [ -n "$CONTAINER_USER" ] && USER_ARGS="-u $CONTAINER_USER"
-    if [ "$USE_PACKAGE_FILES" = "1" ]; then
-        PKG_ARGS="-v $PACKAGE_HOST_DIR:/verify-pkg:ro"
-    else
-        PKG_ARGS=""
-    fi
+    PKG_ARGS="-v $PACKAGE_HOST_DIR:/verify-pkg:ro"
     TREE_LOCAL_DIR="${TREE_LOCAL_DIR:-$TREE_HOST_DIR}"
     mkdir -p "$TREE_LOCAL_DIR" || usage_error "cannot create the agent tree at $TREE_LOCAL_DIR; when the runtime sees it at a different path, set TREE_HOST_DIR to that path and TREE_LOCAL_DIR to this one"
     TREE_LOCAL_DIR="$(cd "$TREE_LOCAL_DIR" && pwd)"
@@ -623,7 +853,7 @@ driver() {
         -v "$TREE_HOST_DIR:/agents" $PKG_ARGS $USER_ARGS $EXTRA_ARGS \
         -e "AGENT_IDS=$AGENT_IDS" -e "HERDR_SESSION=$HERDR_SESSION" \
         -e "AGENT_TREE=/agents" -e "XDG_CONFIG_HOME=/agents/.config" \
-        -e "AGENT_SSHD_DIR=/agents/sshd" -e "AGENT_STATE_ROOT=/agents/.state" \
+        -e "AGENT_STATE_ROOT=/agents/.state" \
         -e "USE_PACKAGE_FILES=$USE_PACKAGE_FILES" -e "EXPECTED_HERDR_VERSION=$EXPECTED_HERDR_VERSION" \
         -e "EXPECTED_USER=$EXPECTED_USER" \
         -e "STUB_ENTRYPOINT=$STUB_ENTRYPOINT" -e "AGENT_ENTRYPOINT=$AGENT_ENTRYPOINT" \
@@ -640,6 +870,30 @@ driver() {
     CHECKS=$((CHECKS + $(printf '%s\n' "$BODY_OUT" | grep -cE '^(PASS|FAIL) ')))
     FAILURES=$((FAILURES + $(printf '%s\n' "$BODY_OUT" | grep -cE '^FAIL ')))
     SKIPS=$((SKIPS + $(printf '%s\n' "$BODY_OUT" | grep -cE '^SKIP ')))
+
+    # Did the in-container half actually run? Without this, a body that could not
+    # start contributes zero rows and therefore zero failures, and the run reads
+    # as a pass for everything that never executed. It has to report, it has to
+    # clear a floor, and if it exited non-zero while reporting no failures, its
+    # own account of itself disagrees with its exit status.
+    BODY_RESULT=$(printf '%s\n' "$BODY_OUT" | sed -n 's/^BODY-RESULT checks=\([0-9]*\) failures=\([0-9]*\) skips=\([0-9]*\)$/\1 \2 \3/p' | tail -1)
+    if [ -z "$BODY_RESULT" ]; then
+        fail "battery: the in-container half reported no result, so none of its rows ran (it must print one BODY-RESULT line; see its output above)"
+    else
+        BODY_CHECKS=$(printf '%s' "$BODY_RESULT" | cut -d' ' -f1)
+        BODY_FAILURES=$(printf '%s' "$BODY_RESULT" | cut -d' ' -f2)
+        BODY_EXIT=$(rt inspect -f '{{.State.ExitCode}}' "$NAME" 2>/dev/null || echo unknown)
+        if [ "$BODY_CHECKS" -ge "$EXPECTED_BODY_CHECKS" ]; then
+            pass "battery: the in-container half reported $BODY_CHECKS checks (floor $EXPECTED_BODY_CHECKS), $BODY_FAILURES failed, and exited $BODY_EXIT"
+        else
+            fail "battery: the in-container half reported $BODY_CHECKS checks, below the floor of $EXPECTED_BODY_CHECKS — a body that ran almost nothing is not a pass"
+        fi
+        if [ "$BODY_EXIT" = "0" ] || [ "$BODY_FAILURES" -gt 0 ]; then
+            pass "battery: the in-container half's exit status ($BODY_EXIT) agrees with its report ($BODY_FAILURES failures)"
+        else
+            fail "battery: the in-container half exited $BODY_EXIT while reporting no failures"
+        fi
+    fi
 
     MOUNTS=$(rt inspect -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' "$NAME" 2>/dev/null)
     case "$MOUNTS" in
@@ -670,14 +924,121 @@ driver() {
         else
             fail "A-9: $BOOT_SHIPPED does not default AGENT_SSH_LISTEN to 127.0.0.1"
         fi
+        # The persistence of the host identity is a property of this default: the
+        # SSH material belongs inside the tree the deployment mounts, or it is
+        # regenerated with the container's own layer.
+        if grep -qE 'AGENT_SSHD_DIR:-\$AGENT_TREE/' "$BOOT_SHIPPED"; then
+            pass "A-10: the shipped boot defaults AGENT_SSHD_DIR inside the mounted tree (\$AGENT_TREE/…)"
+        else
+            fail "A-10: $BOOT_SHIPPED does not default AGENT_SSHD_DIR under \$AGENT_TREE; the host key would live in the container's writable layer"
+        fi
     else
         skip "A-9: $BOOT_SHIPPED is not readable from this script's package directory"
+    fi
+    # Opening remote attach is two edits, not one. A fragment that publishes a
+    # port without moving the listen address off the loopback publishes a
+    # forward to nowhere, so the pair is checked together.
+    if [ -f "$FRAGMENT" ]; then
+        PAIR_PORTS=$(grep -cE '^[[:space:]]*ports:' "$FRAGMENT")
+        PAIR_LISTEN=$(grep -cE '^[[:space:]]*AGENT_SSH_LISTEN:' "$FRAGMENT")
+        if [ "${PAIR_PORTS:-0}" -gt 0 ] && [ "${PAIR_LISTEN:-0}" -eq 0 ]; then
+            fail "A-19: $FRAGMENT publishes a port without setting AGENT_SSH_LISTEN, so the published port reaches an address nothing listens on"
+        elif [ "${PAIR_PORTS:-0}" -gt 0 ]; then
+            pass "A-19: the fragment's published port is paired with AGENT_SSH_LISTEN"
+        else
+            pass "A-19: the fragment publishes nothing and leaves the daemon on the loopback address — the pair is closed together"
+        fi
+    else
+        skip "A-19: $FRAGMENT is not readable from this script's package directory"
+    fi
+    # --- the Containerfile, which cannot be built here ------------------------
+    # No BuildKit on this machine, so the layer cannot be produced and its labels
+    # cannot be read out of a built image. What CAN be checked is the scoping
+    # rule that decides what those labels expand to: an ARG declared before FROM
+    # is not in scope after it, so any variable a post-FROM instruction expands
+    # must be declared again after FROM or be an ENV the base image carries.
+    CONTAINERFILE="$PACKAGE_DIR/skeleton/Containerfile"
+    BASE_PACKAGE_DIR="${BASE_PACKAGE_DIR:-$PACKAGE_DIR/../build-an-agent-dev-image}"
+    BASE_CONTAINERFILE="$BASE_PACKAGE_DIR/skeleton/Containerfile"
+    # Dockerfile continuations joined into single lines, so an instruction that
+    # spans lines is read as the one instruction the builder would see.
+    join_continuations() {
+        awk '{ if (sub(/\\[[:space:]]*$/, "")) { buf = buf $0; next } print buf $0; buf = "" }' "$1"
+    }
+    if [ ! -f "$CONTAINERFILE" ]; then
+        skip "A-17: $CONTAINERFILE is not readable from this script's package directory"
+        skip "A-18: $CONTAINERFILE is not readable from this script's package directory"
+    else
+        CF_VARS=$(join_continuations "$CONTAINERFILE" | awk '
+            function vars(line,   v) {
+                while (match(line, /\$\{[A-Za-z_][A-Za-z0-9_]*\}/)) {
+                    v = substr(line, RSTART + 2, RLENGTH - 3)
+                    print "USE " v
+                    line = substr(line, RSTART + RLENGTH)
+                }
+            }
+            {
+                ins = $1
+                if (ins == "FROM") { seen = 1; next }
+                if (!seen) { next }
+                if (ins == "ARG" || ins == "ENV") {
+                    n = split($0, parts, /[[:space:]]+/)
+                    for (i = 2; i <= n; i++) {
+                        p = parts[i]
+                        sub(/=.*$/, "", p)
+                        if (p != "") print "DECL " p
+                    }
+                    next
+                }
+                if (ins == "LABEL" || ins == "USER" || ins == "WORKDIR" || ins == "EXPOSE" || ins == "VOLUME" || ins == "STOPSIGNAL") vars($0)
+            }')
+        BASE_ENVS=$(join_continuations "$BASE_CONTAINERFILE" | awk '
+            {
+                ins = $1
+                if (ins == "FROM") { seen = 1; next }
+                if (!seen || ins != "ENV") { next }
+                n = split($0, parts, /[[:space:]]+/)
+                for (i = 2; i <= n; i++) { p = parts[i]; sub(/=.*$/, "", p); if (p != "") print p }
+            }')
+        UNKNOWN=""
+        INCLUDING_BASE=1
+        [ -f "$BASE_CONTAINERFILE" ] || INCLUDING_BASE=0
+        for v in $(printf '%s\n' "$CF_VARS" | awk '$1 == "USE" { print $2 }' | sort -u); do
+            printf '%s\n' "$CF_VARS" | grep -qx "DECL $v" && continue
+            if [ "$INCLUDING_BASE" = "1" ]; then
+                printf '%s\n' "$BASE_ENVS" | grep -qx "$v" && continue
+            fi
+            UNKNOWN="$UNKNOWN $v"
+        done
+        if [ "$INCLUDING_BASE" = "0" ] && [ -n "$UNKNOWN" ]; then
+            skip "A-17: $BASE_CONTAINERFILE is not readable, so the variables the base carries as ENV cannot be told from the ones this file must declare; nothing is claimed about $UNKNOWN"
+        elif [ -z "$UNKNOWN" ]; then
+            pass "A-17: every variable the Containerfile's post-FROM instructions expand is declared after FROM${INCLUDING_BASE:+ or carried as an ENV by the base}"
+        else
+            fail "A-17: $CONTAINERFILE expands $UNKNOWN after FROM without declaring it there, so it expands to the empty string (an ARG declared before FROM is out of scope)"
+        fi
+        SPEC_FILE="$PACKAGE_DIR/SCHEMATIC.md"
+        PLACEHOLDER=$(grep -c '<sha256' "$CONTAINERFILE" 2>/dev/null | head -1)
+        CF_AMD=$(sed -n 's/^ARG HERDR_SHA256_AMD64=\([0-9a-f]*\).*/\1/p' "$CONTAINERFILE" | head -1)
+        CF_ARM=$(sed -n 's/^ARG HERDR_SHA256_ARM64=\([0-9a-f]*\).*/\1/p' "$CONTAINERFILE" | head -1)
+        SPEC_AMD=$(sed -n 's/.*`HERDR_SHA256_AMD64`.*\([0-9a-f]\{64\}\).*/\1/p' "$SPEC_FILE" 2>/dev/null | head -1)
+        SPEC_ARM=$(sed -n 's/.*`HERDR_SHA256_ARM64`.*\([0-9a-f]\{64\}\).*/\1/p' "$SPEC_FILE" 2>/dev/null | head -1)
+        if [ "${PLACEHOLDER:-0}" != "0" ]; then
+            fail "A-18: $CONTAINERFILE still carries $PLACEHOLDER checksum placeholder(s), so the build command its own header documents cannot succeed"
+        elif [ -n "$CF_AMD" ] && [ "$CF_AMD" = "$SPEC_AMD" ] && [ "$CF_ARM" = "$SPEC_ARM" ]; then
+            pass "A-18: the Containerfile's default herdr digests are the ones P-4 and P-5 pin (amd64 $(printf '%s' "$CF_AMD" | cut -c1-8)…, arm64 $(printf '%s' "$CF_ARM" | cut -c1-8)…)"
+        else
+            fail "A-18: the Containerfile defaults (amd64 '${CF_AMD:-none}', arm64 '${CF_ARM:-none}') are not the digests P-4/P-5 carry ('${SPEC_AMD:-none}', '${SPEC_ARM:-none}') — one pin, three fields"
+        fi
     fi
 
     printf '\n== persistence across a recreate ==\n'
     SESSION_FILE="$TREE_LOCAL_DIR/$FIRST_ID/home/.probe-session"
+    HOST_KEY_FILE="$TREE_LOCAL_DIR/.sshd/ssh_host_ed25519_key"
     SESSION_BEFORE=0
     [ -f "$SESSION_FILE" ] && SESSION_BEFORE=$(wc -l <"$SESSION_FILE" | tr -d ' ')
+    KEY_BEFORE=""
+    [ -f "$HOST_KEY_FILE" ] && KEY_BEFORE=$(ssh-keygen -lf "$HOST_KEY_FILE" 2>/dev/null | awk '{print $2}')
     rt rm -f "$NAME" >/dev/null 2>&1 || true
     # The recreate container runs the boot alone, with the same environment the
     # first one booted with: the same plugin root and config template in
@@ -696,7 +1057,7 @@ driver() {
         -v "$TREE_HOST_DIR:/agents" $PKG_ARGS $USER_ARGS $EXTRA_ARGS \
         -e "AGENT_IDS=$AGENT_IDS" -e "HERDR_SESSION=$HERDR_SESSION" \
         -e "AGENT_TREE=/agents" -e "XDG_CONFIG_HOME=/agents/.config" \
-        -e "AGENT_SSHD_DIR=/agents/sshd" -e "AGENT_STATE_ROOT=/agents/.state" \
+        -e "AGENT_STATE_ROOT=/agents/.state" \
         -e "USE_PACKAGE_FILES=$USE_PACKAGE_FILES" -e "EXPECTED_USER=$EXPECTED_USER" -e "AGENT_BOOT_FOREGROUND=0" \
         -e "STUB_ENTRYPOINT=$STUB_ENTRYPOINT" -e "AGENT_ENTRYPOINT=$AGENT_ENTRYPOINT" \
         --entrypoint /bin/sh "$IMAGE" -c "$RECREATE_CMD"; then
@@ -717,9 +1078,16 @@ driver() {
         *"agent $FIRST_ID runs in workspace"*) pass "A-10: the recreated host re-established the agent's workspace and pane" ;;
         *) fail "A-10: the recreated host did not re-establish agent $FIRST_ID" ;;
     esac
-    for f in "$TREE_LOCAL_DIR/$FIRST_ID/workspace" "$TREE_LOCAL_DIR/$FIRST_ID/home" "$TREE_LOCAL_DIR/.state" "$TREE_LOCAL_DIR/sshd/ssh_host_ed25519_key"; do
+    for f in "$TREE_LOCAL_DIR/$FIRST_ID/workspace" "$TREE_LOCAL_DIR/$FIRST_ID/home" "$TREE_LOCAL_DIR/.state" "$HOST_KEY_FILE"; do
         [ -e "$f" ] && pass "A-10: $(basename "$(dirname "$f")")/$(basename "$f") exists in the mounted tree (state is not inside the container)" || fail "A-10: $f is missing"
     done
+    KEY_AFTER=""
+    [ -f "$HOST_KEY_FILE" ] && KEY_AFTER=$(ssh-keygen -lf "$HOST_KEY_FILE" 2>/dev/null | awk '{print $2}')
+    if [ -n "$KEY_BEFORE" ] && [ "$KEY_BEFORE" = "$KEY_AFTER" ]; then
+        pass "A-10: the SSH host key is the same after the recreate ($KEY_AFTER), so a client's known_hosts entry stays valid"
+    else
+        fail "A-10: the host key before the recreate was '${KEY_BEFORE:-missing}' and after it '${KEY_AFTER:-missing}'; the host identity changed with the container"
+    fi
 
     printf '\n== the published manifest ==\n'
     if [ -z "${PUBLISHED_IMAGE:-}" ]; then
@@ -743,7 +1111,10 @@ driver() {
 
 if [ "${1:-}" = "--inside" ]; then
     body
-    printf '\n%s checks, %s failed, %s skipped (in-container)\n' "$CHECKS" "$FAILURES" "$SKIPS"
+    # The last line the driver reads. It exists so the driver can tell "the
+    # in-container half ran and reported" from "the in-container half did not
+    # run": both produce an output stream, and only one of them has this line.
+    printf '\nBODY-RESULT checks=%s failures=%s skips=%s\n' "$CHECKS" "$FAILURES" "$SKIPS"
     [ "$FAILURES" -eq 0 ] || exit 1
     exit 0
 fi

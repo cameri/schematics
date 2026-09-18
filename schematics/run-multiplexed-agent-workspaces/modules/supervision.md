@@ -58,7 +58,7 @@ parameters `P-13`, `P-16` … `P-17`, `P-23` … `P-28`.
 | three launches inside 5 seconds (the configured bound) | a 30-second backoff, logged, then the next attempt — a permanently broken agent cannot spin |
 | more than 5 reopens inside 60 seconds | the hook backs off before reopening |
 | the wrapper itself is killed | the pane exits, the hook reopens it; the pane's death also runs herdr's auto-close cascade, so the hook may have to recreate the workspace first |
-| the stop marker is present | the agent is not started at all, and the pane closes |
+| the stop marker is present | the agent is not started at all, and the pane closes. The marker is read before **every** launch, not once at start-up, so writing it while a crash-looping agent sleeps out its backoff stops that agent at the end of the sleep |
 | the hook fires while the boot is reconciling | it stands down: the boot owns the workspace set at that moment |
 
 ## Idempotency Notes

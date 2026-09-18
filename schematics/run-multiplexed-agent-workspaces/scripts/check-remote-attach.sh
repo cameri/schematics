@@ -19,11 +19,19 @@
 #
 # Exit status: 0 when every check that ran came back OK; 1 when any failed.
 #
-# Inputs (environment): AGENT_SSHD_DIR (default $HOME/.sshd), AGENT_SSH_PORT
+# Inputs (environment): AGENT_SSHD_DIR (default <AGENT_TREE>/.sshd, the boot
+# program's own default; AGENT_TREE defaults to /agents), AGENT_SSH_PORT
 # (default 2222), HERDR_BIN_PATH (default herdr).
+#
+# The address it probes is read from the installed sshd_config's ListenAddress,
+# not assumed to be the loopback: AGENT_SSH_LISTEN is a supported parameter, and
+# a deployment that points the daemon at a routed or tunnel address is healthy
+# while a probe of 127.0.0.1 is refused. The address actually probed is printed
+# with the result, so a FAIL can be read without guessing which address was
+# tried.
 set -u
 
-SSHD_DIR="${AGENT_SSHD_DIR:-$HOME/.sshd}"
+SSHD_DIR="${AGENT_SSHD_DIR:-${AGENT_TREE:-/agents}/.sshd}"
 PORT="${AGENT_SSH_PORT:-2222}"
 HERDR_BIN="${HERDR_BIN_PATH:-herdr}"
 FAIL=0
@@ -42,17 +50,29 @@ else
 fi
 
 printf '\n== port %s ==\n' "$PORT"
+# Which address to probe: the one the installed sshd_config binds. A wildcard
+# bind is probed on the loopback address (that is what a wildcard includes); a
+# specific address is probed as itself, because that is the only address such a
+# daemon answers on.
+LISTEN_SEEN=$(sed -n 's/^[[:space:]]*ListenAddress[[:space:]]\+\([^[:space:]]*\).*/\1/p' "$SSHD_DIR/sshd_config" 2>/dev/null | head -1)
+case "$LISTEN_SEEN" in
+    "") PROBE_ADDR=127.0.0.1 ;;
+    0.0.0.0) PROBE_ADDR=127.0.0.1 ;;
+    '::'|'[::]'|'::0') PROBE_ADDR='::1' ;;
+    *) PROBE_ADDR="$LISTEN_SEEN" ;;
+esac
+printf '     probing %s (from %s)\n' "$PROBE_ADDR" "${LISTEN_SEEN:-the default bind, no ListenAddress line}"
 # A TCP connect, however this host can do one. /dev/tcp is a bash feature, so a
 # check written for POSIX sh cannot rely on it; nc is not always installed; and
 # a listening check that silently passes because it could not test anything is
 # worse than no check at all. Hence three outcomes, not two.
 port_probe() {
     if command -v nc >/dev/null 2>&1; then
-        nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1 && return 0
+        nc -z "$PROBE_ADDR" "$PORT" >/dev/null 2>&1 && return 0
         return 1
     fi
     if command -v bash >/dev/null 2>&1; then
-        command bash -c "exec 3<>/dev/tcp/127.0.0.1/$PORT" >/dev/null 2>&1 && return 0
+        command bash -c "exec 3<>/dev/tcp/$PROBE_ADDR/$PORT" >/dev/null 2>&1 && return 0
         return 1
     fi
     return 2
@@ -66,8 +86,8 @@ while [ "$ATTEMPT" -lt 5 ]; do
     sleep 1
 done
 case "${RC:-1}" in
-    0) ok "port $PORT accepts connections on the loopback address" ;;
-    1) fail "port $PORT does not accept a connection on the loopback address (sshd pid file present does not mean it bound)" ;;
+    0) ok "port $PORT accepts connections on the address the daemon binds ($PROBE_ADDR)" ;;
+    1) fail "port $PORT does not accept a connection on $PROBE_ADDR, the address the installed sshd_config binds (a pid file present does not mean it bound)" ;;
     *) skip "cannot test port $PORT: neither nc nor bash is available on this host to open a TCP connection" ;;
 esac
 

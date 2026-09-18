@@ -28,7 +28,12 @@
 # |----------------------|---------|-----------------------|------------------------|
 # | status `< 128` | deliberate exit | writes the agent's `stop` marker, logs the marker path, exits 0 | the pane closes; the tab and (if it was the last pane) the workspace close with it; nothing brings it back |
 # | status `>= 128` | death by signal — a crash | relaunches the agent in the same pane | the pane stays where it was; `loop.log` records the status and the relaunch |
-# | any status, stop marker already present at launch | stopped for maintenance | does not start the agent; exits 0 | the pane closes and stays closed until the marker is removed |
+# | any status, stop marker present | stopped for maintenance | does not start the agent; exits 0 | the pane closes and stays closed until the marker is removed |
+#
+# The marker is read **before every launch**, not once at start-up: an operator
+# who writes it while a crash-looping agent sleeps out its backoff is obeyed at
+# the end of that sleep. That is the case the marker is reached for, and a check
+# made only before the loop would miss it exactly then.
 #
 # An interactive interrupt is a signal death (status 130), so Ctrl-C relaunches
 # rather than closing the workspace. That is deliberate: an accident must not

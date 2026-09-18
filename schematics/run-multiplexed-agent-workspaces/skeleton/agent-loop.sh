@@ -67,6 +67,11 @@ WORKSPACE_DIR=$(printf '%s' "$LINE" | cut -f3)
 AGENT_HOME=$(printf '%s' "$LINE" | cut -f4)
 [ -n "$AGENT_ID" ] || refuse "the roster entry for workspace $WS_ID has no agent id in column 2"
 [ -n "$WORKSPACE_DIR" ] || refuse "the roster entry for agent $AGENT_ID has no workspace directory in column 3"
+# The home goes to the agent as HOME, so an empty column 4 is passed on as an
+# empty HOME and every harness writes its session somewhere unintended. The
+# roster's own contract says a column is never empty; this is where that is
+# enforced, naming the row.
+[ -n "$AGENT_HOME" ] || refuse "the roster entry for agent $AGENT_ID has no home directory in column 4"
 [ -x "$ENTRYPOINT" ] || refuse "entrypoint $ENTRYPOINT is not an executable file"
 
 STATE_DIR="$STATE_ROOT/$AGENT_ID"
@@ -78,12 +83,17 @@ LOG="$STATE_DIR/loop.log"
 log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >>"$LOG"; }
 
 log "pane process started: agent $AGENT_ID, workspace $WS_ID, entrypoint $ENTRYPOINT, herdr $HERDR_BIN"
-if [ -f "$STOP" ]; then
-    log "stop marker $STOP is present: not starting agent $AGENT_ID (remove it to allow a start)"
-    exit 0
-fi
 
+# The marker is the maintenance escape hatch, so it is re-read before every
+# launch rather than once before the loop: an operator who writes it while a
+# crash-looping wrapper sleeps out its backoff must be obeyed at the end of that
+# sleep, not only on the next container start — that is precisely the moment the
+# escape hatch is reached for. The first iteration covers the pre-loop case.
 while :; do
+    if [ -f "$STOP" ]; then
+        log "stop marker $STOP is present: not starting agent $AGENT_ID (remove it to allow a start)"
+        exit 0
+    fi
     log "starting agent $AGENT_ID: workspace $WORKSPACE_DIR, home $AGENT_HOME"
     START=$(date +%s)
     AGENT_ID="$AGENT_ID" \

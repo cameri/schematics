@@ -43,7 +43,11 @@ CONFIG_TEMPLATE="${AGENT_HERDR_CONFIG_TEMPLATE:-/usr/local/share/agent-host/herd
 SSH_ENABLE="${AGENT_SSH_ENABLE:-1}"
 SSH_PORT="${AGENT_SSH_PORT:-2222}"
 SSH_LISTEN="${AGENT_SSH_LISTEN:-127.0.0.1}"
-SSHD_DIR="${AGENT_SSHD_DIR:-$HOME/.sshd}"
+# Under the agent tree by default, not under $HOME: the tree is the one thing a
+# deployment mounts, so the host key and the authorized keys it holds live
+# outside the container's writable layer and survive a recreate. A value outside
+# the tree works, and throws the identity away with the container.
+SSHD_DIR="${AGENT_SSHD_DIR:-$AGENT_TREE/.sshd}"
 AUTHORIZED_KEYS="${AGENT_SSH_AUTHORIZED_KEYS:-$SSHD_DIR/authorized_keys}"
 FOREGROUND="${AGENT_BOOT_FOREGROUND:-1}"
 
@@ -81,6 +85,11 @@ for ID in $AGENT_IDS; do
     AGENT_HOME="$AGENT_TREE/$ID/home"
     mkdir -p "$WORKSPACE_DIR" "$AGENT_HOME" || refuse "cannot create $WORKSPACE_DIR and $AGENT_HOME"
     [ -w "$WORKSPACE_DIR" ] || refuse "the workspace directory $WORKSPACE_DIR is not writable by $(id -un)"
+    # The home holds the state a harness resumes from, so a home the account
+    # cannot write is not a smaller failure than a workspace it cannot write: the
+    # wrapper would start the agent and the harness would fail later, with the
+    # reason in the agent's own output rather than here.
+    [ -w "$AGENT_HOME" ] || refuse "the home directory $AGENT_HOME is not writable by $(id -un); its session state could not be written"
     IFS=','
 done
 IFS="$OLD_IFS"
@@ -188,7 +197,18 @@ for ID in $AGENT_IDS; do
     WORKSPACE_DIR="$AGENT_TREE/$ID/workspace"
     AGENT_HOME="$AGENT_TREE/$ID/home"
 
-    for OLD in $("$HERDR_BIN" workspace list 2>/dev/null | jq -r --arg l "$ID" '.result.workspaces[]? | select(.label == $l) | .workspace_id'); do
+    # The inventory this loop closes against has to be known, not assumed. A
+    # failed `workspace list` or an unparseable one used to read as "no existing
+    # workspace", which skipped the close and created a second workspace with the
+    # same label — the one-thing-per-agent invariant broken silently, with the
+    # boot still reporting success. Both are refusals now, naming what came back.
+    LIST_OUT=$("$HERDR_BIN" workspace list 2>&1) \
+        || refuse "cannot list workspaces while reconciling agent $ID: $LIST_OUT"
+    printf '%s' "$LIST_OUT" | jq -e '.result.workspaces' >/dev/null 2>&1 \
+        || refuse "the workspace list is not the JSON this host expects, so the workspaces labelled '$ID' cannot be found: $LIST_OUT"
+    OLD_IDS=$(printf '%s' "$LIST_OUT" | jq -r --arg l "$ID" '.result.workspaces[]? | select(.label == $l) | .workspace_id') \
+        || refuse "cannot read the workspace labels while reconciling agent $ID: $LIST_OUT"
+    for OLD in $OLD_IDS; do
         "$HERDR_BIN" workspace close "$OLD" >/dev/null 2>&1 || true
     done
 
@@ -197,6 +217,15 @@ for ID in $AGENT_IDS; do
     WS_ID=$(printf '%s' "$CREATED" | jq -r '.result.workspace.workspace_id' 2>/dev/null)
     ROOT_PANE=$(printf '%s' "$CREATED" | jq -r '.result.root_pane.pane_id' 2>/dev/null)
     [ -n "$WS_ID" ] && [ "$WS_ID" != "null" ] || refuse "created the workspace for agent $ID but found no workspace id in: $CREATED"
+
+    # The invariant the close above exists to keep, read back from the server
+    # rather than assumed: a close that failed (the workspace was already gone,
+    # say) would otherwise leave this agent with two workspaces carrying its
+    # label, and the roster naming only one of them.
+    AFTER_LIST=$("$HERDR_BIN" workspace list 2>&1) \
+        || refuse "cannot list workspaces after creating agent $ID's workspace: $AFTER_LIST"
+    WITH_LABEL=$(printf '%s' "$AFTER_LIST" | jq -r --arg l "$ID" '.result.workspaces[]? | select(.label == $l) | .workspace_id' 2>/dev/null | wc -l | tr -d ' ')
+    [ "$WITH_LABEL" = "1" ] || refuse "agent $ID has $WITH_LABEL workspaces labelled '$ID' after reconciliation; exactly one is required — delete the extras and start again"
 
     printf '%s\t%s\t%s\t%s\n' "$WS_ID" "$ID" "$WORKSPACE_DIR" "$AGENT_HOME" >>"$ROSTER" \
         || refuse "cannot append agent $ID to the roster $ROSTER"
