@@ -1190,8 +1190,10 @@ Each test names the requirements it covers. `...` stands for
   (R-10 — the gate applies to the sandbox identity only). The sandbox's own
   legitimate work stays allowed: `docker ... compose -p P-3 up -d` (A-11) and a
   build (A-6) must still exit 0 — named volumes and project binds included,
-  which is what the fourth and fifth denials above must not cost.
-  The first volume-create denial and the fourth line above are the same
+  which the two denials added last above must not cost: the mount that carries
+  driver options, and the non-local volume driver. The
+  `volume create P-3_evil --opt type=none --opt o=bind --opt device=/` denial
+  and the `--mount … volume-opt=…,volume-opt=device=/` denial are the same
   capability through two doors: a volume created with driver options, and a
   container whose own mount carries them.
 

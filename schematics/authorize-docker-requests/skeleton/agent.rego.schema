@@ -87,7 +87,7 @@ The plugin enriches the request the daemon passes it (Docker's
 | `input.Query` | object | The parsed query string, as a map of arrays (`{"name": ["web-1"]}`). A container create's name arrives here, not in the body; no grant depends on it |
 | `input.Headers` | object | Request headers as a flat `string → string` map — Docker's own message type is `map[string]string`, so a value is a string, never an array |
 | `input.Body` | object | Decoded JSON request body, or `null` for requests without one (a `DELETE` carries none) |
-| `input.Body.HostConfig` | object | The create's host-side configuration — `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`, `UsernsMode`, `Binds`, `Mounts` — and the whole of the R-15 gate |
+| `input.Body.HostConfig` | object | The create's host-side configuration — `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`, `UsernsMode`, `Binds`, `VolumeDriver` (the driver for a `Binds` source that is a volume name rather than a path, read by R-16), `Mounts` (each entry read whole by R-16, `VolumeOptions.DriverConfig.Name` and `.Options` included) — and the whole of the R-15 gate |
 | `input.BindMounts` | array | One object per bind mount of a container-create request: `Source`, `ReadOnly`, `Resolved` (plugin addition) |
 
 Every path the policy matches is the derived `path` — `PathPlain` with one

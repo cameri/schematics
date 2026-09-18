@@ -168,11 +168,14 @@ testcontainers_container if {
 }
 
 # ─── R-15: refuse a container that could reach the host ──────────
-# This is the gate every create path passes. It rejects, in order: a privileged
+# This is the gate every create path passes. It rejects: a privileged
 # container, added capabilities, host devices, a relaxed security profile,
-# inherited volumes, a host or joined namespace, an explicit userns mode, and
-# any mount whose source is not a volume name or a path inside the project
-# directory.
+# inherited volumes, a host or joined namespace, an explicit userns mode, any
+# mount whose source is not a volume name or a path inside the project
+# directory, a volume mount whose own driver is not the local one or that
+# carries driver options, and — on the legacy `Binds` route — a volume driver
+# other than the local one. Every rejection the policy can make belongs on this
+# list: it is the boundary an auditor reads before trusting the gate.
 safe_container_config if {
 	not host_access_config
 	not unsafe_bind
