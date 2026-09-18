@@ -303,7 +303,7 @@ agent CLI and nothing else.
 | P-22 | `AGENT_SSH_AUTHORIZED_KEYS` | path (in-container) | `<P-21>/authorized_keys` | The file holding the attaching client's public key(s) | Key-only authentication: an empty file rejects every connection (R-8) |
 | P-23 | `AGENT_CRASH_LIMIT` | integer | `3` | How many rapid relaunches a broken agent should get before the host stops hammering | The wrapper's backoff threshold (R-5) |
 | P-24 | `AGENT_CRASH_WINDOW` | seconds | `5` | The window those launches are counted in | As `P-23` |
-| P-25 | `AGENT_CRASH_BACKOFF` | seconds | `30` | How long a backoff should last | The sleep before the next attempt (R-5) |
+| P-25 | `AGENT_CRASH_BACKOFF` | seconds (≥ 1) | `30` | How long a backoff should last | The sleep before the next attempt (R-5); the wrapper refuses a value below 1, because a pause of zero is a spin |
 | P-26 | `AGENT_REOPEN_LIMIT` | integer | `5` | How many pane reopens the fallback hook should allow before backing off | The hook's bound (R-14) |
 | P-27 | `AGENT_REOPEN_WINDOW` | seconds | `60` | The window those reopens are counted in | As `P-26` |
 | P-28 | `AGENT_REOPEN_BACKOFF` | seconds | `30` | How long the hook backs off | As `P-26` |
@@ -510,7 +510,9 @@ reports, removes it, starts a second one on the same mounted tree, and prints
   why, and every other agent is running.
 - **A-7** (covers R-5): an agent configured to die immediately, repeatedly.
   expected: the wrapper backs off after the configured number of launches instead
-  of re-launching without pause.
+  of re-launching without pause — the announced pause is the configured one, and
+  the gap between the last two relaunches of the burst is at least half of it, so
+  a pause configured to zero fails rather than passing on its own log line.
 - **A-8** (covers R-14): `kill -9` the pane's own process (the wrapper, not the
   agent). expected: the `pane.exited` hook opens a new agent pane — in the same
   workspace, or in a recreated one with the same label when the cascade already
@@ -519,13 +521,16 @@ reports, removes it, starts a second one on the same mounted tree, and prints
   expected: `XDG_CONFIG_HOME` and `HERDR_SESSION` are the server's own values;
   `herdr session list --json` reports the real session running; the workspace
   labels are visible; the server process is its own session leader; password
-  authentication is off; and the container publishes no port.
+  authentication is off; the installed `sshd_config` binds the address the
+  deployment asked for; the shipped boot fragment defaults that address to the
+  loopback, and the shipped compose fragment publishes no port.
 - **A-10** (covers R-7): remove the container, start a new one on the same
   mounted tree. expected: the files the agent left in its home are still there
   and the agent's session continues from them; the host re-establishes its
   workspace and pane; the host key file still exists.
-- **A-11** (covers R-9): the agent process's uid. expected: the base's account,
-  never 0.
+- **A-11** (covers R-9): the account and uid of the agent process, read from the
+  process itself. expected: the account the deployment names in `EXPECTED_USER`
+  (the base's, in a real deployment), and never root.
 - **A-12** (covers R-10): start the image with no override (its own entrypoint,
   no `AGENT_HARNESS`). expected: the base's refusal, exit `78`, naming
   `AGENT_HARNESS`. *(Skipped when the image under test does not carry the base's
@@ -542,6 +547,25 @@ reports, removes it, starts a second one on the same mounted tree, and prints
   prints a top-level digest. expected: both platforms and a list digest.
   *(Skipped without `PUBLISHED_IMAGE`: it inspects a published reference, which
   does not exist until Phase 6. An emulated build is not evidence for it.)*
+
+### What this package does not prove
+
+Three claims belong to this set and no test in the package settles them. They are
+limits of the artifact, not gaps to be filled in later by the same script:
+
+- **The client half of attach.** A-9 proves the server side — the daemon, the
+  parity of `XDG_CONFIG_HOME` and `HERDR_SESSION`, the session leader, the real
+  session visible from inside an SSH session. That `herdr --remote <target>` from
+  an operator's own machine lands in that session rather than a fresh one needs a
+  second host and a real network hop; Phase 5 describes the step, and a
+  loopback SSH session is not it.
+- **`herdr machine add`**, the multiplexer's own machine registry. It authenticates
+  to a live server on its own terms, which this package neither configures nor
+  documents; a deployment that wants it adds it in its own runbook, and nothing
+  here depends on it.
+- **The published reference.** A-16 needs an image that has been pushed with both
+  platforms; until a deployment publishes one, the manifest claim rests on the
+  build, not on an inspection.
 
 ## Failure Modes and Rollback
 

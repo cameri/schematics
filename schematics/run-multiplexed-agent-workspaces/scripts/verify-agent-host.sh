@@ -190,9 +190,23 @@ STUB
     panes_of() { herdr pane list --workspace "$1" 2>/dev/null | jq -r '.result.panes[]?.label // "shell"' 2>/dev/null; }
     agent_pane_of() { herdr pane list --workspace "$1" 2>/dev/null | jq -r '[.result.panes[]? | select(.label == "agent")] | length' 2>/dev/null; }
     starts_of() { grep -c "agent=$1 " "$PROBE/starts.log" 2>/dev/null || echo 0; }
+    # The agent's own pid: the pid the stub recorded, confirmed against the
+    # process's own environment before it is used. The stub execs into the mode's
+    # program, so the command line stops naming the harness — the environment is
+    # what survives — and a stale pid whose process is not this agent's is not
+    # ours to signal: killing it would kill an innocent wrapper instead.
+    stub_pid_of() {
+        p=$(cat "$PROBE/agent-$1.pid" 2>/dev/null) || return 1
+        [ -n "$p" ] || return 1
+        case "$(tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null)" in
+            *"AGENT_ID=$1"*) printf '%s' "$p"; return 0 ;;
+        esac
+        return 1
+    }
     kill_agent() {
-        [ -f "$PROBE/agent-$1.pid" ] || return 1
-        kill -9 "$(cat "$PROBE/agent-$1.pid")" 2>/dev/null || return 1
+        pid=$(stub_pid_of "$1" 2>/dev/null) || return 1
+        [ -n "$pid" ] || return 1
+        kill -9 "$pid" 2>/dev/null || return 1
         return 0
     }
     wait_stub_alive() { i=0; while [ "$i" -lt "${1:-20}" ]; do stub_alive "$first_id" && return 0; i=$((i + 1)); sleep 1; done; return 1; }
@@ -200,8 +214,30 @@ STUB
     wait_starts_gt() { i=0; while [ "$i" -lt "${2:-20}" ]; do [ "$(starts_of "$first_id")" -gt "$1" ] && return 0; i=$((i + 1)); sleep 1; done; return 1; }
     wait_log_match() { i=0; while [ "$i" -lt "${2:-30}" ]; do grep -q "$1" "$STATE_ROOT/$first_id/loop.log" 2>/dev/null && return 0; i=$((i + 1)); sleep 1; done; return 1; }
     session_running() { herdr session list --json 2>/dev/null | jq -r --arg s "$HERDR_SESSION" '.sessions[]? | select(.name == $s) | .running' 2>/dev/null | grep -q true; }
-    stub_alive() { [ -f "$PROBE/agent-$1.pid" ] && kill -0 "$(cat "$PROBE/agent-$1.pid")" 2>/dev/null; }
+    stub_alive() { stub_pid_of "$1" >/dev/null 2>&1; }
     session_lines() { [ -f "$TREE/$1/home/.probe-session" ] && wc -l <"$TREE/$1/home/.probe-session" | tr -d ' ' || echo 0; }
+    # What the wrapper's pause is configured to be: the deployment's value, or the
+    # shipped default read out of the package's own loop. Reading the default out
+    # of the artifact is what lets this check fail when the default is zeroed.
+    backoff_configured() {
+        if [ -n "${AGENT_CRASH_BACKOFF:-}" ]; then
+            printf '%s' "$AGENT_CRASH_BACKOFF"
+            return
+        fi
+        d=$(sed -n 's/.*AGENT_CRASH_BACKOFF:-\([0-9][0-9]*\)}.*/\1/p' "$PACKAGE_DIR/skeleton/agent-loop.sh" 2>/dev/null | head -1)
+        printf '%s' "${d:-30}"
+    }
+    # The largest gap between consecutive launches since the burst began, from the
+    # supervision log's own timestamps. The pause is one big gap; a wrapper that
+    # spins produces only gaps of a second or less, whatever else is running in
+    # parallel — which the last-two-lines statistic was not robust to. Empty when
+    # fewer than two launches are recorded or the timestamps cannot be parsed.
+    max_launch_gap() {
+        awk -v since="$2" '$1 >= since && /starting agent/ {print $1}' "$STATE_ROOT/$1/loop.log" 2>/dev/null \
+            | while read -r ts; do date -u -d "$ts" +%s 2>/dev/null || echo 0; done >"$PROBE/launch-seconds"
+        [ -s "$PROBE/launch-seconds" ] || return 0
+        awk 'NR > 1 { d = $1 - prev; if (d > max) max = d } { prev = $1 } END { print max + 0 }' "$PROBE/launch-seconds"
+    }
     first_id="${AGENT_IDS%%,*}"
     second_id=""
     case "$AGENT_IDS" in *,*) second_id="$(printf '%s' "$AGENT_IDS" | cut -d, -f2)" ;; esac
@@ -241,11 +277,20 @@ STUB
     [ "$CWD_SEEN" = "$TREE/$first_id/workspace" ] \
         && pass "A-3: the agent runs in its own workspace directory ($CWD_SEEN)" \
         || fail "A-3: the agent's working directory is '$CWD_SEEN', expected '$TREE/$first_id/workspace'"
-    UID_SEEN=$(printf '%s' "$LINE" | sed -n 's/.*uid=\([0-9]*\).*/\1/p')
-    if [ -n "$UID_SEEN" ] && [ "$UID_SEEN" != "0" ]; then
-        pass "A-11: every agent process runs as a non-root account (uid $UID_SEEN)"
+    # The account, not merely "not root": the base fixes one non-root account and
+    # a deployment names it in EXPECTED_USER, so any other account would be a
+    # defect the weaker test accepted.
+    PID_SEEN=$(printf '%s' "$LINE" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+    USER_SEEN=$(ps -o user= -p "${PID_SEEN:-0}" 2>/dev/null | tr -d ' ')
+    if [ -n "$USER_SEEN" ] && [ "$USER_SEEN" = "$EXPECTED_USER" ]; then
+        pass "A-11: the agent process runs as $USER_SEEN (pid ${PID_SEEN:-?}), the account the deployment names"
     else
-        fail "A-11: the agent runs with uid '${UID_SEEN:-unknown}'; the base's account is never root"
+        fail "A-11: the agent process runs as '${USER_SEEN:-unknown}' (pid ${PID_SEEN:-?}), expected '$EXPECTED_USER'"
+    fi
+    if [ -n "$USER_SEEN" ] && [ "$USER_SEEN" != "root" ]; then
+        pass "A-11: the agent process is not root"
+    else
+        fail "A-11: the agent process runs as '${USER_SEEN:-unknown}'; the base's account is never root"
     fi
 
     # --- the pinned multiplexer (R-13) ---------------------------------------
@@ -325,7 +370,11 @@ STUB
         if [ -n "$WS2" ] && [ "$(agent_pane_of "$WS2")" = "0" ]; then
             pass "A-6: a stopped agent ($second_id) keeps its workspace but gets no agent pane"
         else
-            fail "A-6: a stopped agent ($second_id) has $(agent_pane_of "$WS2") agent pane(s); the marker must win over the boot"
+            if [ -n "$WS2" ]; then
+                fail "A-6: a stopped agent ($second_id) has $(agent_pane_of "$WS2") agent pane(s); the marker must win over the boot"
+            else
+                fail "A-6: a stopped agent ($second_id) has no workspace at all; the marker must leave the workspace in place"
+            fi
         fi
         grep -q "agent $second_id is stopped" "$PROBE/boot2.log" 2>/dev/null \
             && pass "A-6: the boot names the stopped agent and what it did instead" \
@@ -345,17 +394,46 @@ STUB
         fail "A-10: the agent's session file did not grow across the second boot ($SESSION_BEFORE -> $SESSION_AFTER)"
     fi
 
-    # --- the crash-loop bound (R-5) -------------------------------------------
+    # --- the crash-loop bound and its pause (R-5) -----------------------------
+    # R-5 is a bound *and* a pause. Grepping the log for the line would pass with
+    # the pause configured to zero, because the wrapper logs it before it sleeps
+    # — so the check measures the pacing: the gap between the last two relaunches
+    # of the burst must be at least half the configured pause, and the pause the
+    # wrapper announced must be the configured one.
     rm -f "$STATE_ROOT/$first_id/launches"
     printf 'crashloop\n' >"$PROBE/mode"
+    BURST_START=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     kill_agent "$first_id"
     if wait_log_match 'backing off' 30; then
-        pass "A-7: a crashing agent hits the crash-loop bound and backs off instead of spinning"
+        pass "A-7: a crashing agent hits the crash-loop bound"
     else
         fail "A-7: no backoff appeared after repeated crashes; see $STATE_ROOT/$first_id/loop.log"
     fi
-    printf 'crash\n' >"$PROBE/mode"
-    rm -f "$STATE_ROOT/$first_id/launches"
+    BACKOFF_WANTED=$(backoff_configured)
+    if [ "$BACKOFF_WANTED" -ge 1 ] 2>/dev/null; then
+        pass "A-7: the crash-loop pause is at least a second (${BACKOFF_WANTED}s), so the bound can pace the agent"
+    else
+        fail "A-7: the crash-loop pause is '${BACKOFF_WANTED}s': a pause of zero is a spin, which R-5 forbids"
+    fi
+    BACKOFF_SEEN=$(sed -n 's/.*backing off \([0-9][0-9]*\)s.*/\1/p' "$STATE_ROOT/$first_id/loop.log" 2>/dev/null | tail -1)
+    if [ -n "$BACKOFF_SEEN" ] && [ "$BACKOFF_SEEN" = "$BACKOFF_WANTED" ]; then
+        pass "A-7: the announced pause is the configured one (${BACKOFF_SEEN}s)"
+    else
+        fail "A-7: the wrapper announced a pause of '${BACKOFF_SEEN:-none}s', expected ${BACKOFF_WANTED}s"
+    fi
+    MIN_GAP=$(( BACKOFF_WANTED / 2 ))
+    [ "$MIN_GAP" -lt 1 ] && MIN_GAP=1
+    # The pause comes after the line that announces it, so give the paused wrapper
+    # time to wake and launch once more before measuring.
+    PAUSE_WAIT=$(( BACKOFF_WANTED + 5 ))
+    [ "$PAUSE_WAIT" -gt 60 ] && PAUSE_WAIT=60
+    sleep "$PAUSE_WAIT"
+    GAP=$(max_launch_gap "$first_id" "$BURST_START")
+    if [ -n "$GAP" ] && [ "$GAP" -ge "$MIN_GAP" ]; then
+        pass "A-7: the relaunches are paced (${GAP}s apart, at least half the ${BACKOFF_WANTED}s pause)"
+    else
+        fail "A-7: the relaunches are '${GAP:-unmeasurable}'s apart, below the ${MIN_GAP}s this pause demands — the agent spins"
+    fi
 
     # --- the plugin fallback: the wrapper itself dies (R-14) -----------------
     WS1=$(ws_id_of "$first_id")
@@ -393,6 +471,13 @@ STUB
     grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+no' "$SSHD_DIR/sshd_config" 2>/dev/null \
         && pass "A-9: key-only authentication is configured (PasswordAuthentication no)" \
         || fail "A-9: $SSHD_DIR/sshd_config does not disable password authentication"
+    LISTEN_WANTED="${AGENT_SSH_LISTEN:-127.0.0.1}"
+    LISTEN_SEEN=$(sed -n 's/^[[:space:]]*ListenAddress[[:space:]]\+\([^[:space:]]*\).*/\1/p' "$SSHD_DIR/sshd_config" 2>/dev/null | head -1)
+    if [ -n "$LISTEN_SEEN" ] && [ "$LISTEN_SEEN" = "$LISTEN_WANTED" ]; then
+        pass "A-9: the daemon binds the address it was asked for ($LISTEN_SEEN)"
+    else
+        fail "A-9: the daemon binds '${LISTEN_SEEN:-nothing}', expected $LISTEN_WANTED"
+    fi
     SRV_PID=$(pgrep -f 'herdr server' 2>/dev/null | head -1)
     if [ -n "$SRV_PID" ]; then
         SID=$(ps -o sid= -p "$SRV_PID" 2>/dev/null | tr -d ' ')
@@ -540,6 +625,7 @@ driver() {
         -e "AGENT_TREE=/agents" -e "XDG_CONFIG_HOME=/agents/.config" \
         -e "AGENT_SSHD_DIR=/agents/sshd" -e "AGENT_STATE_ROOT=/agents/.state" \
         -e "USE_PACKAGE_FILES=$USE_PACKAGE_FILES" -e "EXPECTED_HERDR_VERSION=$EXPECTED_HERDR_VERSION" \
+        -e "EXPECTED_USER=$EXPECTED_USER" \
         -e "STUB_ENTRYPOINT=$STUB_ENTRYPOINT" -e "AGENT_ENTRYPOINT=$AGENT_ENTRYPOINT" \
         --entrypoint /bin/sh "$IMAGE" \
         -c "USE_PACKAGE_FILES=$USE_PACKAGE_FILES sh /verify-pkg/scripts/verify-agent-host.sh --inside"; then
@@ -561,11 +647,32 @@ driver() {
         *"/agents"*) pass "A-13: the agent tree is a bind mount, so state lives on the host" ;;
         *) fail "A-13: the agent tree is not bind-mounted" ;;
     esac
-    PUBLISHED=$(rt inspect -f '{{json .NetworkSettings.Ports}}' "$NAME" 2>/dev/null)
-    case "$PUBLISHED" in
-        ""|"null"|"{}") pass "A-9: the probe publishes no port — inbound is closed unless the deployment opens it" ;;
-        *) fail "A-9: the container publishes ports ($PUBLISHED) without the deployment asking for it" ;;
-    esac
+    # Not the container this script created — the script never passes -p, so such
+    # a check could only fail if the script itself were edited. The shipped
+    # artifacts are what a reader copies, so they are what the closed-by-default
+    # inbound is checked against: the fragment publishes nothing, and the boot
+    # defaults the daemon to the loopback address. (A-13 checks the image's own
+    # ExposedPorts; the in-container rows check the installed sshd_config.)
+    FRAGMENT="$PACKAGE_DIR/skeleton/compose.service.yaml"
+    if [ -f "$FRAGMENT" ]; then
+        if grep -qE '^[[:space:]]*ports:' "$FRAGMENT"; then
+            fail "A-9: $FRAGMENT publishes a port; the shipped fragment must leave inbound closed"
+        else
+            pass "A-9: the shipped compose fragment publishes no port — inbound is closed until the deployment opens it"
+        fi
+    else
+        skip "A-9: $FRAGMENT is not readable from this script's package directory"
+    fi
+    BOOT_SHIPPED="$PACKAGE_DIR/skeleton/agent-host-boot.sh"
+    if [ -f "$BOOT_SHIPPED" ]; then
+        if grep -qE 'AGENT_SSH_LISTEN:-127\.0\.0\.1' "$BOOT_SHIPPED"; then
+            pass "A-9: the shipped boot defaults the daemon to the loopback address"
+        else
+            fail "A-9: $BOOT_SHIPPED does not default AGENT_SSH_LISTEN to 127.0.0.1"
+        fi
+    else
+        skip "A-9: $BOOT_SHIPPED is not readable from this script's package directory"
+    fi
 
     printf '\n== persistence across a recreate ==\n'
     SESSION_FILE="$TREE_LOCAL_DIR/$FIRST_ID/home/.probe-session"
@@ -590,7 +697,7 @@ driver() {
         -e "AGENT_IDS=$AGENT_IDS" -e "HERDR_SESSION=$HERDR_SESSION" \
         -e "AGENT_TREE=/agents" -e "XDG_CONFIG_HOME=/agents/.config" \
         -e "AGENT_SSHD_DIR=/agents/sshd" -e "AGENT_STATE_ROOT=/agents/.state" \
-        -e "USE_PACKAGE_FILES=$USE_PACKAGE_FILES" -e "AGENT_BOOT_FOREGROUND=0" \
+        -e "USE_PACKAGE_FILES=$USE_PACKAGE_FILES" -e "EXPECTED_USER=$EXPECTED_USER" -e "AGENT_BOOT_FOREGROUND=0" \
         -e "STUB_ENTRYPOINT=$STUB_ENTRYPOINT" -e "AGENT_ENTRYPOINT=$AGENT_ENTRYPOINT" \
         --entrypoint /bin/sh "$IMAGE" -c "$RECREATE_CMD"; then
         RECREATE_OUT=$(logs_of "$NAME2")

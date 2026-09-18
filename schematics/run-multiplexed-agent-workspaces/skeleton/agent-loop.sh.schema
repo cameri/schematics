@@ -14,7 +14,7 @@
 # | `AGENT_STATE_ROOT` | deployment env | Overrides where per-agent state lives. Default: `HERDR_PLUGIN_STATE_DIR`. |
 # | `AGENT_ROSTER_FILE` | deployment env | Overrides the roster path. Default: `<HERDR_PLUGIN_CONFIG_DIR>/roster.tsv`. |
 # | `AGENT_ENTRYPOINT` | deployment env | The program run for the agent. Default: `/usr/local/bin/agent-entrypoint`, the base image's entrypoint. |
-# | `AGENT_CRASH_LIMIT`, `AGENT_CRASH_WINDOW`, `AGENT_CRASH_BACKOFF` | deployment env | Crash-loop bound and its backoff. Defaults: 3 crashes, 5 seconds, 30 seconds. |
+# | `AGENT_CRASH_LIMIT`, `AGENT_CRASH_WINDOW`, `AGENT_CRASH_BACKOFF` | deployment env | Crash-loop bound and its backoff. Defaults: 3 crashes, 5 seconds, 30 seconds. `AGENT_CRASH_BACKOFF` must be a whole number of seconds of at least 1: the wrapper refuses anything less, since a pause of zero leaves a broken agent spinning. |
 #
 # The roster is tab-separated with a comment header:
 #

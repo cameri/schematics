@@ -47,6 +47,15 @@ CRASH_WINDOW="${AGENT_CRASH_WINDOW:-5}"
 CRASH_BACKOFF="${AGENT_CRASH_BACKOFF:-30}"
 SIGNAL_FLOOR=128
 
+# A pause of zero is not a bound: it would let a permanently broken agent spin
+# exactly as if there were no refusal at all, which is the failure R-5 exists to
+# prevent. Refuse it here, where the value is named, rather than discovering it
+# as load on the host.
+case "$CRASH_BACKOFF" in
+    ''|*[!0-9]*) refuse "AGENT_CRASH_BACKOFF is '$CRASH_BACKOFF'; the crash-loop pause must be a whole number of seconds" ;;
+esac
+[ "$CRASH_BACKOFF" -ge 1 ] || refuse "AGENT_CRASH_BACKOFF is $CRASH_BACKOFF; the crash-loop pause must be at least 1 second, or a permanently broken agent spins"
+
 WS_ID="${HERDR_WORKSPACE_ID:-}"
 [ -n "$WS_ID" ] || refuse "HERDR_WORKSPACE_ID is unset; this program is the process of a herdr plugin pane, and the workspace is how it knows which agent it runs"
 

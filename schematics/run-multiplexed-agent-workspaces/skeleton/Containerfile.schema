@@ -2,12 +2,18 @@
 #
 # Companion document for `Containerfile`, the build of the agent host image.
 #
-# ## The two build arguments that matter
+# ## The build arguments that matter
 #
 # | Argument | Value |
 # |----------|-------|
 # | `AGENT_BASE_IMAGE` | The base reference without a tag: `<registry>/<namespace>/<name>`. |
 # | `AGENT_BASE_DIGEST` | The base's **manifest list** digest — the `Digest:` line the base's publish step prints. A tag moves; a per-platform digest pins one architecture and breaks the other's build. |
+# | `HERDR_SHA256_AMD64` | The publisher's SHA-256 for the `linux-x86_64` release asset at `HERDR_VERSION` (`P-4`). |
+# | `HERDR_SHA256_ARM64` | The same for `linux-aarch64` (`P-5`). |
+#
+# The two checksum arguments are placeholders in the shipped file and the build
+# **fails until they are filled**: `sha256sum -c` matches nothing a placeholder
+# can supply, so an unhashed multiplexer cannot be baked in by accident.
 #
 # ## What this layer may and may not change
 #
@@ -33,11 +39,21 @@
 # of those three inputs was changed on purpose, which is what makes the layer's
 # own tag meaningful.
 #
+# The version and both checksums are **fill-in parameters**, not defaults: the
+# shipped placeholders are rejected by the build, so a deployment cannot pin a
+# herdr it has not hashed.
+#
 # ## Validation
+#
+# Fill `HERDR_SHA256_AMD64` and `HERDR_SHA256_ARM64` first — in the
+# Containerfile or through the two `--build-arg`s below: they ship as
+# placeholders and `sha256sum -c` fails the build while they stand. `HERDR_VERSION`
+# already defaults to the version this package was verified against (`P-3`).
 #
 # ```
 # docker build -f Containerfile \
 #   --build-arg AGENT_BASE_IMAGE=<ref> --build-arg AGENT_BASE_DIGEST=<digest> \
+#   --build-arg HERDR_SHA256_AMD64=<sha256> --build-arg HERDR_SHA256_ARM64=<sha256> \
 #   -t agent-host:verify .                                          # exits 0
 # docker image inspect agent-host:verify \
 #   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
