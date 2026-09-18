@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: authorize-docker-requests
-version: 0.6.0
+version: 0.6.1
 status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
 created: 2026-09-09
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # Schematic: OPA Authorization for Docker Sandbox Access
@@ -40,6 +40,14 @@ updated: 2026-09-17
 > table in which 30 of its 71 rows decided wrongly before the change and every
 > row decides as specified after it, on the three OPA engines the package names
 > (see `skeleton/agent.rego.schema`).
+>
+> **2026-09-18 — R-16 was endpoint-scoped; it is a capability.** The policy
+> refused a driver-optioned volume at `/volumes/create` and admitted the same
+> volume through a container's own `HostConfig.Mounts[].VolumeOptions`, which the
+> daemon passes to the volume's driver when it creates the named volume — and
+> the legacy `HostConfig.VolumeDriver` named a driver the policy never read. A
+> volume mount now carries no driver options and no driver other than `local`,
+> and the legacy field is refused outside that set too.
 Grants a sandbox container (isolated agent, CI runner, or untrusted workload)
 restricted TCP access to the host Docker daemon, policed by Open Policy Agent.
 After implementing this schematic, the host's Docker daemon listens on a TLS
@@ -185,13 +193,22 @@ deployment that does not accept them is deploying something else.
 - **Host-access refusal is a deny list, and it is not exhaustive.** R-15
   refuses the host-reaching fields the policy knows: `Privileged`, `CapAdd`,
   `Devices`, `SecurityOpt`, `VolumesFrom`, `PidMode`/`IpcMode`/`NetworkMode`/
-  `CgroupnsMode` naming the host or another container, `UsernsMode`, and mount
-  sources outside `P-15`. **Published host ports are not covered**: a project
+  `CgroupnsMode` naming the host or another container, `UsernsMode`, mount
+  sources outside `P-15`, a volume mount's own driver options or a driver other
+  than `local`, and a legacy `HostConfig.VolumeDriver` naming another driver.
+  **Published host ports are not covered**: a project
   container may map a host port (compose `ports:`) or ask for
   `PublishAllPorts`. Binding a port is not root — it cannot read the host
   filesystem — but a container can occupy a port a host service is not yet
   using and answer for it. A deployment that needs that closed must close it
   in the daemon's own configuration or in the firewall, not here.
+- **The volume-options gate is deliberately coarse.** R-16 refuses any non-empty
+  option set on a volume's driver, at either endpoint, including options that
+  name a path inside `P-15`: accepting a *safe* subset would mean this policy
+  maintaining a copy of the local volume driver's option grammar, and the driver
+  is free to add an option that means something this gate does not know. A
+  deployment that genuinely needs a driver-backed volume must extend the policy
+  and add probe rows with it.
 - **The mount check is only as good as the path it is given.** R-15 accepts a
   mount source that is not an absolute path (a volume name) or that is a path
   inside `P-15` with no `..` segment. That is a *string* test on the source
@@ -390,7 +407,8 @@ deployment that does not accept them is deploying something else.
   a host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
   `CgroupnsMode` naming `host` or `container:<id>`); an explicit `UsernsMode`;
   and any mount whose source is neither a volume name nor a path inside `P-15`
-  or inside one of the roots `P-16` names.
+  or inside one of the roots `P-16` names — and, for a volume mount, any driver
+  options on the mount itself, or a driver other than `local`.
   The same gate MUST apply to every create-equivalent path the policy grants —
   the compose-label create, the testcontainers create, and volume creation
   (R-16) — so no grant can be used to reach the host. Host port publishing is
@@ -399,12 +417,21 @@ deployment that does not accept them is deploying something else.
   refused when it asks for one of these fields, even where the field is exotic
   rather than dangerous (a `DriverOpts`-bearing local volume, a `service:`
   network mode, a bind by an id-named resource).
-- **R-16**: The OPA policy MUST refuse a volume-create request that turns the
-  volume into a host mount. A project-named volume with the `local` driver (or
-  no driver) and no `DriverOpts` MUST be allowed; a `DriverOpts` object with any
-  entry, or a driver other than `local`, MUST be denied — `DriverOpts: {type:
-  none, o: bind, device: /}` is the host's root filesystem wearing a project
-  name, and R-15 cannot see it at container-create time.
+- **R-16**: The OPA policy MUST refuse any route to a volume that was created
+  with driver options, or with a driver other than `local` — by either endpoint
+  that can ask for one. At volume creation: a project-named volume with the
+  `local` driver (or no driver) and no `DriverOpts` MUST be allowed; a
+  `DriverOpts` object with any entry, or a driver other than `local`, MUST be
+  denied. At container creation: a volume mount that carries driver options of
+  its own, a driver other than `local`, or a legacy `HostConfig.VolumeDriver`
+  naming another driver MUST be denied, because the daemon creates the named
+  volume with those options and the local driver then performs the bind they
+  describe. `{type: none, o: bind, device: /}` is the host's root filesystem
+  wearing a project name, and it reaches the container from whichever endpoint
+  asked for it.
+  **Revision 2026-09-18** (the volume-create half was stated as the whole
+  requirement; the container-mount door is the same capability, and a reader
+  who had only the volume-create text had no reason to suspect it).
 - **R-17**: The policy MUST grant by exact path, never by path prefix or
   substring, and MUST NOT contain a carve-out that makes a create grant
   reachable from another endpoint. Concretely: `POST /build` (not
@@ -632,7 +659,15 @@ Fields used by the policy:
 - `input.Body.HostConfig` — the create's host-side configuration, and the whole
   of the R-15 gate: `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`,
   `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`,
-  `UsernsMode`, `Binds`, `Mounts`
+  `UsernsMode`, `Binds`, `Mounts`, `VolumeDriver`
+- `input.Body.HostConfig.Mounts[].VolumeOptions` — a volume mount's own driver
+  and driver options. A non-empty `DriverConfig.Options`, or a
+  `DriverConfig.Name` other than `local`, is refused: the daemon applies those
+  options when it creates the volume the mount names, which is the same
+  capability as a driver-optioned volume create (R-16)
+- `input.Body.HostConfig.VolumeDriver` — the driver the legacy `Binds` route
+  creates a named volume with. A value other than `local` (or none) is refused,
+  for the same reason (R-16)
 - `input.BindMounts` — one entry per bind mount of a create request, with
   `Source`, `ReadOnly`, and `Resolved` (a plugin addition; `Resolved` is empty
   when the plugin cannot read the host path — see the policy module). Every
@@ -1147,12 +1182,20 @@ Each test names the requirements it covers. `...` stands for
   docker ... run --rm -v /:/host alpine echo hello            # bind outside P-15
   docker ... run --rm -v /var/run/docker.sock:/s alpine echo hello
   docker ... volume create P-3_evil --opt type=none --opt o=bind --opt device=/
+  docker ... run --rm --mount type=volume,src=fresh,dst=/host,volume-opt=type=none,volume-opt=o=bind,volume-opt=device=/ alpine echo hello
+  docker ... run --rm --volume-driver evil -v P-3_data:/data alpine echo hello
   ```
   and the same host with a user who is not the sandbox still succeeds:
   `docker run --rm --privileged alpine echo hello` on the unix socket exits 0
   (R-10 — the gate applies to the sandbox identity only). The sandbox's own
   legitimate work stays allowed: `docker ... compose -p P-3 up -d` (A-11) and a
-  build (A-6) must still exit 0.
+  build (A-6) must still exit 0 — named volumes and project binds included,
+  which the two denials added last above must not cost: the mount that carries
+  driver options, and the non-local volume driver. The
+  `volume create P-3_evil --opt type=none --opt o=bind --opt device=/` denial
+  and the `--mount … volume-opt=…,volume-opt=device=/` denial are the same
+  capability through two doors: a volume created with driver options, and a
+  container whose own mount carries them.
 
 ## Failure Modes and Rollback
 
@@ -1410,6 +1453,33 @@ Decisions:
     deletion of the per-package `SCHEMATIC.md.schema` is in the base rather
     than a conflict here.
 
+- 2026-09-18 — **R-16 was endpoint-scoped; it is a capability.** The rule was
+  written about `/volumes/create`, and the same volume was admitted through a
+  container's own mount. Changes, each with rows in `skeleton/agent.rego.schema`
+  run under the engine the plugin embeds (OPA v1.3.0):
+  - **A volume mount carried its own driver options.** `mount_ok` admitted a
+    `Type: volume` entry on the strength of the type alone, so
+    `VolumeOptions.DriverConfig.Options: {type: none, o: bind, device: /}`
+    passed while the identical option set was refused at `/volumes/create`. The
+    daemon passes those options to the volume's driver when it creates the named
+    volume, and the local driver then performs the bind as the container mounts
+    it — host root inside the container, by a fresh volume name. A non-empty
+    option set, and any driver other than `local`, are refused.
+  - **The legacy `Binds` route named a driver in a field the policy never
+    read.** `HostConfig.VolumeDriver` is what the daemon parses a non-absolute
+    `Binds` source with; a value other than `local`, or none, is now refused.
+  - **The refusals are coarse on purpose.** Options naming a path inside `P-15`
+    are refused with the rest: accepting a safe subset would mean the policy
+    maintaining a copy of the local driver's option grammar, which the driver
+    may extend past it. The policy's own residual — a deployment that needs a
+    driver-backed volume — is stated in Limitations.
+  - **Version 0.6.1 (patch)**: no requirement is added, removed or reworded in
+    intent, and no parameter changes; two routes the policy allowed are now
+    refused, which is the safe direction R-15 already states for exotic fields.
+  - **Not measured here**: no container create against a live daemon in this
+    pass. The rows assert the policy's decisions; the daemon-side mechanism is
+    Docker's own (`registerMountPoints` passes a mount's `VolumeOptions` to the
+    volume create, and the local driver's `setOpts`/`mount` binds the device).
 - **Path matching derives the version-free path inside the policy** (R-19):
   `path` is `PathPlain` with one optional `/v<major>[.<minor>]` prefix removed
   and with no `..` segment, and `path_segments` is `split(path, "/")`. Deriving

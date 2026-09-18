@@ -21,10 +21,18 @@ container, in its project" are different grants:
   testcontainers label) must additionally pass a host-access gate: no
   `Privileged`, no `CapAdd`, no `Devices`, no `SecurityOpt`, no `VolumesFrom`,
   no host or container-joined namespace (`PidMode`, `IpcMode`, `NetworkMode`,
-  `CgroupnsMode`), no `UsernsMode`, and no mount whose source is neither a
-  volume name nor a path inside `P-15` or inside a root named by `P-16`.
-- **R-16** — a volume create may not carry `DriverOpts`, and its driver must be
-  `local` (or unset). `DriverOpts: {type: none, o: bind, device: /}` makes a
+  `CgroupnsMode`), no `UsernsMode`, no mount whose source is neither a volume
+  name nor a path inside `P-15` or inside a root named by `P-16`, and no volume
+  mount whose own `VolumeOptions` carry driver options or name a driver other
+  than `local`.
+- **R-16** — no route to a volume created with driver options, or with a driver
+  other than `local`, survives, by either endpoint that can ask for one. At
+  volume creation: no `DriverOpts`, and the driver must be `local` (or unset).
+  At container creation: no `VolumeOptions.DriverConfig.Options` on the mount,
+  no `DriverConfig.Name` other than `local`, and no legacy
+  `HostConfig.VolumeDriver` naming another driver — the daemon creates the named
+  volume with whichever of those the request carries, and the local driver then
+  performs the bind they describe. `{type: none, o: bind, device: /}` makes a
   project-named volume the host filesystem.
 - **R-17** — grants match a path by *equality* (`/build`, `/images/create`,
   `/containers/create`), never by substring, and no carve-out may be reachable
@@ -80,7 +88,10 @@ before evaluation. Fields the policy uses:
 - `input.Body.HostConfig` — the create's host-side configuration, and the whole
   of the R-15 gate: `Privileged`, `CapAdd`, `Devices`, `SecurityOpt`,
   `VolumesFrom`, `PidMode`, `IpcMode`, `NetworkMode`, `CgroupnsMode`,
-  `UsernsMode`, `Binds`, `Mounts`.
+  `UsernsMode`, `Binds`, `Mounts`, `VolumeDriver`. A `Mounts` entry of type
+  `volume` is read for `VolumeOptions` as well: driver options there are applied
+  when the daemon creates the volume the mount names (R-16), and
+  `VolumeDriver` is the driver the legacy `Binds` route creates one with.
 - `input.BindMounts` — array of objects with `Source`, `ReadOnly`, and
   `Resolved` (the source path with symlinks resolved). Derived from either
   `HostConfig.Binds` or `HostConfig.Mounts`. The policy checks every witness of
@@ -106,8 +117,8 @@ so the plugin release decides the language version:
 
 | Plugin image | Embedded OPA | Result |
 |--------------|--------------|--------|
-| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 86 probe rows decides as specified |
-| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 86 probe rows |
+| `ghcr.io/open-policy-agent/opa-docker-authz:v0.10` | **v1.3.0** | loads; every one of the 94 probe rows decides as specified |
+| `openpolicyagent/opa-docker-authz-v2:0.9` | v0.60.0 | loads; identical decisions on all 94 probe rows |
 | `openpolicyagent/opa-docker-authz-v2:0.8` | v0.30.0 | does **not** load — `import rego.v1` is rejected |
 
 The embedded versions are read from each release's own `go.mod` at its tag
@@ -145,7 +156,7 @@ limitations):
   lifecycle calls are not.
 - **The R-15 gate refuses in the safe direction.** A create that asks for a
   field the gate knows is refused even where the field is exotic rather than
-  dangerous — a `DriverOpts`-bearing local volume (R-16), a compose
+  dangerous — a driver-optioned volume, at either endpoint (R-16), a compose
   `network_mode: service:<name>`, a mount that names a resource by id. Every one
   of those has a form that is allowed (no `DriverOpts`, an explicit network, a
   name); a deployment that needs the refused form must extend the policy
