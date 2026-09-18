@@ -1,0 +1,73 @@
+# agent-loop.sh.schema
+#
+# Companion document for `agent-loop.sh`, the supervision wrapper. The script is
+# what herdr runs as the agent pane's process; this document is its contract.
+#
+# ## Inputs
+#
+# | Input | Source | Meaning |
+# |-------|--------|---------|
+# | `HERDR_WORKSPACE_ID` | injected by herdr into every pane | Which workspace this pane belongs to — and therefore which agent, through the roster. Nothing else identifies the agent. |
+# | `HERDR_PLUGIN_STATE_DIR` | injected by herdr | Where herdr keeps this plugin's state; the default parent of the per-agent state directories. |
+# | `HERDR_PLUGIN_CONFIG_DIR` | injected by herdr | Holds `roster.tsv` by default. |
+# | `HERDR_BIN_PATH` | injected by herdr | The herdr binary to call. Defaults to `herdr` on `PATH`. |
+# | `AGENT_STATE_ROOT` | deployment env | Overrides where per-agent state lives. Default: `HERDR_PLUGIN_STATE_DIR`. |
+# | `AGENT_ROSTER_FILE` | deployment env | Overrides the roster path. Default: `<HERDR_PLUGIN_CONFIG_DIR>/roster.tsv`. |
+# | `AGENT_ENTRYPOINT` | deployment env | The program run for the agent. Default: `/usr/local/bin/agent-entrypoint`, the base image's entrypoint. |
+# | `AGENT_CRASH_LIMIT`, `AGENT_CRASH_WINDOW`, `AGENT_CRASH_BACKOFF` | deployment env | Crash-loop bound and its backoff. Defaults: 3 crashes, 5 seconds, 30 seconds. |
+#
+# The roster is tab-separated with a comment header:
+#
+# ```
+# # workspace_id<TAB>agent_id<TAB>workspace_dir<TAB>home_dir
+# ```
+#
+# ## The restart contract
+#
+# | The agent exits with | Meaning | What the wrapper does | What the operator sees |
+# |----------------------|---------|-----------------------|------------------------|
+# | status `< 128` | deliberate exit | writes the agent's `stop` marker, logs the marker path, exits 0 | the pane closes; the tab and (if it was the last pane) the workspace close with it; nothing brings it back |
+# | status `>= 128` | death by signal — a crash | relaunches the agent in the same pane | the pane stays where it was; `loop.log` records the status and the relaunch |
+# | any status, stop marker already present at launch | stopped for maintenance | does not start the agent; exits 0 | the pane closes and stays closed until the marker is removed |
+#
+# An interactive interrupt is a signal death (status 130), so Ctrl-C relaunches
+# rather than closing the workspace. That is deliberate: an accident must not
+# destroy the agent's pane, and closing an agent is what the stop marker is for.
+#
+# State files, all under `<state root>/<agent id>/`:
+#
+# | File | Written by | Meaning |
+# |------|-----------|---------|
+# | `loop.log` | this script | One line per start, exit, relaunch and backoff. The operator's only account of what happened. |
+# | `stop` | this script (on a clean exit) or the operator | Present = keep this agent down. |
+# | `launches` | this script | Timestamps of recent launches, for the crash-loop bound. |
+#
+# ## Failure behaviour
+#
+# Every refusal exits 78 with one line on stderr prefixed `agent-loop: `:
+#
+# | Condition | Message names |
+# |-----------|---------------|
+# | `HERDR_WORKSPACE_ID` unset | the variable — this program is not a plain shell script; it is a pane's process |
+# | roster file missing | the path the boot program should have written |
+# | workspace not in the roster | the workspace id |
+# | an empty roster column | the column number and the agent |
+# | the entrypoint is not executable | its path |
+# | the state directory cannot be created | its path |
+#
+# ## Idempotency
+#
+# Every path is derived from the workspace id, so re-running is a re-read of the
+# roster plus a fresh launch: no state accumulates except the log, `launches`
+# (trimmed to 50 entries) and the explicit stop marker. Removing the state
+# directory entirely is safe and resets the agent.
+#
+# ## Validation
+#
+# ```
+# sh -n agent-loop.sh                       # parses
+# # inside a running host, with the agent's pane open:
+# cat <state root>/<agent id>/loop.log      # a start line, then either a relaunch after SIGKILL or a clean-exit line
+# kill -9 <the agent process>               # the wrapper logs "death by signal" and starts it again
+# touch <state root>/<agent id>/stop        # the next launch stays down
+# ```

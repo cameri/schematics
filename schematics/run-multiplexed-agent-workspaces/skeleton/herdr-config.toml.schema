@@ -1,0 +1,38 @@
+# herdr-config.toml.schema
+#
+# Companion document for `herdr-config.toml`. The file itself is what the boot
+# program installs, once, at `$XDG_CONFIG_HOME/herdr/config.toml`; this document
+# says what each key does, what breaks without it, and how to check the result.
+#
+# ## Keys
+#
+# | Key | Value | Why |
+# |-----|-------|-----|
+# | `onboarding` | `false` | Top-level key, not an `[update]` subkey. Left unset, herdr shows a first-run setup prompt on every attach until someone answers it interactively — and nothing in this boot flow ever does. |
+# | `[update].version_check` | `false` | herdr's background release check. A pinned binary must not ask whether it should be a different binary. |
+# | `[update].manifest_check` | `false` | herdr's background agent-detection manifest fetch. Off, the host makes no outbound request of its own. |
+#
+# ## The parity requirement
+#
+# The file is only half of the configuration story. A herdr client resolves its
+# config root from `XDG_CONFIG_HOME`, so a client that runs with a different
+# value than the server finds a different root — and, at best, no session at
+# all. The boot program exports `XDG_CONFIG_HOME` for the server, and the same
+# value goes into the SSH daemon's `SetEnv` line, which is what carries it into
+# the non-interactive SSH sessions `herdr --remote` runs. Change one without the
+# other and remote attach silently lands somewhere else.
+#
+# ## Validation
+#
+# ```
+# grep -qx 'onboarding = false' "$XDG_CONFIG_HOME/herdr/config.toml"   # exits 0
+# herdr --default-config | grep -n 'onboarding'                        # the key is documented there
+# ssh <target> 'echo $XDG_CONFIG_HOME'                                 # equals the value the server runs with
+# ```
+#
+# ## What this file does not carry
+#
+# No keybindings, no theme, no window layout: those are operator preferences,
+# and a package that shipped them would fight the operator's own config. No
+# socket or state path: herdr derives both from the config root, which is what
+# makes the root the only value that has to be kept in parity.

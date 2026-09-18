@@ -1,0 +1,48 @@
+# compose.service.yaml.schema
+#
+# Companion document for `compose.service.yaml`, the deployment fragment.
+#
+# ## The line that makes it a host
+#
+# `entrypoint: ["/usr/local/bin/agent-host-boot"]`. The image keeps the base's
+# entrypoint on purpose, so the multiplexer is selected by the deployment rather
+# than baked into the image. Two consequences, both intended:
+#
+# - the same image started without this override runs exactly one agent in one
+#   workspace — the base's behaviour, unchanged, which is what an operator gets
+#   from `docker run <image>` and what keeps this image composable with the rest
+#   of the set;
+# - the multiplexer is a run-time choice, so a deployment that wants a single
+#   agent does not have to build a second image.
+#
+# ## Posture
+#
+# | Setting | Value | Why |
+# |---------|-------|-----|
+# | `user` | the base's account | Never root. The image already carries it; the fragment names it so a deployment that renames the account in one place stays consistent. |
+# | `tty`, `stdin_open` | true | The container's process is a herdr client. |
+# | `restart` | `unless-stopped` | The host comes back after a host restart; agents' sessions resume from the mounted tree. |
+# | `ports` | absent | The SSH daemon listens on the loopback address inside the container and no port is published, so nothing outside can reach it. Publishing is one deliberate edit, shown commented. |
+# | docker access | none | No socket mount. Docker CLI access goes through the pinned restrict-docker-api-access endpoint, shown commented. |
+#
+# ## Volumes
+#
+# `AGENT_HOST_STATE` is mounted at `AGENT_TREE`. One directory holds every
+# agent's workspace and home, and, below `.state`, its supervision state. Because
+# it is a bind mount and not a container path, stopping the container frees
+# memory and touches no state: a restart resumes each agent's session from the
+# files the harness left in its home, and a stop marker written before the stop
+# is still there afterwards.
+#
+# The SSH directory is a bind mount for a different reason: host keys generated
+# at first boot make the host identity stable, so a client's `known_hosts` entry
+# stays valid across recreates. Without the mount, every recreate changes the
+# host key and every client is asked to trust a new one.
+#
+# ## Validation
+#
+# ```
+# AGENT_IDS=a,b AGENT_HOST_STATE=/srv/agents docker compose -f compose.service.yaml up -d
+# docker inspect <container> --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+# docker inspect <container> --format '{{json .NetworkSettings.Ports}}'   # no published port
+# ```

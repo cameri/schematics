@@ -1,0 +1,69 @@
+# The service that runs one agent host.
+#
+# This fragment is the deployment half of the package: the image carries the
+# multiplexer and the supervision, and this is what starts it. `entrypoint`
+# is the line that matters — the image keeps the base's entrypoint, so a host
+# is started by naming the boot program explicitly rather than by changing the
+# image. Without this override the image runs exactly one agent in one
+# workspace, which is the base's behaviour unchanged.
+#
+# Posture, and why nothing here opens a port: the agent host is outbound-only by
+# default (the isolation contract of the set). The SSH daemon inside the
+# container listens on the loopback address, so a client outside the container
+# cannot reach it until the deployment deliberately publishes it — see the
+# commented `ports` block, which is the one change that makes remote attach
+# reachable from another machine.
+#
+# Docker access is not mounted. When the agents need the Docker CLI, the socket
+# stays on the host and the daemon is reached through the pinned
+# restrict-docker-api-access endpoint; the commented environment block shows
+# where that endpoint goes. Mounting docker.sock into this container hands the
+# agents host root and defeats the isolation contract.
+
+services:
+  agent-host:
+    image: "${AGENT_HOST_IMAGE:?set AGENT_HOST_IMAGE to the published agent-host image}:${AGENT_HOST_TAG:-latest}"
+    container_name: "${AGENT_HOST_NAME:-agent-host}"
+    entrypoint: ["/usr/local/bin/agent-host-boot"]
+    user: "${AGENT_USER:-user}"
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    environment:
+      # The agents this host runs: ids, comma-separated, each becoming one
+      # workspace labelled with the id and one directory pair under the tree.
+      AGENT_IDS: "${AGENT_IDS:?set AGENT_IDS to the agent ids this host runs}"
+      AGENT_TREE: "${AGENT_TREE:-/agents}"
+      HERDR_SESSION: "${HERDR_SESSION:-agents}"
+      # The herdr configuration root. Unset, the boot program uses $HOME/.config.
+      # If you set it here, the SSH daemon's SetEnv takes the same value at boot,
+      # so a remote client resolves the same session — do not set it anywhere else.
+      # XDG_CONFIG_HOME: "/home/user/.config"
+      #
+      # Docker CLI access, through the pinned restrict-docker-api-access
+      # endpoint rather than a socket mount:
+      #
+      # DOCKER_HOST: "tcp://<proxy-host>:<port>"
+      # DOCKER_TLS_VERIFY: "1"
+      # DOCKER_CERT_PATH: "/run/agent-docker"
+      #
+      # Credentials for the harnesses arrive from the callers of this layer, not
+      # from the image: encrypt-container-secrets decrypts them at boot into the
+      # processes that need them, and run-an-llm-router is the inference endpoint
+      # the harness layers point at.
+    volumes:
+      # One host directory holds the whole agent tree: per agent a workspace
+      # (the working directory it edits) and a home (the state its session
+      # resumes from). Bind-mounted, so stopping the container frees memory and
+      # never touches state, and a restart finds every session where it left it.
+      - "${AGENT_HOST_STATE:?set AGENT_HOST_STATE to the host directory that holds the agent tree}:${AGENT_TREE:-/agents}"
+      # The SSH host key and authorized_keys. Mounted so the host identity is
+      # stable across recreates: regenerate it and every client's known_hosts
+      # entry is wrong.
+      # - "${AGENT_HOST_STATE}/sshd:/home/user/.sshd"
+    # Remote attach, deliberately opened. Uncomment and set the address and port
+    # to publish the SSH daemon beyond the container: this is the only step that
+    # makes `herdr --remote` reachable from another machine.
+    #
+    # ports:
+    #   - "<attach address>:2222:2222"

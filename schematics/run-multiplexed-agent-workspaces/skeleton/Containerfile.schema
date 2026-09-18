@@ -1,0 +1,47 @@
+# Containerfile.schema
+#
+# Companion document for `Containerfile`, the build of the agent host image.
+#
+# ## The two build arguments that matter
+#
+# | Argument | Value |
+# |----------|-------|
+# | `AGENT_BASE_IMAGE` | The base reference without a tag: `<registry>/<namespace>/<name>`. |
+# | `AGENT_BASE_DIGEST` | The base's **manifest list** digest — the `Digest:` line the base's publish step prints. A tag moves; a per-platform digest pins one architecture and breaks the other's build. |
+#
+# ## What this layer may and may not change
+#
+# | May | Why it is in this layer's hands |
+# |-----|---------------------------------|
+# | the packages it installs | `openssh-server`, `openssh-client`, `jq` and `util-linux` are what the multiplexer, the attach transport and the JSON parsing need. |
+# | the files it adds | the herdr binary at a pinned version, the plugin, the configuration template, the boot program. |
+# | an optional `HEALTHCHECK` | Declared as none: a host's readiness is its herdr session, which the acceptance script checks directly rather than through a container health probe that would have to re-derive it. |
+#
+# | Must not change | Why |
+# |-----------------|-----|
+# | the runtime account | Its name, ids and home are the base's contract; every agent pane runs as that account. |
+# | the entrypoint | `docker run <this image>` must behave exactly like the base: one agent, one workspace, the base's refusals. The host's own process is named by the deployment (`compose.service.yaml`), not by this image. |
+# | the working directory | Consumers mount agent workspaces deliberately; the image default stays the base's. |
+# | the `AGENT_*` variable names | They are the seam every harness layer writes through. |
+# | any `EXPOSE`, `VOLUME` or socket mount | The image opens no port and mounts nothing: which port is published, and where the Docker API is reached, are the deployment's decisions. A socket mount in the image would hand every agent host root. |
+#
+# ## Reproducibility
+#
+# The base is pinned by manifest digest, herdr by version plus the publisher's
+# per-asset SHA-256 checked into the build, and the package set comes from the
+# base's own distribution repositories. A rebuild is the same image unless one
+# of those three inputs was changed on purpose, which is what makes the layer's
+# own tag meaningful.
+#
+# ## Validation
+#
+# ```
+# docker build -f Containerfile \
+#   --build-arg AGENT_BASE_IMAGE=<ref> --build-arg AGENT_BASE_DIGEST=<digest> \
+#   -t agent-host:verify .                                          # exits 0
+# docker image inspect agent-host:verify \
+#   --format '{{.Config.User}} {{.Config.WorkingDir}} {{json .Config.Entrypoint}}'
+#   # the base's account, working directory and entrypoint, unchanged
+# docker run --rm agent-host:verify                                 # the base's refusal, exit 78
+# docker image inspect agent-host:verify --format '{{json .Config.ExposedPorts}}'  # null
+# ```

@@ -1,0 +1,18 @@
+# herdr configuration for the agent host.
+#
+# This file is installed at $XDG_CONFIG_HOME/herdr/config.toml. The same
+# XDG_CONFIG_HOME value must reach every SSH session that runs herdr commands,
+# or a remote client resolves a different config root and finds no server.
+#
+# herdr's only two background network calls are its own version check and its
+# agent-detection manifest update. Both are off: the binary is installed at a
+# pinned version, and a host that never fetches anything keeps that pin true.
+# `onboarding` is a top-level key, not an [update] subkey. Left at herdr's
+# default (unset), every attach shows a first-run setup prompt until someone
+# answers it interactively — and nothing in this boot flow ever does, so the
+# prompt returns at every attach.
+onboarding = false
+
+[update]
+version_check = false
+manifest_check = false

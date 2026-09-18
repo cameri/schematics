@@ -1,0 +1,51 @@
+# herdr-plugin.toml.schema
+#
+# Companion document for `herdr-plugin.toml`, the manifest of the plugin that
+# owns the agent pane and the pane-exited hook.
+#
+# ## Fields
+#
+# | Field | Value here | Why |
+# |-------|------------|-----|
+# | `id`, `name` | `agent-respawn` | The id names the plugin's config directory (`$XDG_CONFIG_HOME/herdr/plugins/config/<id>`) and is what the boot program and the hook pass to `herdr plugin pane open --plugin`. |
+# | `version` | this package's plugin version | Independent of the image tag; the image tag is what a deployment pins. |
+# | `min_herdr_version` | the lowest herdr the manifest is valid for | herdr refuses a manifest below it, which is the honest failure when the installed binary is older than the fields used here. |
+# | `platforms` | `["linux"]` | Declaring it keeps `herdr plugin list` free of the "platform support unknown" warning, and states the platform the scripts are written for. |
+# | `description` | one sentence | Appears in `herdr plugin list`; it is the operator's only in-place description. |
+#
+# ## The pane
+#
+# `[[panes]]` declares one pane type. `command` runs `agent-loop.sh` through
+# `$HERDR_PLUGIN_ROOT`, which herdr injects and points at the manifest's own
+# directory — the command therefore does not depend on where the plugin was
+# installed. `placement = "tab"` gives the agent its own tab rather than a split
+# of the workspace's shell pane, so the two are independently closable and the
+# agent's pane survives closing the shell.
+#
+# The pane's process is the wrapper, never the harness directly: herdr closes a
+# pane whose process exits, and a pane process that dies with the agent would
+# take the tab and then the workspace with it.
+#
+# ## The hook
+#
+# `[[events]]` with `on = "pane.exited"` runs `reopen-pane.sh` whenever a pane
+# exits. herdr passes the event in `HERDR_PLUGIN_EVENT_JSON`; the hook reads
+# only `data.workspace_id` from it to decide whether the workspace belongs to a
+# configured agent. This is the fallback for the wrapper itself dying, not the
+# crash path — the wrapper handles crashes without the pane ever exiting.
+#
+# ## Validation
+#
+# ```
+# herdr plugin link <plugin root>        # exits 0, and herdr validates the manifest
+# herdr plugin list                      # lists agent-respawn with no warning
+# herdr plugin pane open --plugin agent-respawn --entrypoint agent --workspace <id>
+# ```
+#
+# ## What the manifest cannot express
+#
+# Which agent a pane runs. A plugin pane's environment comes from herdr, and the
+# workspace's `--env` values do not reach it; nothing per-agent can be written
+# into this file. Identity therefore travels through the workspace: herdr injects
+# `HERDR_WORKSPACE_ID` into every pane, and the wrapper looks that workspace up
+# in the roster the boot program writes.

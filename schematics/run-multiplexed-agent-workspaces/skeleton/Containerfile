@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1
+#
+# The agent host image: the dev base image plus a multiplexer (herdr) and the
+# supervision, attach and persistence layers that turn it into a host for
+# several named agents.
+#
+# Build (the base must be pinned by its MANIFEST LIST digest — the `Digest:`
+# line the base's publish step reports):
+#
+#   docker build -f Containerfile \
+#     --build-arg AGENT_BASE_IMAGE=<registry>/<namespace>/<name> \
+#     --build-arg AGENT_BASE_DIGEST=sha256:<manifest list digest> \
+#     -t <registry>/<namespace>/<name>-agent-host:<version>-<commit> .
+#
+# What this layer changes, against the base's layer contract: the packages it
+# installs, and the files it adds. It does NOT change the runtime account, the
+# entrypoint, the working directory, or any AGENT_* variable name. The base's
+# entrypoint is the contract every agent pane runs under, untouched; this image
+# adds a second, optional entrance (agent-host-boot) that the deployment selects
+# at run time, leaving `docker run` on this image behaving exactly like the base.
+
+ARG AGENT_BASE_IMAGE
+ARG AGENT_BASE_DIGEST
+
+FROM ${AGENT_BASE_IMAGE}@${AGENT_BASE_DIGEST}
+
+ARG HERDR_VERSION=0.9.0
+ARG HERDR_SHA256_AMD64=<sha256 of herdr-linux-x86_64 for HERDR_VERSION>
+ARG HERDR_SHA256_ARM64=<sha256 of herdr-linux-aarch64 for HERDR_VERSION>
+ARG IMAGE_VERSION=0.0.0
+ARG GIT_COMMIT=unknown
+ARG IMAGE_SOURCE=https://example.invalid/agent-host
+ARG TARGETARCH
+
+# Installing needs root; running never does (R-1 of the base). The section ends
+# by switching back to the inherited account, so the image's runtime identity is
+# the base's.
+USER root
+
+# openssh-server: the transport remote attach arrives through. jq: this host
+# parses herdr's JSON output. util-linux: setsid, without which the herdr server
+# is not its own session leader and herdr --remote refuses to attach.
+RUN set -eux; \
+    if ! command -v curl >/dev/null 2>&1; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends curl; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends openssh-server openssh-client jq util-linux; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v setsid >/dev/null; \
+    command -v sshd >/dev/null; \
+    command -v jq >/dev/null
+
+# herdr, pinned by version and by the publisher's per-asset SHA-256. The two
+# digests are the GitHub release API's `digest` values for this release's
+# assets, checked into the build rather than fetched: a build that verified
+# against a freshly fetched checksum would pin nothing.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) herdr_url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64"; herdr_sha="${HERDR_SHA256_AMD64}" ;; \
+        arm64) herdr_url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-aarch64"; herdr_sha="${HERDR_SHA256_ARM64}" ;; \
+        *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}'; this image is built for amd64 and arm64." >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "${herdr_url}" -o /usr/local/bin/herdr; \
+    echo "${herdr_sha}  /usr/local/bin/herdr" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/herdr; \
+    herdr --version
+
+# The host's own files: the herdr configuration template, the plugin (manifest
+# plus the two scripts herdr runs), and the boot program. Root-owned and
+# world-readable: the account reads them and writes only under its own home and
+# the agent tree.
+COPY herdr-config.toml /usr/local/share/agent-host/herdr-config.toml
+COPY herdr-plugin.toml agent-loop.sh reopen-pane.sh /usr/local/share/agent-host/plugin/
+COPY agent-host-boot.sh /usr/local/bin/agent-host-boot
+RUN set -eux; \
+    chmod 0444 /usr/local/share/agent-host/herdr-config.toml; \
+    chmod 0444 /usr/local/share/agent-host/plugin/herdr-plugin.toml; \
+    chmod 0555 /usr/local/share/agent-host/plugin/agent-loop.sh /usr/local/share/agent-host/plugin/reopen-pane.sh; \
+    chmod 0755 /usr/local/bin/agent-host-boot
+
+LABEL org.opencontainers.image.title="agent host (multiplexed agent workspaces)" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.opencontainers.image.base.name="${AGENT_BASE_IMAGE}" \
+      org.opencontainers.image.base.digest="${AGENT_BASE_DIGEST}" \
+      dev.agent.host.herdr.version="${HERDR_VERSION}"
+
+# No EXPOSE: the SSH daemon listens inside the container and the deployment
+# decides whether to publish it. No VOLUME: the agent tree is a bind mount the
+# deployment provides. No HEALTHCHECK: a host is up when its herdr session is
+# running, which the acceptance script checks.
+
+USER ${AGENT_USER}

@@ -1,0 +1,70 @@
+# reopen-pane.sh.schema
+#
+# Companion document for `reopen-pane.sh`, the `pane.exited` hook.
+#
+# ## The event
+#
+# herdr runs the hook with the event in `HERDR_PLUGIN_EVENT_JSON`. For a pane
+# that exits, the measured shape is:
+#
+# ```json
+# {"event":"pane_exited","data":{"type":"pane_exited","pane_id":"w2:p2","workspace_id":"w2"}}
+# ```
+#
+# Only `data.workspace_id` is used. The pane id is deliberately ignored: the
+# pane is gone, and the hook's job is to open a new one in the same workspace
+# (or in the workspace it recreates), not to resurrect a specific pane id.
+#
+# ## Decision order
+#
+# | Condition | Action |
+# |-----------|--------|
+# | no `data.workspace_id` in the event | exit 0 — not a pane exit we act on |
+# | no roster file | exit 0 — the host has not booted yet |
+# | the workspace is not in the roster | exit 0 — not an agent of this host |
+# | the agent's stop marker exists | exit 0 — a deliberate stop is never undone by a fallback path |
+# | more than `AGENT_REOPEN_LIMIT` reopens inside `AGENT_REOPEN_WINDOW` seconds | sleep `AGENT_REOPEN_BACKOFF` first |
+# | `plugin pane open` succeeds | exit 0 |
+# | it fails naming a missing workspace | recreate the workspace with the agent's cwd and label, rewrite the roster line with the new workspace id, open the pane |
+# | it fails any other way | exit 0 after logging: the workspace exists, so this is not the hook's failure to repair |
+#
+# ## Why the workspace may be gone
+#
+# herdr closes a workspace that loses its last pane — the auto-close cascade is
+# pane, then tab, then workspace. When the wrapper is killed outright, that is
+# exactly the sequence: the pane exits, it was often the workspace's only pane
+# (the boot closes the shell pane once the agent pane is open), and the
+# workspace is gone before this hook starts. The event still names the old
+# workspace id, so the id in the roster is rewritten to the recreated one;
+# without that, `agent-loop.sh` would resolve nothing and refuse.
+#
+# ## Inputs
+#
+# `HERDR_PLUGIN_EVENT_JSON`, `HERDR_BIN_PATH`, `HERDR_PLUGIN_STATE_DIR`,
+# `HERDR_PLUGIN_CONFIG_DIR` (injected by herdr); `AGENT_STATE_ROOT`,
+# `AGENT_ROSTER_FILE`, `AGENT_PLUGIN_ID`, `AGENT_PANE_ENTRYPOINT`,
+# `AGENT_REOPEN_LIMIT`, `AGENT_REOPEN_WINDOW`, `AGENT_REOPEN_BACKOFF`
+# (deployment env, defaults in the script).
+#
+# ## State
+#
+# `<state root>/reopen.log` (what the hook did and why), `<state root>/<agent
+# id>/reopens` (timestamps for the bound), and the roster rewrite itself.
+#
+# ## Failure behaviour
+#
+# Exits 0 in every case except two: a workspace that must be recreated while the
+# roster has no workspace directory for the agent, and a recreate or reopen that
+# fails. Both print one line prefixed `reopen-pane: ` and exit 78. A hook that
+# fails is visible in `herdr plugin log`, which is where an operator looks when
+# a pane does not come back.
+#
+# ## Validation
+#
+# ```
+# sh -n reopen-pane.sh
+# # inside a running host, with an agent pane open:
+# kill -9 <the pane's process>                       # not the agent: the wrapper itself
+# herdr pane list --workspace <workspace id>         # a new pane id, same workspace
+# herdr plugin log agent-respawn                     # the hook's own output
+# ```
