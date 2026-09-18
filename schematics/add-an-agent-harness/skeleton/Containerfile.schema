@@ -1,0 +1,42 @@
+# Containerfile.schema
+#
+# Companion document for `Containerfile`, the harness layer's build file.
+#
+# ## The shape, and why
+#
+# | Instruction | Why it is there |
+# |---|---|
+# | `ARG AGENT_BASE_REF` + `FROM ${AGENT_BASE_REF}` | One complete base reference (`P-2`): `name:tag` for an image built locally, `name@sha256:<manifest list digest>` for a published one. Deliberately not two parameters — a registry host and a digest — because a deployment that has not published the base yet must still be able to build a layer over it. |
+# | `USER root` … `USER ${AGENT_USER}` | The install needs root; the produced image does not. `${AGENT_USER}` is the **base's** own environment variable, so the layer returns to an account it did not name, create or modify (R-1). |
+# | the `case` arm | The closed harness parameter (`P-1`). An unknown value stops the build with one stderr line naming it and exit `78` before anything is installed, so no image can exist without a harness (R-4). |
+# | the parameter guard loop | `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`, `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` are required; an empty one refuses the same way. A build that produced an image with an empty alias in it would look successful and fail at the first request. |
+# | `npm view … version` | The version is resolved from the registry at build time, never copied from documentation and never a floating tag (R-5). `HARNESS_PACKAGE_VERSION` (`P-10`) overrides it to reproduce an older image. |
+# | the four `printf` records | `/usr/local/share/agent-harness/{version,package,command,credential-env}`: what was installed, and what the deployment must call the credential variable. Readable without starting the CLI, so the acceptance table can assert what was actually built inside the image (R-5, H-7). |
+# | `sed` over the template | The CLI's configuration is written at build time, in the CLI's own file shape, with the layer's parameters substituted. The templates ship beside this file and are the shape the `.schema` companions describe. |
+# | the placeholder check | A template that still contains `@…@` fails the build. Substitution that silently no-ops produces a configuration naming `@HARNESS_MODEL_ALIAS@` as a model — a file that parses and cannot work. |
+# | `"${CLI}" --version` | The build proves the CLI is installed and runnable before it declares success. A build that cannot run its own harness is a build that should not produce an image. |
+# | `ENV AGENT_HARNESS=${AGENT_HARNESS_ID}` | The one variable the inherited entrypoint reads (R-3). It is the CLI's own name, resolved from `PATH`, so nothing here needs to know where the package manager put it. |
+# | `ENV CLAUDE_CONFIG_DIR=… CODEX_HOME=…` | The CLI's config root (`P-9`). Each CLI reads its own variable and the other is inert; one parameter means a deployment that bind-mounts the harness home mounts one path. |
+#
+# ## What this file must never contain
+#
+# - `ENTRYPOINT`, `CMD` or `WORKDIR`: they are the base's, and a harness layer
+#   that took them over would have to reimplement the base's validation, its
+#   workspace preparation and its refusals (R-1, R-3).
+# - A credential, a token, or a login file: the image must contain none (R-8).
+# - A pipe-to-shell installer, an unpinned tag, or a second CLI (R-2, R-5).
+# - `RUN --mount=…`, a heredoc, `COPY --link`, or a dependency on `TARGETARCH`:
+#   the layer must build with the legacy builder as well as BuildKit, so a
+#   deployment with only the former is not blocked by this package.
+#
+# ## Validation
+#
+# ```
+# docker build -f Containerfile -t <name>:<tag> .            # succeeds, legacy builder too
+# docker build --build-arg AGENT_HARNESS_ID=nope -f Containerfile .   # fails, naming "nope"
+# docker image inspect <name>:<tag> --format '{{.Config.User}} {{json .Config.Entrypoint}}'
+# ```
+#
+# The second command must fail: an enum that accepts anything is not an enum.
+# The third must show the base's account and the base's entrypoint — this layer
+# sets neither.

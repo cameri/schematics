@@ -1,0 +1,47 @@
+# codex-config.toml.schema
+#
+# Companion document for `codex-config.toml`, the Codex harness's configuration
+# template. The build substitutes the `@…@` placeholders and writes the result to
+# `<P-9 HARNESS_HOME>/config.toml`, which is the file this CLI reads (see
+# `modules/router-wiring.md`).
+#
+# ## Every key, and why it is here
+#
+# | Key | Parameter | Effect |
+# |---|---|---|
+# | `model` | `P-5` | The model the session uses — an alias from the router's set. |
+# | `model_provider` | — | Which provider block to use. The built-in `openai` provider is reserved and cannot be overridden, so pointing at the router is not the same as pointing at `openai` with a different URL. |
+# | `model_context_window` | `P-7` | The context window available to the active model. A **top-level** key, next to `model` — not a field inside the provider block, which is where a reader would expect it. |
+# | `model_providers.router.name` | — | A display name for the provider block. |
+# | `model_providers.router.base_url` | `P-3` | The router's API base URL. |
+# | `model_providers.router.env_key` | `P-4` | The **name** of the environment variable the credential arrives in. This is why the file names a credential without carrying one. |
+# | `model_providers.router.wire_api` | — | The protocol used to reach the provider. `responses` is the only supported value. |
+#
+# ## The condition this file places on the router
+#
+# Codex CLI speaks the Responses API. A router that serves chat completions alone
+# will accept this configuration and fail at the first request, so
+# `wire_api = "responses"` is a compatibility requirement on the endpoint
+# (the dependency's failure behaviour), not a tunable. Translating between the two
+# protocols is a second service, which this layer must not add (R-2).
+#
+# ## The field this CLI does not have
+#
+# There is no key for maximum output tokens. `P-8` is therefore unused for this
+# harness, and that gap is stated rather than filled with a plausible-looking key
+# that the CLI would ignore.
+#
+# ## What must not be in this file
+#
+# A credential value: `env_key` names the variable, and an inline bearer-token
+# field or a token pasted into `base_url` would put a credential in an image layer
+# (R-8). Nor a second provider block for a role the router serves (R-7).
+#
+# ## Validation
+#
+# ```
+# docker run --rm --entrypoint sh <image> -c 'cat "${CODEX_HOME}/config.toml"'
+# ```
+#
+# The file must parse as TOML (`@…@` left in place does not), carry no credential
+# value, and name exactly one provider.
