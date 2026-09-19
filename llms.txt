@@ -38,6 +38,7 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 
 - [create-schematic skill](https://schemaformat.ai/skills/schematics/skills/create-schematic/SKILL.md): interview-driven authoring and reverse-engineering of schematics from working implementations.
 - [build-schematic skill](https://schemaformat.ai/skills/schematics/skills/build-schematic/SKILL.md): fetch, validate, and stage a schematic package from any public GitHub repo (`<name>@<user>/<repo>`).
+- [audit-schematic skill](https://schemaformat.ai/skills/schematics/skills/audit-schematic/SKILL.md): audit a package against the format and against its own claims — every documented command run, every stated behaviour checked, findings by severity with the evidence quoted.
 - [Catalog source](https://schemaformat.ai/.agent-schematics/marketplace.json): machine-readable marketplace catalog listing every package (also consumed by Claude Code and omp as a plugin marketplace).
 - [Contributing](https://schemaformat.ai/CONTRIBUTING.md): contribution rules. Every PR must reference an open issue opened first; outside PRs without one are rejected automatically.
 
