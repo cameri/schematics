@@ -53,10 +53,24 @@
 # | `PARTS_ROOT` | — | a directory holding each part's package checkout, laid out as `<PARTS_ROOT>/<part-name>/` |
 # | `COMPOSE_FILES` | — | the compose files in merge order, glue last |
 #
-# Optional inputs: `ROUTER_HEALTH_URL` (default: `ROUTER_BASE_URL` with a
-# trailing `/v1` replaced by `/health/liveliness`), `ROUTER_CREDENTIAL_FILE` or
-# `ROUTER_CREDENTIAL` for reading `/models`, `BASE_ACCOUNT_UID`/`BASE_ACCOUNT_GID`
-# for the tree-ownership check, `BUILD_BASE=1`, `BUILDKIT=1`, `NO_CACHE=1`.
+# Optional inputs: `ROUTER_HEALTH_URL` (default: `ROUTER_BASE_URL` with
+# `/health/liveliness` appended — `P-8` is the router root, so nothing is
+# stripped), `ROUTER_CREDENTIAL_FILE` or `ROUTER_CREDENTIAL` for reading
+# `/v1/models` (`P-8` plus `/v1`, appended here exactly as the harness layer
+# appends it per arm), `HARNESS_HOME` (passed to the layer build when set; the
+# layer has the same default), `HARNESS_VERIFY_ENDPOINT=1` (passes the layer's
+# own `P-11` endpoint check through), `BASE_ACCOUNT_UID`/`BASE_ACCOUNT_GID` for
+# the tree-ownership check, `BUILD_BASE=1`, `BUILDKIT=1`, `NO_CACHE=1`.
+#
+# Two rules hold for the step labels and for the checks that follow them:
+#
+# - A label is printed BEFORE its step validates its input, so every expansion in
+#   a label uses the empty-default form (`${VAR:-not set}`). `${VAR}` there would
+#   abort the script under `set -u` with the shell's own message instead of the
+#   documented exit 2.
+# - `PARTS_ROOT` gates the three BUILD steps only. The router checks (6, 7) and
+#   the start step (9) have their own inputs and run without it, so a run with no
+#   part checkout is not a run in which every step skipped.
 #
 # Neither credential variable is ever printed, and no value read from them
 # appears in any command line this script echoes: the only thing printed about
@@ -71,10 +85,10 @@
 # | 3 store layout | checks each service's `.env.encrypted` and `<service>-keys.txt` exist | any of them is missing — the store part's phases create them, not this script | it only reads |
 # | 4 base image | accepts a published reference as-is, finds or builds a local one | a local base is absent and `BUILD_BASE` is not set | an existing image is accepted |
 # | 5 host image | builds it `FROM` the base reference | the part's Containerfile is missing, or the build fails | an existing image is accepted unless `NO_CACHE=1` |
-# | 6 router readiness | calls the router's health endpoint | the router does not answer — it must be up before step 7, because the harness build validates against it | a healthy router is accepted |
-# | 7 alias check | reads `GET <router>/models` with the credential and requires `ROUTER_ALIAS` to be in it | the alias is absent, or no credential was supplied to check with | it only reads |
-# | 8 harness layer | builds the layer with every alias and window argument | the build fails — an alias the router does not serve fails HERE, which is the edge this step exists for | an existing image is accepted unless `NO_CACHE=1` |
-# | 9 start the set | merges `COMPOSE_FILES` and runs `docker compose up -d` | a compose file is missing, or compose fails | compose converges an already-running set |
+# | 6 router readiness | calls the router's health endpoint | the router does not answer — it must be up before step 7, because step 7 is the gate the set's alias contract depends on | a healthy router is accepted |
+# | 7 alias check | reads `GET <router>/v1/models` with the credential and requires every id in `ROUTER_ALIAS`, `ROUTER_ALIAS_SET` and `ROUTER_FAST_ALIAS` to be in the answer | any of them is absent from the answer, or NO credential was supplied — a gate nobody can open is not a gate, so this refuses rather than skipping past the check the build and the start both follow | it only reads |
+# | 8 harness layer | builds the layer with every alias and window argument, `HARNESS_HOME` when set, and the layer's endpoint check when asked | the build fails — a missing argument or an unreachable endpoint fails HERE, and the refusal names which | an existing image is accepted unless `NO_CACHE=1` |
+# | 9 start the set | merges `COMPOSE_FILES` and runs `docker compose up -d` | a compose file is missing, or compose fails | compose converges an already-running set. Without `COMPOSE_FILES` the step skips and the run exits 3, because nothing was started |
 #
 # A refusal never blocks a later step silently: step 8 prints `skip` and says the
 # build would validate against a router that is not known good, rather than
@@ -98,3 +112,4 @@
 # | 0 | every step was satisfied or created; the set is up (or the dry run finished) |
 # | 1 | at least one step refused; the summary names how many, and each refusal names the input to fix |
 # | 2 | the invocation is wrong — a required variable is unset |
+# | 3 | the run completed with no refusal, but no step that starts anything ran (no `COMPOSE_FILES`): nothing was brought up, and the run says so instead of reporting success |
