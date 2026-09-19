@@ -81,7 +81,7 @@
   ].join("\n");
 
   // ─── Catalog rendering ─────────────────────────────────────
-  function renderCatalog(plugins) {
+  function renderCatalog(entries) {
     var host = document.getElementById("catalog-list");
     if (!host) return;
 
@@ -91,9 +91,8 @@
     // The main page shows ONLY featured schematics - the featured flag is
     // the curation mechanism that keeps the page from growing indefinitely.
     // Everything else stays in the catalog and on GitHub.
-    var schematics = (plugins || [])
+    var schematics = (entries || [])
       .filter(function (p) { return p.category !== "authoring" && p.featured; });
-    var pluginEntry = (plugins || []).find(function (p) { return p.category === "authoring"; });
 
     // Hero stat: schematic count (the authoring plugin is not a schematic)
     var statCount = document.getElementById("stat-count");
@@ -108,11 +107,23 @@
     schematics.forEach(function (plugin) {
       host.appendChild(renderCard(plugin, false));
     });
+
+    // Clear the plugin host here, so a catalog re-render stays idempotent even
+    // when the plugin marketplace is slow, absent or fails.
     var pluginHost = document.getElementById("plugin-list");
-    if (pluginHost) pluginHost.innerHTML = ""; // idempotent re-run
-    if (pluginHost && pluginEntry) {
-      pluginHost.appendChild(renderCard(pluginEntry, true));
-    }
+    if (pluginHost) pluginHost.innerHTML = "";
+  }
+
+  // The plugin section is filled separately, and later than the catalog: the
+  // authoring plugin lives in its own marketplace and the catalog must not
+  // wait on it. A request that never settles leaves this section empty, which
+  // is the honest degrade - it must not leave the schematics blank.
+  function renderPluginSection(pluginEntries) {
+    var pluginHost = document.getElementById("plugin-list");
+    if (!pluginHost) return;
+    pluginHost.innerHTML = ""; // idempotent: a late settle must not duplicate
+    var pluginEntry = (pluginEntries || []).find(function (p) { return p.category === "authoring"; });
+    if (pluginEntry) pluginHost.appendChild(renderCard(pluginEntry, true));
   }
 
   function renderCard(plugin, isAuthoring) {
@@ -173,6 +184,25 @@
 
   // ─── Init ──────────────────────────────────────────────────
   function init() {
+    // The catalog and the authoring plugin are two files since the split:
+    // .agent-schematics/marketplace.json holds the schematics, and
+    // .claude-plugin/marketplace.json holds the plugin that authors them.
+    // This page renders both, so it reads both - the plugin entry no longer
+    // travels inside the schematics array, and searching that array for it
+    // leaves the plugin section empty.
+    function fetchPluginEntries() {
+      return fetchText(RAW_BASE + ".claude-plugin/marketplace.json")
+        .then(function (json) {
+          return JSON.parse(json).plugins || [];
+        })
+        .catch(function (err) {
+          // The catalog is the page; the plugin card is a convenience. Report
+          // the failure and still render the schematics.
+          console.error("plugin marketplace load failed:", err);
+          return [];
+        });
+    }
+
     fetchText(RAW_BASE + ".agent-schematics/marketplace.json")
       .then(function (json) {
         var data;
@@ -181,7 +211,14 @@
         } catch (e) {
           throw new Error("marketplace.json is not valid JSON");
         }
-        renderCatalog(data.plugins);
+        // Draw the catalog now. The plugin marketplace is optional and must
+        // not gate it: awaiting it here is what left the whole page blank
+        // whenever that request stalled instead of failing.
+        renderCatalog(data.schematics);
+        return fetchPluginEntries();
+      })
+      .then(function (plugins) {
+        renderPluginSection(plugins);
       })
       .catch(function (err) {
         console.error("catalog load failed:", err);

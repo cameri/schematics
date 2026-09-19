@@ -27,9 +27,12 @@ No GitHub API token is required.
 
 1. **Catalog first.** Fetch
    `https://raw.githubusercontent.com/<user>/<repo>/HEAD/.agent-schematics/marketplace.json`.
-   If it parses, find the plugin entry whose `name` matches `<name>`. The
-   package directory is its `source` (strip any leading `./`), and the spec
-   file is `source` + `spec` (or `source/SCHEMATIC.md` if no `spec` field).
+   If it parses, find the entry under its `schematics` array whose `name`
+   matches `<name>`. The package directory is its `source` (strip any leading
+   `./`), and the spec file is `source` + `spec` (or `source/SCHEMATIC.md` if no
+   `spec` field). A repository's catalog lists schematics; if the file instead
+   carries a `plugins` array, it is a harness plugin marketplace and not a
+   catalog — fall through to conventional paths rather than reading it.
 2. **Conventional paths.** If there is no catalog or no matching entry, probe
    for `SCHEMATIC.md` under, in order:
    - `schematics/<name>/SCHEMATIC.md`

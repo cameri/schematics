@@ -131,19 +131,24 @@ Full details: [`skills/schematics/skills/create-schematic/references/schematic-p
 
 ## The catalog
 
-The `.agent-schematics/marketplace.json` file lists every package in this
-repository and doubles as a Claude Code / omp plugin marketplace. The website
-at [schemaformat.ai](https://schemaformat.ai) renders it live with one-click
-copy-as-Markdown for each entry.
+`.agent-schematics/marketplace.json` is this repository's catalog: it lists
+every schematic package, and nothing else. It is **not** a plugin marketplace —
+a schematic is a build specification anyone implements, not something a harness
+installs — and its format is its own, declared by the file's `$schema` and
+documented in
+[`schemas/catalog-1/marketplace.json.schema`](schemas/catalog-1/marketplace.json.schema).
+The website at [schemaformat.ai](https://schemaformat.ai) renders it live with
+one-click copy-as-Markdown for each entry.
 
-This repository holds **plugins**. Every plugin carries a schematic — the
-build specification for the capability it provides:
+This repository also ships one plugin — the authoring toolkit — registered
+separately in the Claude Code marketplace file
+[`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
 
-### Plugins in this repo
+### Packages in this repo
 
-| Plugin | Kind | What it provides |
-|--------|------|------------------|
-| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic`, `build-schematic` and `audit-schematic` skills: author, reverse-engineer, maintain, build schematics from any repo, and audit a package against the claims inside it |
+| Package | Kind | What it provides |
+|---------|------|------------------|
+| [`schematics`](skills/schematics/README.md) | plugin | The `create-schematic`, `build-schematic` and `audit-schematic` skills: author, reverse-engineer, maintain, build schematics from any repo, and audit a package against the claims inside it |
 | [`authorize-docker-requests`](schematics/authorize-docker-requests/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`authorize-docker-requests/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 | [`encrypt-container-secrets`](schematics/encrypt-container-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 | [`encrypt-shared-host-secrets`](schematics/encrypt-shared-host-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: one shared secret store on one host served to many unlike consumers — each consumer classified by whether it can run a decrypting command first, the wrappable ones given the value in memory, the one that cannot (the Compose CLI resolves interpolation before any container exists) served by a narrowed plaintext file and a fail-fast guard instead of a silent blank, per-consumer projections so a key unlocks only what its consumer reads, and rotation across every consumer without a rebuild. Composes `encrypt-container-secrets` |

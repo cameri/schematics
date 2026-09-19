@@ -33,6 +33,7 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 
 - [The ten binding principles](https://schemaformat.ai/#spec): vendor-agnostic, portable, self-contained, predictable, idempotent, parameterized, dependencies called out, composable, applicable context stated, pluggable.
 - [SCHEMATIC.md format schema](https://schemaformat.ai/schemas/spec-1/SCHEMATIC.md.schema): the format's own self-describing schema, kept once for the whole catalog and keyed by the `spec:` frontmatter field. Uncommon file types in a package always ship with a `<name>.<ext>.schema` companion documenting their syntax.
+- [Catalog format schema](https://schemaformat.ai/schemas/catalog-1/marketplace.json.schema): the format of the repository's `.agent-schematics/marketplace.json`, keyed by that file's own `$schema` value. It lists schematic packages and is not a plugin marketplace; a repository's plugin marketplace is a separate file in the harness's format.
 - [Schematic skeleton](https://schemaformat.ai/index.html): the canonical SCHEMATIC.md skeleton (frontmatter, Applicable Context, Requirements R-n, Dependencies D-n, Parameters P-n, Modules, Implementation phases, Acceptance A-n, Removal).
 
 ## Authoring and tooling
@@ -40,7 +41,7 @@ Build a schematic from any public GitHub repo with the `schematics` plugin's bui
 - [create-schematic skill](https://schemaformat.ai/skills/schematics/skills/create-schematic/SKILL.md): interview-driven authoring and reverse-engineering of schematics from working implementations.
 - [build-schematic skill](https://schemaformat.ai/skills/schematics/skills/build-schematic/SKILL.md): fetch, validate, and stage a schematic package from any public GitHub repo (`<name>@<user>/<repo>`).
 - [audit-schematic skill](https://schemaformat.ai/skills/schematics/skills/audit-schematic/SKILL.md): audit a package against the format and against its own claims — every documented command run, every stated behaviour checked, findings by severity with the evidence quoted.
-- [Catalog source](https://schemaformat.ai/.agent-schematics/marketplace.json): machine-readable marketplace catalog listing every package (also consumed by Claude Code and omp as a plugin marketplace).
+- [Catalog source](https://schemaformat.ai/.agent-schematics/marketplace.json): machine-readable catalog listing every schematic package in this repository. It is not a plugin marketplace; the authoring plugin is registered in the repository's `.claude-plugin/marketplace.json`.
 - [Contributing](https://schemaformat.ai/CONTRIBUTING.md): contribution rules. Every PR must reference an open issue opened first; outside PRs without one are rejected automatically.
 
 ## Schematics vs skills and plugins
