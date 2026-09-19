@@ -537,6 +537,8 @@ Steps:
 Verify:
 ```bash
 sops --decrypt --input-type dotenv --output-type dotenv "${STORE_FILE}" >/dev/null && echo store-ok
+# P-3 PROJECTION_PATTERN with its <consumer> slot filled for one consumer
+PROJECTION_FILE="${SECRETS_DIR}/<consumer>.env.encrypted"
 grep -o 'age1[a-z0-9]*' "${PROJECTION_FILE}" | sort -u     # exactly two: master and that consumer
 ```
 
@@ -672,7 +674,9 @@ real migration.
   else. With a canary key in the store that the consumer does not read:
   ```bash
   sops --decrypt --input-type dotenv --output-type dotenv "${PROJECTION_FILE}" \
-    | grep -c '<canary-key>'      # 0
+    | grep -c '<canary-key>'      # 0, with PROJECTION_FILE set to that consumer's
+                                  # file (P-3 with its <consumer> slot filled, as
+                                  # in Phase 4's verify)
   SOPS_AGE_KEY_FILE="<consumer-key>" sops --decrypt --input-type dotenv --output-type dotenv "${STORE_FILE}" \
     >/dev/null                    # non-zero: the consumer key is not a recipient of the store
   ```
