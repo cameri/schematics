@@ -43,7 +43,7 @@ Plain OpenAI-compatible HTTP. A client needs exactly three facts:
 
 | Fact | Value |
 |---|---|
-| Base URL | `P-13` (the router's `/v1`) |
+| Base URL | `P-13` for a client that appends only a resource (`/chat/completions`, `/models`); the **root** (`http://<service>:<port>`) for a client whose own path begins with `/v1` (`/v1/messages`, `/v1/responses`). Both address the same server; a `/v1`-appending client given `P-13` requests `/v1/v1/…` and gets a 404 |
 | Credential | the router's own credential (`P-7`'s value), presented as `Authorization: Bearer <credential>` on every request |
 | Model id | an alias from `P-10`, sent as the `model` field |
 
