@@ -26,3 +26,10 @@ jobs:
           # empty there, so the rule skips itself.
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/validate-catalog.sh
+      - name: Render the catalog page against both catalogues
+        # The catalogue is data the page reads at runtime, so nothing in the
+        # validator above would notice a page that stops following it: the site
+        # fails soft and shows "No schematics published yet." rather than
+        # erroring. This renders the real page and counts the cards a reader
+        # sees, on both hosts, including when the optional plugin fetch stalls.
+        run: node scripts/check-site-render.js
