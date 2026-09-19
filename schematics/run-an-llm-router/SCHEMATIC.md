@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-an-llm-router
-version: 0.1.0
+version: 0.2.0
 status: draft
 spec: 1
 description: A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.
 created: 2026-09-14
-updated: 2026-09-14
+updated: 2026-09-19
 ---
 
 # Schematic: Run an LLM Router
@@ -335,10 +335,53 @@ Every environment-specific value. Referenced by name from prose and code.
 |--------|------|------|---------|
 | `GET` | `/v1/models` | bearer | Returns exactly the `P-10` alias set; a client that discovers models here can treat every id as usable |
 | `POST` | `/v1/chat/completions` | bearer | OpenAI-compatible chat completion; `model` is an alias from `P-10` |
+| `POST` | `/v1/completions` | bearer | The legacy OpenAI completion route, same alias rule |
+| `POST` | `/v1/embeddings` | bearer | Embeddings, same alias rule; the alias must be bound to a provider that serves embeddings |
+| `POST` | `/v1/messages` | bearer | **Anthropic Messages** shape — the route a Claude Code client appends to its base URL. Same alias rule, Anthropic request and response shape |
+| `POST` | `/v1/responses` | bearer | **OpenAI Responses** shape — the route a Codex CLI lands on, since Codex appends only `/responses` to a base ending in `/v1`. Same alias rule |
+| `POST` | `/v1/rerank` | bearer | Reranking, same alias rule |
+| `POST` | `/v1/moderations` | bearer | Moderation, same alias rule |
+| `POST` | `/v1/images/generations` | bearer | Image generation, same alias rule |
+| `POST` | `/v1/batches` | bearer | Batch submission, same alias rule |
 | `GET` | `/health/liveliness` | none | Liveness for orchestration (R-7). The reference implementation's path; a different router exposes its own, and `P-2` is what stays fixed |
+| `GET` | `/health/readiness` | none | Readiness: the proxy is up and its backing store is connected. The reference answers `{"status":"healthy","db":"connected"}` |
+
+A router that serves a narrower surface is still conformant — the table is the
+reference implementation's, and R-1 and R-11 are what every router must meet —
+but a deployment that wires a coding-agent CLI to it needs the two protocol rows
+above, and they are exactly the rows an OpenAI-only build can silently lack.
+A-14 is written as that floor rather than as this table: it fails on the routes a
+deployment's clients need and reports the rest, and the two protocol rows are the
+ones an OpenAI-only build can silently lack.
 
 - Authentication is `Authorization: Bearer <router credential>` on every
-  `/v1` request; a missing or wrong credential is `401` *(observed)*.
+  `/v1` request; a missing or wrong credential is `401` *(observed; the reference
+  answers `401` and `scripts/router-verify.sh` accepts `401` or `403`, because a
+  router that rejects an unauthenticated request with `403` has registered the
+  route just as plainly)*.
+- **What a `401` proves, and how this table was measured (2026-09-19):** against
+  the reference deployment, every `/v1` row above answers `401` with no
+  credential, the two `/health` rows answer `200`, and a path the router does
+  not serve answers `404 {"detail":"Not Found"}`. The `404` is the control that
+  makes the others evidence: an unregistered path is distinguishable from a
+  registered one, so an unauthenticated probe establishes that a route is
+  registered rather than that a blanket gate rejected the request — which is how
+  this table was established rather than copied from the router's documentation.
+- **A client's base URL is `P-13`, or the router root, decided by the path that
+  client appends — not by which protocol it speaks.** `P-13` ends in `/v1`. A
+  client that appends a bare resource MUST be given `P-13`: the OpenAI family
+  (`/chat/completions`, `/models`) and the Codex CLI, which appends `/responses`
+  and therefore takes the base that already ends in `/v1`. A client whose own
+  appended path already begins with `/v1` MUST be given the **root**
+  (`http://<service>:<port>`) — Claude Code, which appends `/v1/messages`; given
+  `P-13` it requests `/v1/v1/messages` and gets a 404. Both forms address the
+  same server; the only difference is where the client stops. This is the one
+  contract detail that has already cost a downstream package a broken build, so
+  a client-wiring step reads the suffix the client appends before it writes the
+  base URL.
+- Whether an alias can *answer* a route is a second question: the alias is bound
+  to one provider (R-3), and a provider that does not serve the operation
+  returns its own error rather than another provider's success.
 - A model id that is not in the alias set is a client error, not a
   passthrough: `400` from the router *(observed)*.
 - A provider-side failure is returned as an error naming the provider's
@@ -535,7 +578,7 @@ Verify: the specific checks named above pass.
 
 One test per requirement minimum. All of them are runnable by the implementer
 after the phases. `scripts/router-verify.sh` implements A-1, A-2, A-3, A-4's
-negative, A-6, and the R-9 check mechanically:
+negative, A-6, A-14, and the R-9 check mechanically:
 
 ```
 ROUTER_BASE_URL=<P-13> ROUTER_API_KEY_FILE=<file with the P-7 credential> \
@@ -600,6 +643,24 @@ scripts/router-verify.sh
 - **A-13** (covers any `schematic` dependency): the `D-3` link resolves at its
   pinned commit and the file's SHA-256 matches the recorded value. expected:
   `curl <raw-url-at-commit> | sha256sum` equals the recorded digest.
+- **A-14** (covers R-1, R-11): the route table is registered, checked as the
+  conformance FLOOR rather than as the reference's whole surface — a router that
+  serves a narrower surface is still conformant, so only the routes a
+  deployment's clients actually need may fail. An unauthenticated request to
+  each `/v1` row answers `401`, the two `/health` rows answer `200`, and a path
+  the router does not serve answers `404` — measured against the reference
+  deployment on 2026-09-19: ten `/v1` routes `401` (one `GET`, nine `POST`), two
+  `/health` routes `200`, `/v1/bogus-route-xyz` `404`, so the answers are
+  distinguishable and a `401` is evidence of registration.
+  `scripts/router-verify.sh` runs this row mechanically. expected:
+  `/v1/models`, `/v1/chat/completions`, and the protocol route of every client
+  family the run declares in its `CLIENT_ARMS` input (default `claude,codex`;
+  `/v1/messages` for a Claude-family client, `/v1/responses` for a Codex-family
+  one) answer `401`, and an unknown path answers `404`. So a router built for
+  one protocol FAILS for the family it does not serve — the failure this row
+  exists to catch — while a router that serves that family and omits the rest of
+  the table is reported, not failed. The `404` control is probed with `GET` as
+  well as `POST`, so method-specific `404` handling cannot carry it.
 
 ## Failure Modes and Rollback
 

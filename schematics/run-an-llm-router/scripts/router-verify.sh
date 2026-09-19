@@ -27,6 +27,14 @@
 #   STORE_PATH           path, inside that container, of the mounted key store
 #                        (default: /run/secrets/router-secrets.env)
 #   SKIP_COMPLETIONS     set to 1 to skip every token-spending check
+#   CLIENT_ARMS          comma-separated coding-agent client families this
+#                        deployment wires, from: claude, codex
+#                        (default: claude,codex — the reference deployment's)
+#                        A-14 asserts the conformance floor only: the two routes
+#                        every router must serve, plus the protocol route of each
+#                        family named here. Every other row of the reference
+#                        table is probed and REPORTED, never failed, because a
+#                        router that serves a narrower surface is conformant
 #   TIMEOUT              per-request timeout in seconds (default: 30)
 #
 # Exit status: 0 when every executed check passed; 1 when any failed; 2 on a
@@ -40,6 +48,7 @@ STORE_PATH="${STORE_PATH:-/run/secrets/router-secrets.env}"
 EXPECTED_ALIASES="${EXPECTED_ALIASES:-}"
 ALIASES="${ALIASES:-}"
 SKIP_COMPLETIONS="${SKIP_COMPLETIONS:-0}"
+CLIENT_ARMS="${CLIENT_ARMS:-claude,codex}"
 TIMEOUT="${TIMEOUT:-30}"
 
 if [ -n "${ROUTER_API_KEY_FILE:-}" ]; then
@@ -59,7 +68,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 export ROUTER_BASE_URL HEALTH_PATH ROUTER_CONTAINER STORE_PATH EXPECTED_ALIASES \
-       ALIASES SKIP_COMPLETIONS TIMEOUT ROUTER_API_KEY
+       ALIASES SKIP_COMPLETIONS CLIENT_ARMS TIMEOUT ROUTER_API_KEY
 
 python3 - <<'PY'
 import json, os, shlex, subprocess, sys, urllib.error, urllib.request
@@ -74,6 +83,7 @@ SUBSET = [a.strip() for a in os.environ["ALIASES"].split(",") if a.strip()]
 CONTAINER = os.environ["ROUTER_CONTAINER"]
 STORE_PATH = os.environ["STORE_PATH"]
 SKIP_COMPLETIONS = os.environ["SKIP_COMPLETIONS"] == "1"
+CLIENT_ARMS = [a.strip() for a in os.environ["CLIENT_ARMS"].split(",") if a.strip()]
 
 results = []
 def check(name, ok, detail="", skip=False):
@@ -216,6 +226,95 @@ else:
                   f"could not inspect the store: {p.stderr.decode('utf-8', 'replace').strip()[:160]}")
     except Exception as e:
         check("A-6 mounted key store holds no plaintext", False, f"docker exec failed: {e}"[:160])
+
+# --- A-14: the conformance floor is registered (R-1, R-11) -------------------
+# An unregistered path answers 404 while a registered one answers 401 without a
+# credential, so one unauthenticated request per row separates "the route
+# exists" from "this deployment lacks it". This is the failure a router built
+# for a single protocol has: invisible to every provider-side check, and the
+# reason this row is worth running on its own. Costs no tokens.
+#
+# What this row ASSERTS is the conformance floor, not the reference
+# implementation's whole surface. The table under Interfaces and Contracts is
+# the reference router's, and the spec says a router that serves a narrower
+# surface is still conformant — so only the routes the deployment's clients
+# actually need can fail here: /v1/models and /v1/chat/completions, which every
+# router must serve, plus the protocol route of each client family this
+# deployment declares in CLIENT_ARMS (A-10 is the row that wires them). Every
+# other row of the table is probed and REPORTED — a route this router does not
+# serve is information about it, not a defect. A row added to the table and not
+# to OPTIONAL below is simply unprobed, so keep the two in step.
+FLOOR = [
+    ("GET", "/v1/models"),
+    ("POST", "/v1/chat/completions"),
+]
+# The client families A-10 can wire, each with the protocol route it needs.
+FAMILIES = {
+    "claude": ("POST", "/v1/messages"),
+    "codex": ("POST", "/v1/responses"),
+}
+# The rest of the reference table (SCHEMATIC.md § Interfaces and Contracts):
+# probed, reported, never failed.
+OPTIONAL = [
+    ("POST", "/v1/completions"),
+    ("POST", "/v1/embeddings"),
+    ("POST", "/v1/rerank"),
+    ("POST", "/v1/moderations"),
+    ("POST", "/v1/images/generations"),
+    ("POST", "/v1/batches"),
+]
+CONTROL = "/v1/bogus-route-xyz"
+
+# The control, in both methods: a router whose 404 handling is method-sensitive
+# could answer the POST control without being unregistered in general, and then
+# the 401s below would prove nothing. Two requests, no tokens.
+for control_method in ("POST", "GET"):
+    control_status, _ = request(CONTROL, method=control_method, key=None, base=ORIGIN)
+    check(f"A-14 unserved path answers 404 (the control, {control_method})",
+          control_status == 404,
+          f"HTTP {control_status} {control_method} {ORIGIN}{CONTROL}"
+          + ("" if control_status == 404 else " — without a 404 here the 401s prove nothing"))
+
+unknown = [a for a in CLIENT_ARMS if a not in FAMILIES]
+if unknown:
+    check("A-14 CLIENT_ARMS names only client families this row knows", False,
+          f"unknown: {', '.join(unknown)} (known: {', '.join(sorted(FAMILIES))})")
+
+REQUIRED = list(FLOOR) + [FAMILIES[a] for a in CLIENT_ARMS if a in FAMILIES]
+REQUIRED_PATHS = {path for _, path in REQUIRED}
+
+registered = {}
+for method, path in REQUIRED + OPTIONAL:
+    status, _ = request(path, method=method, key=None, base=ORIGIN)
+    registered[path] = status in (401, 403)
+    if path not in REQUIRED_PATHS:
+        continue
+    detail = f"HTTP {status} {method} {ORIGIN}{path}"
+    if status == 404:
+        detail += " — 404: this deployment's clients need this route"
+    elif not registered[path]:
+        detail += " — expected 401 (or 403) with no credential"
+    check(f"A-14 {method} {path} is registered", registered[path], detail)
+
+# The protocol route of each wired family is the one a single-protocol build
+# silently lacks, so each gets its own named result rather than being folded
+# into the list above.
+for arm in CLIENT_ARMS:
+    if arm not in FAMILIES:
+        continue
+    arm_method, arm_path = FAMILIES[arm]
+    check(f"A-14 {arm_path} serves the {arm}-family client wired in A-10",
+          registered.get(arm_path, False),
+          "" if registered.get(arm_path) else "route not registered: that client cannot reach the router")
+
+narrower = [f"{m} {p}" for m, p in OPTIONAL if not registered.get(p)]
+if narrower:
+    print("      A-14 note: not served here — " + ", ".join(narrower)
+          + " (optional: the reference table lists them, and a narrower router is conformant)")
+
+for path in (HEALTH, "/health/readiness"):
+    status, _ = request(path, base=ORIGIN, key=None)
+    check(f"A-14 {path} answers 200 with no credential", status == 200, f"HTTP {status} {ORIGIN}{path}")
 
 # --- Summary -----------------------------------------------------------------
 failed = [n for n, s, _ in results if s == "FAIL"]
