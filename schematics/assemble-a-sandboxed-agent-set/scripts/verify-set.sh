@@ -733,8 +733,16 @@ if [ "${ALLOW_CONTAINER_PROBE:-0}" != "1" ]; then
 elif ! command -v docker >/dev/null 2>&1; then
     skip "A-14 docker is not available"
 else
+    # The container runs the composition's own boot command — `sops exec-env
+    # <file> <program>` — with a key file that does not exist, which is the
+    # failure a deployment hits when the key material never arrived. Stated limit:
+    # this exercises the wrapper and sops, not the deployment's encrypted file,
+    # which needs the real key.
     PROBE_CID="$(docker create --label org.testcontainers=true --name "agent-set-verify-probe-$$" \
-        -e SOPS_AGE_KEY_FILE="/run/secrets/age-keys-missing" "$HARNESS_IMAGE" 2>&1)"
+        --entrypoint sh \
+        -e SOPS_AGE_KEY_FILE="/run/secrets/agent-set-verify-missing-key" \
+        "$HARNESS_IMAGE" \
+        -c 'exec sops exec-env /run/secrets/agent-set-verify-missing.env /usr/local/bin/agent-host-boot' 2>&1)"
     if denied "$PROBE_CID" || [ -z "$PROBE_CID" ]; then
         PROBE_CID=""
         skip "A-14 this host refused to create the probe container"
@@ -749,8 +757,11 @@ else
             esac
             i=$((i + 1)); sleep 1
         done
-        docker rm -f "$PROBE_CID" >/dev/null 2>&1; PROBE_CID=""
+        # The log has to be read while the container still exists: removing it
+        # first left `docker logs` with nothing to read, so a genuine failure was
+        # downgraded to a skip.
         logs="$(docker logs "$PROBE_CID" 2>/dev/null | tail -5)"
+        docker rm -f "$PROBE_CID" >/dev/null 2>&1; PROBE_CID=""
         if [ -z "$rc" ]; then
             fail "A-14 a container started without its key material kept running; the store's failure is not loud"
         elif [ "$rc" = "0" ]; then
