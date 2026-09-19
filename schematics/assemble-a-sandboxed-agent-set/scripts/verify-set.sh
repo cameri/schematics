@@ -805,13 +805,26 @@ else
     if [ -n "${COMPOSE_FILES:-}" ] && command -v docker >/dev/null 2>&1; then
         args=""
         for f in $COMPOSE_FILES; do args="$args -f $f"; done
-        docker compose $args down >/dev/null 2>&1
+        down_out="$(docker compose $args down 2>&1)"; down_rc=$?
+        [ "$down_rc" -eq 0 ] || printf 'note: A-16 `docker compose down` exited %s: %s\n' "$down_rc" "$(printf '%s' "$down_out" | tail -1 | cut -c1-90)"
+        # The network removal's own status is part of the row: a refusal here means
+        # the network survived the teardown, which the previous version of this row
+        # reported as removed because it never looked.
+        rm_out="$(docker network rm "$AGENT_SET_NETWORK" 2>&1)"; rm_rc=$?
+        if docker network inspect "$AGENT_SET_NETWORK" >/dev/null 2>&1; then
+            fail "A-16 the network $AGENT_SET_NETWORK still exists after teardown (docker network rm exited $rm_rc: $(printf '%s' "$rm_out" | tail -1 | cut -c1-80))"
+        else
+            pass "A-16 the network $AGENT_SET_NETWORK is gone (docker network rm exited $rm_rc)"
+        fi
+        # -a, and the proxy included: a stopped leftover is still a container the
+        # teardown failed to detach, and the proxy is a service of the set.
+        left="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__}|${PROXY_CONTAINER:-__none__})$" || true)"
+        [ -z "$left" ] \
+            && pass "A-16 no container of the set remains, running or stopped (host${ROUTER_CONTAINER:+, router}${PROXY_CONTAINER:+, proxy})" \
+            || fail "A-16 containers still present after teardown: $left"
+    else
+        skip "A-16 no COMPOSE_FILES supplied, so this row cannot detach the composition; the tree and part checks below still run"
     fi
-    docker network rm "$AGENT_SET_NETWORK" >/dev/null 2>&1
-    left="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__})$" || true)"
-    [ -z "$left" ] \
-        && pass "A-16 the set's containers are gone and the network is removed" \
-        || fail "A-16 containers still running after teardown: $left"
     tree_ok=1
     [ -d "$AGENT_TREE_DIR" ] || tree_ok=0
     [ "$tree_ok" = "1" ] \
