@@ -1,5 +1,0 @@
-DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
-            BuildKit is currently disabled; enable it by removing the DOCKER_BUILDKIT=0
-            environment-variable.
-
-sha256:0e25191da3b14547f614cdd40a0b3c8f95db80f6db1ab98ea4e425fc230573bb
