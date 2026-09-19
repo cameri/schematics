@@ -503,13 +503,22 @@ reported as a pass.
   this host can run it, exits 0; where it cannot, the script prints `SKIP` and
   the reason. expected: no part is assembled before it is verified, and the
   skipped ones are named.
-- **A-4** (covers R-1): building the harness layer with the router stopped fails,
-  and the failure names the alias check or the unreachable endpoint. expected:
-  the ordering edge is enforced by the part's build, not only by this document.
-- **A-5** (covers R-4, R-6): `docker inspect` on every container in the set
-  reports no published port, no `Privileged`, no added `CapAdd`, no `Devices`,
-  and no bind from `/var/run/docker.sock`. expected: nothing published,
-  nothing privileged, no socket.
+- **A-4** (covers R-1): building the harness layer with its endpoint check
+  pointed at an address nothing answers at fails with the layer's own refusal
+  code (`78`) and a line naming the parameter — the row supplies every argument
+  the build requires for the chosen arm, so a build that failed on a missing
+  argument FAILS this row instead of satisfying it. expected: the ordering edge
+  is enforced by the part's build when the deployment asks for it (part 3's
+  `P-11`), and by this composition's own gate (`A-11`, Phase 3 step 3) either
+  way. Stated limit: the build check proves reachability, not alias membership —
+  a credential cannot be a build argument (part 3's `R-8`).
+- **A-5** (covers R-4, R-6): `docker inspect` on every container in the set —
+  the proxy included, when `PROXY_CONTAINER` is supplied — reports no published
+  port, no `Privileged`, no added `CapAdd`, no `Devices`, and no bind from
+  `/var/run/docker.sock`, with exactly one exception: the proxy's own socket
+  mount, which must be the only one and read-only. expected: nothing published,
+  nothing privileged, and the socket in the one container whose job it is, under
+  the mode the Docker-access part requires.
 - **A-6** (covers R-6): the same inspect output lists exactly one read-write
   host path (the agent tree, equal to `AGENT_TREE_DIR`) plus read-only or secret
   mounts. expected: one stateful path.
@@ -517,8 +526,14 @@ reported as a pass.
   base's account and is not `root` (`docker inspect … '{{.Config.User}}'` and
   the process's own `id -u`). expected: non-root everywhere.
 - **A-8** (covers R-7): the harness image reports `AGENT_HARNESS` set, no
-  `ENTRYPOINT`, no `CMD`, and contains no credential-shaped file (no `.env`, no
-  key material, no token). expected: one CLI, no credential in the artifact.
+  `ENTRYPOINT`, no `CMD`, its history carries no credential-shaped value, and a
+  scan run inside a container made from the image finds no credential-shaped
+  file or value in the harness configuration directory or the account's homes.
+  expected: one CLI, no credential in the artifact. Stated limit: the filesystem
+  scan sees the final image, so a value written in one layer and deleted in a
+  later one is absent from it while remaining in the earlier layer's tar — the
+  history scan is what covers that case, and neither sees a value assembled at
+  build time and never written.
 - **A-9** (covers R-7): an agent pane, started through the host's own boot
   program, has the harness CLI as its process. expected: the pane runs that CLI
   and not a shell wrapper — the harness is what the pane's process tree contains.
@@ -539,9 +554,14 @@ reported as a pass.
   that names the router, not a silent fallback.
 - **A-13** (covers R-4): from inside the host container,
   `DOCKER_HOST="$DOCKER_PROXY_URL" docker version` answers, a denied verb is
-  refused by policy, and the socket path is absent from the container's
-  filesystem. expected: Docker works through the proxy, and the socket is not
-  reachable from where the agent runs.
+  refused by policy in terms that name the proxy's own decision (any other
+  daemon error SKIPs — it is not evidence of a refusal), and the socket path is
+  absent from the container's filesystem. With `PROXY_CONTAINER` supplied it
+  also checks the network contract: every network the proxy is attached to
+  reports `internal=true`, and the router container cannot resolve the proxy by
+  name while the host container can. expected: Docker works through the proxy,
+  the socket is not reachable from where the agent runs, and the proxy is not
+  exposed to the rest of the set.
 - **A-14** (covers R-8): a container started without its key material exits
   non-zero, and its own output names the credential path — not some unrelated
   startup failure. expected: the credential path fails loudly and identifiably.
@@ -549,8 +569,10 @@ reported as a pass.
   Phase 3's verification, because it needs the store prepared to be meaningful.
   **If the probe cannot be created on this host, or the failure does not name
   the credential path:** `SKIP` with that reason — an unrelated failure is not
-  evidence about the store. The probe runs the harness image with a key path
-  that does not exist; it needs no store of its own.
+  evidence about the store. The probe runs the composition's own boot command —
+  `sops exec-env <file> <program>` — inside the harness image, with a key path
+  that does not exist; it needs no store of its own, and its log is read while
+  the container still exists so a genuine failure cannot be lost.
 - **A-15** (covers R-9, R-11): one real completion through the alias returns
   200, made from inside the agent pane with the router credential. expected: a
   real answer, not a simulated one. Stated limit: the request is issued the way
@@ -559,10 +581,12 @@ reported as a pass.
   checked by `A-9` and `A-10`. **If no real provider credential exists:** `SKIP`
   with that reason — this row is never asserted, and the alias path is still
   proven by `A-11`.
-- **A-16** (covers R-13): after `docker compose down` and removal of the glue
-  file and the network, every part's own acceptance script still runs against
-  its images, and the agent tree directory is untouched. expected: removal
-  detaches the composition and changes no part.
+- **A-16** (covers R-13): after `docker compose down`, the network is gone
+  (its removal is verified, not merely attempted), no container of the set
+  remains — running or stopped, the proxy included — and every part's own
+  acceptance script still runs against its images while the agent tree
+  directory is untouched. expected: removal detaches the composition and changes
+  no part.
 
 ## Failure Modes and Rollback
 
