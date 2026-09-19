@@ -23,7 +23,12 @@
 #                        enough
 #   HEALTH_PATH          health endpoint path (default: /health/liveliness)
 #   ROUTER_CONTAINER     container name; when set, adds the at-rest check that
-#                        the mounted key store carries no plaintext (A-6)
+#                        the mounted key store carries no plaintext (A-6) and the
+#                        account check (A-15: not root, and every process running
+#                        as the account the container states). Run this on the
+#                        host that runs the container: A-15 resolves the names
+#                        `docker top` prints against this host's passwd, which is
+#                        the database ps read them from.
 #   STORE_PATH           path, inside that container, of the mounted key store
 #                        (default: /run/secrets/router-secrets.env)
 #   SKIP_COMPLETIONS     set to 1 to skip every token-spending check
@@ -73,6 +78,30 @@ export ROUTER_BASE_URL HEALTH_PATH ROUTER_CONTAINER STORE_PATH EXPECTED_ALIASES 
 python3 - <<'PY'
 import json, os, shlex, subprocess, sys, urllib.error, urllib.request
 
+results = []
+def check(name, ok, detail="", skip=False):
+    results.append((name, "SKIP" if skip else ("PASS" if ok else "FAIL"), detail))
+    print(f"{'SKIP' if skip else ('PASS' if ok else 'FAIL')}  {name}" + (f" — {detail}" if detail else ""))
+
+def runner_error(exc_type, exc, tb):
+    """An error in this script still prints the checks that ran, and exits 2.
+
+    The rows are the deliverable and the summary is how a caller reads them, so
+    the one outcome that must never happen is a traceback where the verdicts
+    should be. The traceback follows the summary, not instead of it.
+    """
+    import traceback
+    print()
+    print(f"RUNNER ERROR  {exc_type.__name__}: {exc} — the rows above are every check that ran; "
+          f"this is a defect in the script, not a verdict on the router")
+    failed = [n for n, state, _ in results if state == "FAIL"]
+    skipped = [n for n, state, _ in results if state == "SKIP"]
+    print(f"{len(results) - len(failed) - len(skipped)} passed, {len(failed)} failed, {len(skipped)} skipped")
+    traceback.print_exception(exc_type, exc, tb)
+    sys.exit(2)
+
+sys.excepthook = runner_error
+
 BASE = os.environ["ROUTER_BASE_URL"].rstrip("/")
 ORIGIN = BASE[:-3] if BASE.endswith("/v1") else BASE
 KEY = os.environ["ROUTER_API_KEY"]
@@ -85,10 +114,6 @@ STORE_PATH = os.environ["STORE_PATH"]
 SKIP_COMPLETIONS = os.environ["SKIP_COMPLETIONS"] == "1"
 CLIENT_ARMS = [a.strip() for a in os.environ["CLIENT_ARMS"].split(",") if a.strip()]
 
-results = []
-def check(name, ok, detail="", skip=False):
-    results.append((name, "SKIP" if skip else ("PASS" if ok else "FAIL"), detail))
-    print(f"{'SKIP' if skip else ('PASS' if ok else 'FAIL')}  {name}" + (f" — {detail}" if detail else ""))
 
 def request(path, method="GET", body=None, key=KEY, base=None):
     """Returns (status, parsed-or-text). Never raises on an HTTP error status."""
@@ -172,7 +197,11 @@ else:
 # --- R-3: an unconfigured model id is an error, not a passthrough ------------
 status, payload = request("/chat/completions", method="POST",
                           body=dict(COMPLETION, model="router-verify-nonexistent-model"))
-detail = payload if isinstance(payload, str) else json.dumps(payload.get("error", payload))[:160]
+# A body is whatever the router answered with, including a JSON array or a bare
+# string, so the shape is tested rather than assumed: `payload.get` on a list is
+# the same defect as a name a failed command never set.
+error = payload.get("error", payload) if isinstance(payload, dict) else payload
+detail = (payload if isinstance(payload, str) else json.dumps(error))[:200]
 check("R-3 unconfigured model id is refused", 400 <= status < 500, f"HTTP {status} {detail}")
 
 # --- R-9: unsupported parameters are dropped, not rejected ------------------
@@ -212,20 +241,140 @@ else:
     try:
         # The credential is fed on stdin, never in argv: it cannot be read out
         # of a process list on the operator host or inside the container.
+        #
+        # The verdict is text, and it is derived from the status of the command
+        # under test and nothing else. grep gives meaning to exactly two of
+        # them — 0 found, 1 not found — so every other status (a path that does
+        # not exist or is a directory, an unreadable file, docker's own
+        # failure) is "could not inspect", never "clean". A verdict taken from
+        # another command's failure is how this check reported ciphertext for a
+        # container that had already been removed (measured 2026-09-19), and
+        # the same shape reads "clean" for a store path that is missing or a
+        # directory.
         p = subprocess.run(
             ["docker", "exec", "-i", CONTAINER, "sh", "-c",
-             "grep -qF -f - " + shlex.quote(STORE_PATH)],
+             'grep -qF -f - "$1"; status=$?; case $status in '
+             '0) echo A6-FOUND;; 1) echo A6-CLEAN;; *) echo "A6-ERROR status=$status";; esac',
+             "_", STORE_PATH],
             input=KEY.encode(), capture_output=True, timeout=TIMEOUT)
-        if p.returncode == 0:
+        verdict = p.stdout.decode("utf-8", "replace").strip()
+        if verdict == "A6-FOUND":
             check("A-6 mounted key store holds no plaintext", False,
                   "the decrypted credential appears in the mounted store file")
-        elif p.returncode == 1:
+        elif verdict == "A6-CLEAN":
             check("A-6 mounted key store holds no plaintext", True, "ciphertext only")
         else:
             check("A-6 mounted key store holds no plaintext", False,
-                  f"could not inspect the store: {p.stderr.decode('utf-8', 'replace').strip()[:160]}")
+                  f"could not inspect the store: "
+                  f"{(p.stderr.decode('utf-8', 'replace').strip() or f'exit {p.returncode}')[:160]}")
     except Exception as e:
         check("A-6 mounted key store holds no plaintext", False, f"docker exec failed: {e}"[:160])
+
+# --- A-15: the container does not run as root (R-12) -------------------------
+# Two readings, because either alone is silenceable. `Config.User` is what the
+# deployment ASKED for (the image's USER, unless a `user:` overrode it); the uid
+# column of `docker top` is what the processes GOT. A deployment can pass the
+# first and fail the second, and a root container passes every other row in this
+# script — including A-1 and A-2 — so nothing else here would notice. Both need
+# only `docker inspect`/`docker top`, so this row runs without `docker exec`.
+#
+# The readability half of R-12 needs no third check: the router read the mounted
+# config and key store to get this far, so a healthy container has already
+# proven that account can read them.
+if not CONTAINER:
+    check("A-15 container account is stated and is not root", False,
+          "skipped: set ROUTER_CONTAINER", skip=True)
+    check("A-15 every process runs as that account", False,
+          "skipped: set ROUTER_CONTAINER", skip=True)
+else:
+    ROOTISH = ("", "0", "root", "0:0")
+
+    def account_uid(identity):
+        """The uid an identity string names, or None when it cannot be resolved.
+
+        `docker inspect` reports the account as the image or the deployment
+        stated it — a name, a number, or `uid:gid` — and `docker top` reports
+        whatever `ps` prints, which is the number for a uid this host has no
+        name for and the name otherwise. Resolving a name against this host's
+        passwd puts both sides in one language: the number.
+        """
+        head = str(identity).split(":")[0].strip()
+        if head.isdigit():
+            return int(head)
+        try:
+            import pwd
+            return pwd.getpwnam(head).pw_uid
+        except (KeyError, ImportError):
+            return None
+    # Both are assigned before the attempt, so a failed `docker inspect` leaves
+    # them at None rather than undefined: state that a command sets and a
+    # handler skips is read on the far side of that handler, and an unbound name
+    # there turns a failed check into a traceback with no summary at all.
+    configured = None
+    configured_uid = None
+    try:
+        p = subprocess.run(["docker", "inspect", "--format", "{{.Config.User}}", CONTAINER],
+                           capture_output=True, timeout=TIMEOUT)
+        configured = p.stdout.decode("utf-8", "replace").strip()
+        if p.returncode != 0:
+            raise RuntimeError(p.stderr.decode("utf-8", "replace").strip()[:120])
+        check("A-15 container account is stated and is not root",
+              configured.lower() not in ROOTISH,
+              f"Config.User={configured!r}" if configured.lower() not in ROOTISH
+              else f"Config.User={configured!r} — the image states no account, or a user: override set it to root")
+        # An unstated account is the image's default, which is root.
+        configured_uid = 0 if configured.strip() == "" else account_uid(configured)
+    except Exception as e:
+        check("A-15 container account is stated and is not root", False, f"docker inspect failed: {e}"[:160])
+        # A failed inspect leaves no account to compare against, so the second
+        # reading says so rather than blaming the host's passwd for a value the
+        # command never returned.
+        configured = None
+
+    if configured is None:
+        check("A-15 every process runs as that account", False,
+              "could not inspect the container: the account it states is unknown, so nothing can be "
+              "compared with it")
+    elif configured_uid is None:
+        check("A-15 every process runs as that account", False,
+              f"cannot compare: this host cannot resolve the configured account {configured!r} to a "
+              f"uid. Configure a numeric account (user: \"65532:65532\") so the check is decidable "
+              f"rather than assumed")
+    else:
+        try:
+            p = subprocess.run(["docker", "top", CONTAINER], capture_output=True, timeout=TIMEOUT)
+            rows = [line.split() for line in p.stdout.decode("utf-8", "replace").splitlines() if line.split()]
+            if p.returncode != 0 or len(rows) < 2:
+                raise RuntimeError((p.stderr.decode("utf-8", "replace").strip() or "no processes returned")[:120])
+            # The column is located by header name: ps output across hosts
+            # differs (procps says UID, busybox says USER) but one of those two
+            # headers is what both print first.
+            header = [h.upper() for h in rows[0]]
+            column = next((i for i, h in enumerate(header) if h in ("UID", "USER")), 0)
+            seen = sorted({row[column] for row in rows[1:] if len(row) > column})
+            # Every identity is resolved to a uid and compared with the
+            # configured one. Names come from this host's passwd — the same
+            # database ps read them from — so a name and its number compare
+            # equal. Only the uid is comparable: `docker top` prints no group,
+            # so a differing gid is outside this check.
+            resolved = {token: account_uid(token) for token in seen}
+            unresolved = [token for token, uid in resolved.items() if uid is None]
+            mismatched = {token: uid for token, uid in resolved.items()
+                          if uid is not None and uid != configured_uid}
+            count = len(rows) - 1
+            detail = (f"configured {configured!r} (uid {configured_uid}); docker top: {seen} "
+                      f"({count} process{'es' if count != 1 else ''})")
+            if unresolved:
+                detail += (f" — this host cannot resolve {', '.join(unresolved)} to a uid, so the "
+                           f"identity cannot be compared")
+            if mismatched:
+                detail += " — " + ", ".join(f"{t} is uid {u}" for t, u in sorted(mismatched.items()))
+                if 0 in mismatched.values():
+                    detail += "; uid 0 is running in this container"
+            check("A-15 every process runs as that account",
+                  configured_uid != 0 and not unresolved and not mismatched, detail)
+        except Exception as e:
+            check("A-15 every process runs as that account", False, f"docker top failed: {e}"[:160])
 
 # --- A-14: the conformance floor is registered (R-1, R-11) -------------------
 # An unregistered path answers 404 while a registered one answers 401 without a
