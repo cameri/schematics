@@ -26,7 +26,7 @@ of consumers (`consumer-taxonomy.md`), the parse-time remedy
 - The inventory (`P-12`): which consumer reads which names, and which consumer
   is declared as holding the whole store.
 - `scripts/sops-shared.sh`: `set`, `remove`, `keys`, `extract` (projection
-  generation), `--add-recipient`.
+  generation), `add-recipient`.
 
 Error inputs tolerated: a store that does not exist yet (Phase 3 creates it); a
 narrow file that no longer exists (a deployment where every value moved may
@@ -119,7 +119,7 @@ recipient list intact; `extract` overwrites the projection from the current
 store, so re-running it is the way to converge after any change. Recreating a
 key is skipped when the key file exists — regenerating a key would invalidate
 every file encrypted to it, so the scripts refuse rather than replace.
-`--add-recipient` on a key already present is a no-op. Reading an alias never
+`add-recipient` on a key already present is a no-op. Reading an alias never
 modifies the ciphertext (measured: the `ENC[` count is unchanged after an
 `exec-env` run through a symlink).
 

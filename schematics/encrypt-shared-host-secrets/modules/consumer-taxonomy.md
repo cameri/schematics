@@ -29,7 +29,7 @@ the parse-time mechanics (`compose-interpolation.md`), or rotation
   of yours can run before that consumer needs the value.
 
 Error inputs tolerated: a reference the script cannot classify (it prints
-`mechanism: unknown` with the line); a variable that appears in no file (a
+`mechanism: reference` with the line); a variable that appears in no file (a
 consumer that reads it from the ambient environment only, which the inventory
 must carry as a hand-written row).
 

@@ -17,14 +17,16 @@ value arrived, and the records to update. It does **not** own the store's format
 ## Inputs
 
 - `P-2 STORE_FILE`, the key to rotate, and the new value (stdin or
-  `--value-file`).
+  `--value-file`, or an already-encoded value with `--value-json`).
 - The inventory (`P-12`): every consumer that reads that key, with its class
   and its restart mechanism (unit name, container service, cron entry, script).
 - `P-9 CONSUMER_KEY_PATTERN` for every projection that carries the key.
 - `scripts/sops-shared.sh set` and `extract`.
 
 Error inputs tolerated: a value containing spaces, quotes or `=` (it is written
-as one dotenv line; the scripts refuse a leading/trailing newline); a key that
+as one dotenv line; a raw value with a leading or trailing newline is refused,
+so `echo value | sops-shared.sh set …` fails loudly instead of storing the
+newline — `--value-json` is the way in for a value that must keep one); a key that
 does not exist yet (`set` creates it); a consumer that is already stopped
 (skipped, and recorded as such).
 
@@ -41,7 +43,7 @@ does not exist yet (`set` creates it); a consumer that is already stopped
 **The procedure, for a key `NAME`:**
 
 1. `scripts/sops-shared.sh set "${STORE_FILE}" NAME` with the value on stdin
-   (masked prompt or `--value-file`); the plaintext never reaches argv or
+   (masked prompt, `--value-file` or `--value-json`); the plaintext never reaches argv or
    history.
 2. For every projection the inventory lists as carrying `NAME`:
    `scripts/sops-shared.sh extract "${STORE_FILE}" "${PROJECTION_PATTERN}" "<its keys>" --consumer-key "<its key file>"`.

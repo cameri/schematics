@@ -43,7 +43,9 @@ PRISTINE=0
 ALIAS_DIR="${RUNTIME_DIR:-/run}/sops-alias"
 
 usage() {
-    sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the leading comment block verbatim (from `#` through the first
+    # non-comment line): a hard-coded line range goes stale on the next edit.
+    awk 'NR > 2 { if (sub(/^# ?/, "")) { print; next } exit }' "$0"
     exit 2
 }
 
@@ -93,11 +95,15 @@ export SOPS_AGE_KEY_FILE="$AGE_KEY"
 # error from sops and none from the shell: that is the silent-blank failure.
 # Comparing names is what turns it into a refusal, and names are all this reads.
 if [ -n "$REQUIRE" ]; then
-    PRESENT="$(sops --decrypt --input-type dotenv --output-type dotenv "$STORE" \
-        | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | grep -v '^sops_' | sort -u)" || {
+    # Two steps on purpose: piping the decryption into grep would hand grep's
+    # status to the shell, so an unreadable store (wrong key, corrupt file) would
+    # be reported as a missing name instead of as the failure it is.
+    if ! sops --decrypt --input-type dotenv --output-type dotenv "$STORE" >/dev/null 2>&1; then
         echo "sops-env-exec: cannot decrypt $STORE with $AGE_KEY; nothing was run" >&2
         exit 1
-    }
+    fi
+    PRESENT="$(sops --decrypt --input-type dotenv --output-type dotenv "$STORE" \
+        | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | grep -v '^sops_' | sort -u)" || true
     MISSING=""
     for NAME in $(printf '%s' "$REQUIRE" | tr ',' ' '); do
         printf '%s\n' "$PRESENT" | grep -qx "$NAME" || MISSING="$MISSING $NAME"

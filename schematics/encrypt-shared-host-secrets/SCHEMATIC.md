@@ -82,7 +82,9 @@ with a blank token and says nothing.
 
 **May assume** (each with the risk if the assumption is wrong):
 
-- **Docker Compose v2** for the interpolation behaviours this spec relies on
+- **Docker Compose** for the interpolation behaviours this spec relies on
+  (measured on a host whose `docker compose version` reports v5.5.1; the
+  behaviours are the v2-family parse-time ones)
   (the `.env` lookup, `${VAR:?}`, `--env-file`). Risk if wrong: Compose v1
   resolves `.env` differently and `--env-file` does not exist; the parse-time
   remedy then reduces to `R-4`'s (c) and the fail-fast form must be a
@@ -188,9 +190,10 @@ with a blank token and says nothing.
   restarting or re-invoking each consumer recorded in the inventory is the whole
   procedure.
 - **R-9**: The plaintext's lifetime MUST be bounded and observable: a
-  materialized file is removed when its consumer exits, including on failure,
-  and no plaintext remains at any materialized path once the consumer has
-  started.
+  materialized file is removed when the consumer it serves exits, including on
+  failure, and no plaintext remains at any materialized path afterwards. While
+  that consumer runs the file MUST exist — that is what `R-4` requires of it —
+  so the bound is the consumer's lifetime, not its start.
 - **R-10**: Removal MUST restore each consumer's previous mechanism and leave
   the ciphertext store in place; the revert is provable per consumer.
 - **R-11**: A narrow plaintext file and the store MUST NOT share a key. No
@@ -211,7 +214,7 @@ that produced it):
 | R-6 | `sops exec-env` injects each store key verbatim, so a reference to a value under a name the consumer does not read finds nothing; the wrapper checks store key names against the names the inventory records |
 | R-7 | A projection is generated from the store by `scripts/sops-shared.sh extract` and encrypted to the master key plus that consumer's key only; `A-7` proves a canary key outside the projection cannot be decrypted with that consumer's key |
 | R-8 | Rotation is the store update plus the projection regeneration plus the consumer restarts recorded in the inventory; no image is rebuilt and no ciphertext is re-templated |
-| R-9 | The materializing wrapper removes its file on every exit path (`trap … EXIT`), and `A-9` looks for plaintext after the consumer has started rather than assuming the trap ran |
+| R-9 | The materializing wrapper removes its file on every exit path (`trap … EXIT`) because it runs the consumer as its child, and `A-9` looks for plaintext after the consumer exits rather than assuming the trap ran |
 | R-10 | The narrow file was never deleted, only narrowed; restoring the previous mechanism is putting the interpolated key back and dropping the wrapper invocation |
 | R-11 | `A-11` diffs the key sets of the narrow file and the store; the empty intersection is the requirement |
 
@@ -261,9 +264,9 @@ Binding notes where a principle applies non-obviously:
 | D-1 | system | age encryption (keygen, recipients) | Generate the master and per-consumer keys, encrypt to them | Provided by `sops` (age built in) or the `age` package | Hard fail before Phase 3: without a recipient nothing encrypts |
 | D-2 | system | SOPS binary on the host (`P-10 SOPS_IMAGE` supplies one when the host has none) | Encrypt, decrypt, extract projections, and inject the environment | `command -v sops`, else `docker create … --entrypoint sops "${SOPS_IMAGE}" --version` | Hard fail before Phase 3: `scripts/sops-shared.sh` and `skeleton/host-wrapper.sh` refuse with an explanation rather than degrading, because a container cannot inject values into a host process's environment. Remedies: a host that has the binary, or the sibling package's `sops-set-env.sh`, which implements a container fallback for value-setting |
 | D-3 | system | POSIX shell where the wrapper runs | The wrapper execs the consumer through a shell, and sops spawns the child with `/bin/sh -c` | `sh -c 'echo ok'` exits 0 | Hard fail before Phase 5: no wrapper means every wrappable consumer keeps its plaintext path |
-| D-4 | system | `python3` or `jq` | JSON-encode a value before `sops set --value-stdin` | `command -v python3 \|\| command -v jq` | Degrade: the operator passes `--value-file` with a pre-encoded value, or installs one of them |
+| D-4 | system | `python3` or `jq` | JSON-encode a value before `sops set --value-stdin` | `command -v python3 \|\| command -v jq` | Degrade: the operator JSON-encodes the value elsewhere and passes it with `--value-json <path>`, which skips the encoder; or installs one of them. `--value-file` is the *raw* value — the script encodes it — so it still needs an encoder. |
 | D-5 | schematic | [encrypt-container-secrets v0.2.2](https://github.com/cameri/schematics/blob/4ab37413e2d47c895074ea290867ec0f234f624f/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:7b40f292571587b0c6a57460ab5611b2bb4104b1ea0cc6e6848dddea78a45d6a` | The container half of the taxonomy: a value that must reach a container process is injected by that package's boot wrapper, with its per-service key and its no-plaintext-on-disk guarantee. Declared instead of restated so the two specs cannot drift | Its own acceptance green; `docker compose config` of the consuming service shows its secrets wiring | A container consumer cannot be served by this package's host wrapper: Phase 5 stops for that consumer and it keeps its plaintext path until the dependency is deployed. Starting it with the store mounted instead is refused by `R-3` |
-| D-6 | service | Docker Engine and Compose v2 | The parse-time consumer exists only here: interpolation, `--env-file`, and the resolved config that `A-5` inspects | `docker compose version` exits 0 | Without it there is no parse-time consumer on this host: phases 1-5 and 7-8 still apply, Phase 6 reduces to the narrow file's own checks |
+| D-6 | service | Docker Engine and Docker Compose | The parse-time consumer exists only here: interpolation, `--env-file`, and the resolved config that `A-5` inspects | `docker compose version` exits 0 | Without it there is no parse-time consumer on this host: phases 1-5 and 7-8 still apply, Phase 6 reduces to the narrow file's own checks |
 | D-7 | system | A directory that is writable by the operator and backed by tmpfs (where the platform provides one) | Holds the ciphertext aliases and any materialized plaintext env-file | `findmnt -no FSTYPE --target "${RUNTIME_DIR}"` prints `tmpfs`; `test -w "${RUNTIME_DIR}"` | Degrade to a 0700 directory on a persistent filesystem: `R-9` then carries the whole lifetime guarantee and the inventory must say so per consumer |
 
 ## Parameters
@@ -331,7 +334,7 @@ honoured for the subcommand. Measured with sops v3.11.0:
 | `store.env` (symlink, hardlink or copy of the same bytes) | SOPS dotenv | exit 0, values injected, ciphertext untouched |
 | `store.env`, `--pristine` before the file | SOPS dotenv | exit 0, inherited environment dropped |
 | `store.env` with the command split into several arguments | SOPS dotenv | exit 1, `error: missing file to decrypt` |
-| `store.env` with `--` between file and command | SOPS dotenv | exit 1, `error: missing file to decrypt` |
+| `store.env` with `--` between file and command, command in one argument | SOPS dotenv | exit 0, `--` is harmless here — the failure belongs to the row above |
 | `--pristine` **after** the file | SOPS dotenv | exit 2, `Error reading file: open <the command>` — flags belong before the two positionals |
 
 Consequences the implementation MUST honour:
@@ -443,7 +446,8 @@ Steps:
 2. `command -v sops` or confirm the container path works:
    `docker create --label org.testcontainers=true --entrypoint sops "${SOPS_IMAGE}" --version`
    then `docker start` and read the logs (D-2).
-3. `command -v python3 || command -v jq` (D-4; else use `--value-file`).
+3. `command -v python3 || command -v jq` (D-4; without either, encode the value
+   yourself and pass it with `--value-json`).
 4. `findmnt -no FSTYPE --target "${RUNTIME_DIR}"` and `test -w "${RUNTIME_DIR}"` (D-7).
 5. List the variables that are candidates to move: every key of
    `P-4 PLAIN_ENV_FILE` whose value is a credential, a token, or a password.
@@ -466,8 +470,11 @@ Steps:
 2. Assign each reference a class from `modules/consumer-taxonomy.md`
    (wrappable, path-reading, parse-time, or non-consumer) and the remedy
    (a), (b) or (c) for anything that cannot decrypt.
-3. Record per consumer: location, mechanism, variable names it reads, class,
-   remedy, and whether it holds the whole store or a projection (`R-7`).
+3. Record per consumer as one row of a table in `INVENTORY_FILE`, under a
+   header row naming the columns in this order, so the acceptance checks can
+   read it: `| Location | Mechanism | Names | Class | Remedy | Store reach |`.
+   `Names` is the comma-separated variables that consumer reads; `Store reach`
+   is `whole` or `projection` (`R-7`).
 4. Any reference you cannot classify is left in the inventory as
    `class: unknown` with the reason — never dropped, since dropping it is how
    a consumer ends up unserved.
@@ -500,10 +507,13 @@ Verify:
 ```bash
 grep -c '^NAME=' "${STORE_FILE}"                 # >= 1, and the value is ENC[…]
 grep -c '^NAME=' "${PLAIN_ENV_FILE}"             # 0
-comm -12 "$(keys_of "${PLAIN_ENV_FILE}")" "$(keys_of "${STORE_FILE}")"   # prints nothing (R-11)
+grep -oE '^[A-Za-z_][A-Za-z0-9_]*' "${PLAIN_ENV_FILE}" | grep -v '^sops_' | sort -u > /tmp/narrow.keys
+scripts/sops-shared.sh keys "${STORE_FILE}" > /tmp/store.keys
+comm -12 /tmp/narrow.keys /tmp/store.keys        # prints nothing (R-11)
 ```
-`keys_of` is `grep -oE '^[A-Za-z_][A-Za-z0-9_]*' <file> | grep -v '^sops_' | sort -u`
-for the plaintext file and the same over `sops --decrypt …` for the store.
+The first pipeline reads the plaintext file's key names; `sops-shared.sh keys`
+reads the store's (it decrypts, so an unreadable store is an error rather than
+an empty list). Both sides go to files because `comm` compares files.
 
 ### Phase 4: Recipients and projections
 
@@ -521,7 +531,7 @@ Steps:
    keys it used. Re-run it after every rotation of a key it carries.
 4. For a consumer declared as holding the whole store, add its public key to
    the store's recipient list
-   (`scripts/sops-shared.sh --add-recipient "${STORE_FILE}" "<CONSUMER_PUB>"`)
+   (`scripts/sops-shared.sh add-recipient "${STORE_FILE}" "<CONSUMER_PUB>"`)
    and record that in the inventory.
 
 Verify:
@@ -571,7 +581,10 @@ Steps:
 
 Verify:
 ```bash
-skeleton/preflight-compose-secrets.sh --var TZ --var API_TOKEN -- docker compose config   # exit 0
+skeleton/preflight-compose-secrets.sh --var TZ --var API_TOKEN -- config   # exit 0
+# everything after `--` goes to `docker compose` as its subcommand arguments,
+# so it is `-- config`: `-- docker compose config` would run
+# `docker compose docker compose config` and fail for the wrong reason
 # and, with the materialized value absent, the same command exits non-zero and names API_TOKEN
 ```
 
@@ -617,8 +630,10 @@ real migration.
   from the inventory fails this check.
 - **A-3** (covers R-3): a wrapped consumer gets the value, and only the value.
   Expected: the required name prints non-empty; with `--pristine`, the child's
-  environment contains only the store's key names
-  (`env | cut -d= -f1 | sort` equals the store's key names).
+  environment holds the store's key names and nothing else the wrapper could
+  have passed — `env | cut -d= -f1 | sort` equals the store's key names plus
+  `PWD`, which the shell sets for itself (`D-3` runs the command through
+  `/bin/sh -c`).
 - **A-4** (covers R-4, remedy (b)): a materialized file is a bounded plaintext.
   Expected: while the consumer runs, the file exists with `P-14`'s mode
   (`stat -c %a`), its directory is tmpfs where `D-7` found one
@@ -635,7 +650,7 @@ real migration.
   or `--env-file` naming a store produces (the CLI inlines the file's contents
   into the service environment, so the variable is non-empty and wrong):
   ```bash
-  skeleton/preflight-compose-secrets.sh --var API_TOKEN -- docker compose config
+  skeleton/preflight-compose-secrets.sh --var API_TOKEN -- config
   # non-zero, naming the variable and reporting that it resolves to CIPHERTEXT
   ```
   Expected: the fail-fast form aborts the parse; the wrapper refuses before
@@ -643,9 +658,16 @@ real migration.
   an unset variable **without** the fail-fast form exits 0 with `PLAIN: ""` in
   the resolved config, which is the state this test exists to end.
 - **A-6** (covers R-6): the store key is the variable name the consumer reads.
-  For every consumer: `comm -23 <(inventory names for that consumer) <(store key names)`
-  prints nothing. A non-empty result names a variable the consumer reads and
-  the store does not define — the silent-blank case again, caught before start.
+  For every consumer, the names out of the inventory's `Names` column:
+  ```bash
+  awk -F'|' '$2 ~ /<consumer>/ { gsub(/[ `]/,"",$4); print $4 }' "${INVENTORY_FILE}" \
+    | tr ',' '\n' | sed '/^$/d' | sort -u > /tmp/consumer.keys
+  scripts/sops-shared.sh keys "${STORE_FILE}" > /tmp/store.keys
+  comm -23 /tmp/consumer.keys /tmp/store.keys    # prints nothing
+  ```
+  Expected: no output. A non-empty result names a variable the consumer reads
+  and the store does not define — the silent-blank case again, caught before
+  start.
 - **A-7** (covers R-7): a projection's key decrypts its own keys and nothing
   else. With a canary key in the store that the consumer does not read:
   ```bash
@@ -659,26 +681,31 @@ real migration.
   consumer's own path shows the new value, and
   `docker image inspect <image> --format '{{.Created}}'` is unchanged for every
   container consumer.
-- **A-9** (covers R-9): no plaintext survives a consumer's start.
+- **A-9** (covers R-9): no plaintext outlives its consumer.
   ```bash
   find "${RUNTIME_DIR}" -name '*.env' -type f -newer "${STORE_FILE}"   # no plaintext env file
   docker diff <service> | grep -iE '\.env$'                            # empty for container consumers
   ```
-  Expected: no output. Run it after the consumer has started, not only after
-  it exited: a file left behind while a process runs is the failure this
-  catches.
+  Expected: no output. Run it after the consumer has **exited**, including on a
+  failing exit: the file is allowed to exist while the consumer runs (`R-4`),
+  and the materializer removes it when the consumer it serves exits. For a
+  consumer the wrapper does not own (`--keep`), stop the consumer first — the
+  file is the operator's to remove and the inventory records that.
 - **A-10** (covers R-10): removal restores the previous mechanism. After the
   Removal procedure: every consumer starts, `git status --porcelain` shows the
   store's ciphertext still tracked and untouched, and
   `grep -c 'sops-env-exec' <cron, units, scripts>` is 0.
 - **A-11** (covers R-11): the narrow file and the store share no key.
   ```bash
-  comm -12 <(keys_of "${PLAIN_ENV_FILE}") <(keys_of_store "${STORE_FILE}")   # prints nothing
+  grep -oE '^[A-Za-z_][A-Za-z0-9_]*' "${PLAIN_ENV_FILE}" | grep -v '^sops_' | sort -u > /tmp/narrow.keys
+  scripts/sops-shared.sh keys "${STORE_FILE}" > /tmp/store.keys
+  comm -12 /tmp/narrow.keys /tmp/store.keys      # prints nothing
   ```
   Expected: no output. A shared key means the value is still in plaintext.
 
 **Verification provenance.** The behaviours this spec depends on were
-measured, not assumed, against `sops` v3.11.0 and Docker Compose v2: the
+measured, not assumed, against `sops` v3.11.0 and a Compose CLI reporting
+v5.5.1: the
 interpolation table in `modules/compose-interpolation.md`, the alias table in
 Interfaces and Contracts, the `sops set` flag placement above, and the
 `--pristine`/single-argument rules. The package's own tools were then exercised
@@ -782,9 +809,7 @@ Decisions:
   consumers, and a consumer (the Compose parser) that cannot decrypt at all.
   Extending would mean superseding two of its requirements and rewriting its
   scope; declaring it as a pinned dependency (`D-5`) keeps both contracts
-  single-purpose and reuses the container half unchanged. The reasoning is
-  restated in the pull request, per the repository's rule that a spec states
-  what is true now and the PR carries the argument.
+  single-purpose and reuses the container half unchanged.
 - 2026-09-19 — **The store is read through a `.env`-named alias, never by
   renaming the ciphertext.** `sops exec-env` selects its parser from the file
   name and honours no input-type flag (measured, see Interfaces). Naming the

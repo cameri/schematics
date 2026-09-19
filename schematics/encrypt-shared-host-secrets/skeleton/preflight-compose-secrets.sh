@@ -13,8 +13,10 @@
 #           that resolves to SOPS ciphertext, which is what an `env_file:`
 #           pointing at a store produces.
 #   --dir   the directory to run the Compose command in. Default: $PWD.
-#   --      everything after it is passed to the Compose CLI verbatim.
-#           Default: `config`.
+#   --      everything after it is passed to `docker compose` as its subcommand
+#           and arguments, verbatim — `-- config`, not `-- docker compose config`
+#           (the latter runs `docker compose docker compose config`). Default:
+#           `config`.
 #
 # Runs the Compose command, capturing its output, and then checks the *resolved*
 # configuration — the same text `docker compose config` prints, where every
@@ -42,7 +44,9 @@ DIR="${COMPOSE_DIR:-$PWD}"
 COMPOSE_ARGS=""
 
 usage() {
-    sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the leading comment block verbatim (from `#` through the first
+    # non-comment line): a hard-coded line range goes stale on the next edit.
+    awk 'NR > 2 { if (sub(/^# ?/, "")) { print; next } exit }' "$0"
     exit 2
 }
 

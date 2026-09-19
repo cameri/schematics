@@ -49,7 +49,9 @@
 set -eu
 
 usage() {
-    sed -n '3,43p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the leading comment block verbatim (from `#` through the first
+    # non-comment line): a hard-coded line range goes stale on the next edit.
+    awk 'NR > 2 { if (sub(/^# ?/, "")) { print; next } exit }' "$0"
     exit 2
 }
 
