@@ -373,6 +373,20 @@ package skip with their reason when only a stand-in is available, and the summar
 says so. Rows are measured, not asserted: a `PASS` means the check ran against a
 real container built from this layer.
 
+The script has **two invocation modes, and they do not cover the same rows.**
+With `IMAGE` supplied it verifies that image and never builds, so the
+build-dependent rows do not run: `H-16` (the build refuses an endpoint nothing
+answers at) is skipped entirely and `H-7` skips its build-log half, reporting the
+version recorded in the image on its own. `IMAGE` is therefore the mode for
+checking a layer that is already published, and **leaving `IMAGE` unset is the
+mode that gives the full row set** — it is also the only one that proves this
+layer builds at all, which is why a report of the two modes' totals (for example
+`35/0/2` with `IMAGE` against `36/0/1` without) is a difference in coverage, not
+in the layer. One thing neither mode proves by any row is `sops`: the binary is
+proved by the build's own `sops --version` line in `skeleton/Containerfile`,
+which runs as part of every build and stops it when the binary is absent — no
+row reads that line.
+
 - **H-1** (covers R-1): inspect the built image. expected: `Config.User` is the
   base's account, `Config.WorkingDir` is the base's workspace, and the image
   declares no `ENTRYPOINT` or `CMD` of its own — the values are the base's.

@@ -38,6 +38,16 @@
 #                        IS set, BASE_IMAGE must be set too: the rows that
 #                        compare the inherited contract, and the enum probe, need
 #                        an image to compare against.
+#                        The two modes are NOT equal in coverage. With IMAGE
+#                        supplied the script verifies that image and never
+#                        builds, so H-16 (the build refuses an unreachable
+#                        endpoint) and the build half of H-7 do not run — H-7
+#                        skips with that reason. IMAGE is the mode for checking
+#                        a published layer; leaving it unset is the mode that
+#                        gives the full row set, and the only one that proves
+#                        this layer builds. Neither mode proves `sops`: the
+#                        binary is proved by the build's own `sops --version`
+#                        line in skeleton/Containerfile, which no row reads.
 #   BASE_IMAGE           a locally present image to build the layer over and to
 #                        compare the inherited contract against. No default: an
 #                        agent-host image is the deployment's own, and naming one
@@ -475,8 +485,22 @@ fi
 
 if [ -z "$IMAGE" ]; then
     if [ "$STANDIN_OK" != "1" ]; then
-        skip "H-0..H-12 no image could be built here: no agent-host image is available locally and no stand-in base could be synthesized"
-        note "what happened: $BASE_IMAGE was ${BASE_PRESENT:-not inspected}; the stand-in base is built from ${BASE_PACKAGE_DIR}/skeleton/entrypoint.sh; the line above is what its build said"
+        # Three states reach here and the line must name the one that holds:
+        # BASE_IMAGE unset or absent locally (no base at all), BASE_IMAGE present
+        # but the base package's entrypoint not available (no stand-in to make),
+        # and a stand-in that failed or whose builder was refused. The notes
+        # printed above already say which stand-in outcome happened and where the
+        # entrypoint would have come from, so this line reuses their terms and
+        # the two agree. The run skips rather than building over the raw base
+        # because the boot-path rows need the base's own entrypoint: over a base
+        # without it they would fail about a missing prerequisite — the
+        # environment — instead of the property under test.
+        if [ "$BASE_PRESENT" = "present" ]; then
+            skip "H-0..H-12 no image could be built here: $BASE_IMAGE is present locally, but no stand-in base could be synthesized${BASE_PACKAGE_DIR:+ from $BASE_PACKAGE_DIR/skeleton/entrypoint.sh}, and the rows that need the base's own entrypoint cannot run over the raw base"
+        else
+            skip "H-0..H-12 no image could be built here: BASE_IMAGE is ${BASE_PRESENT:-not inspected} (${BASE_IMAGE:-unset}) and no stand-in base could be synthesized, so there is no base to build this layer over"
+        fi
+        note "what happened: BASE_IMAGE was ${BASE_PRESENT:-not inspected}; the stand-in base is built from ${BASE_PACKAGE_DIR:-<unset BASE_PACKAGE_DIR>}/skeleton/entrypoint.sh, and when a stand-in build ran, its own last line is printed above"
         note "supply a locally present BASE_IMAGE, a builder that can run, and the base package; the static rows above ran regardless"
         printf '\nchecks=%s failures=%s skips=%s\n' "$CHECKS" "$FAILURES" "$SKIPS"
         [ "$FAILURES" -eq 0 ] && exit 0 || exit 1
