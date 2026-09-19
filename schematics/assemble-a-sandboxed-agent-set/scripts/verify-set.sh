@@ -52,7 +52,7 @@
 #                           loudly without its key
 #   ALLOW_TEARDOWN=1        A-16 tears the set down before re-checking the parts
 #   PROVIDER_CREDENTIAL=1   A-15 makes one real completion through the alias
-#   ALLOW_BUILD_PROBE=1     A-4 attempts a build that must fail on the alias
+#   ALLOW_BUILD_PROBE=1     A-4 attempts a build whose endpoint check must fail
 #
 # Rows that need something the host does not have print
 # `SKIP  <row> <reason>` and are never counted as passes.
@@ -285,12 +285,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# A-4: the harness build fails when the router does not serve the alias
+# A-4: the harness build refuses an endpoint nothing answers at
 # ---------------------------------------------------------------------------
-# The layer part validates the alias against the running router at build time.
-# This row points the build at an endpoint with nothing behind it and requires a
-# build failure that names the alias: a build that succeeds would mean the edge
-# is only documented, not enforced.
+# The layer's P-11 check is what makes this row meaningful: with it set, a build
+# that cannot reach the endpoint the arm is wired to stops with the guard's code
+# 78 and a line naming the parameter. The row supplies EVERY argument the build
+# requires for this arm: a build that failed on a missing argument would satisfy a
+# looser version of this check while testing nothing, and that is exactly what an
+# earlier version of this row did.
 if [ "${ALLOW_BUILD_PROBE:-0}" != "1" ]; then
     skip "A-4 build probe not enabled (set ALLOW_BUILD_PROBE=1; it builds one throwaway image)"
 else
@@ -298,21 +300,29 @@ else
     if [ -z "$LAYER_CTX" ] || [ ! -f "$LAYER_CTX/Containerfile" ]; then
         skip "A-4 no harness layer build context (set LAYER_BUILD_CONTEXT to the directory holding its Containerfile)"
     else
+        arm_args="--build-arg HARNESS_MODEL_ALIAS=$ROUTER_ALIAS --build-arg HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW:-200000}"
+        [ "$HARNESS_ID" = "claude" ] && arm_args="$arm_args --build-arg HARNESS_FAST_ALIAS=${ROUTER_FAST_ALIAS:-$ROUTER_ALIAS} --build-arg HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS:-32000}"
+        [ -n "${HARNESS_HOME:-}" ] && arm_args="$arm_args --build-arg HARNESS_HOME=$HARNESS_HOME"
+        # shellcheck disable=SC2086
         out="$(docker build -f "$LAYER_CTX/Containerfile" -t "$PROBE_TAG" \
             --build-arg AGENT_BASE_REF="$AGENT_HOST_IMAGE" \
             --build-arg AGENT_HARNESS_ID="$HARNESS_ID" \
-            --build-arg ROUTER_BASE_URL="http://127.0.0.1:1/v1" \
-            --build-arg HARNESS_MODEL_ALIAS="$ROUTER_ALIAS" \
+            --build-arg ROUTER_BASE_URL="http://127.0.0.1:1" \
+            --build-arg ROUTER_CREDENTIAL_ENV="$ROUTER_CREDENTIAL_ENV" \
+            --build-arg HARNESS_VERIFY_ENDPOINT=1 \
+            $arm_args \
             "$LAYER_CTX" 2>&1)"
         rc=$?
         if [ $rc -eq 0 ]; then
-            fail "A-4 the harness layer built against an unreachable router endpoint; the alias check is not enforced at build time"
+            fail "A-4 the harness layer built with its endpoint check pointed at an endpoint nothing answers at; the check is not enforced"
         elif denied "$out"; then
             skip "A-4 build probe: docker refused the build on this host"
-        elif printf '%s' "$out" | grep -qiE 'alias|router|models|connection refused|Name or service not known'; then
-            pass "A-4 building against an unreachable router fails, and the failure names the alias or the endpoint"
+        elif printf '%s' "$out" | grep -q "not reachable from the build" && printf '%s' "$out" | grep -q "non-zero code: 78"; then
+            pass "A-4 a harness build whose endpoint check cannot reach the router fails with the guard's code 78, naming the parameter"
+        elif printf '%s' "$out" | grep -qiE 'HARNESS_FAST_ALIAS|HARNESS_MAX_OUTPUT_TOKENS|HARNESS_HOME|ROUTER_CREDENTIAL_ENV|ROUTER_BASE_URL is required|is required and was not set'; then
+            fail "A-4 the probe build failed on a missing argument rather than the endpoint check: $(printf '%s' "$out" | grep -m1 'add-an-agent-harness:' | cut -c1-120)"
         else
-            skip "A-4 build probe failed for an unrelated reason: $(printf '%s' "$out" | tail -1)"
+            skip "A-4 build probe failed for an unrelated reason: $(printf '%s' "$out" | tail -1 | cut -c1-120)"
         fi
     fi
 fi
