@@ -1,6 +1,6 @@
 ---
 name: assemble-a-sandboxed-agent-set
-version: 0.1.1
+version: 0.2.0
 status: draft
 spec: 1
 description: "The composition package for the sandboxed-agent set: the deployment order with the reason for every edge, the isolation rules between the parts, the shared contracts, and one end-to-end acceptance test that proves the chain — the base image, the agent host, the harness layer and their neighbours — rather than the parts."
@@ -240,18 +240,18 @@ that parameter's contract lives.
 | P-6  | `HARNESS_IMAGE` | string | *(none — required)* | `docker image ls` after the harness layer build, or the published reference | The image an agent pane's CLI comes from; the top of the chain |
 | P-7  | `HARNESS_ID` | string | *(none — required)* | The harness arm this deployment wants; the layer part's templates name the arms it ships | Which CLI the layer installs and what `AGENT_HARNESS` becomes (part 3's `P-1`). Empty is not a default: a build that names no harness is refused, so it must be chosen here |
 | P-8  | `ROUTER_BASE_URL` | string (URL) | `http://llm-router:4000` | The router's endpoint on `P-1`'s network: its service name and port (the router part's `P-1`, `P-2`) | Where the harness sends inference requests. It is the router ROOT, with no `/v1`: the harness layer takes it as part 3's `P-3` and derives each arm's protocol path (the root for Claude Code's `ANTHROPIC_BASE_URL`, root plus `/v1` for Codex's `base_url`), which is why the router's own API paths are written as `<root>/v1/…` wherever this package reads them (`A-11`). A value ending in `/v1` is refused by the layer's build |
-| P-9  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The variable name the chosen harness's configuration reads; the layer part's templates show the arm's own name where it differs | The environment variable the harness reads its router credential from (part 3's `P-4`) |
+| P-9  | `ROUTER_CREDENTIAL_ENV` | string | *(derived — arm-dependent, from `P-7 HARNESS_ID`)* | The variable the CLI reads at runtime, derived from the arm rather than chosen: `ANTHROPIC_AUTH_TOKEN` when `HARNESS_ID=claude`, the layer's `ROUTER_CREDENTIAL_ENV` (default `ROUTER_API_KEY`) when `HARNESS_ID=codex`. The pinned layer records the name the harness it installed actually reads at `/usr/local/share/agent-harness/credential-env` inside the image — `cat` it; that record is the authority for the arm that was built | The one name the router credential is carried under: the store's dotenv entry, the harness process's environment, and `A-10`/`A-11`/`A-15` all use it (part 3's `P-4`, whose per-arm record is the file above) |
 | P-10 | `ROUTER_ALIAS` | string | *(none — required)* | Read the alias set from the running router: `GET /v1/models` with the router credential | The model id the harness sends for its primary role (part 3's `P-5`). It must be a member of the router's alias set (`P-11` here), and this composition's own gate checks that before the set starts (the bring-up script's step 7, `A-11`), because the layer's build-time check proves reachability only |
 | P-11 | `ROUTER_ALIAS_SET` | list | *(none — required)* | `GET /v1/models` returns it exactly; the operator chooses what it contains in the router's own configuration | The ids any client may send (the router part's `P-10`). `ROUTER_ALIAS` and `ROUTER_FAST_ALIAS` must both be members |
 | P-12 | `ROUTER_FAST_ALIAS` | string | *(empty — arm-dependent)* | As `ROUTER_ALIAS`; some harness arms have no second role | The model id for the harness's background/small-task role (part 3's `P-6`) |
 | P-13 | `HARNESS_CONTEXT_WINDOW` | int (tokens) | *(none — required)* | The model behind `ROUTER_ALIAS` on the router's side: the operator's record of it, or the provider's documentation for that alias | Written into the harness configuration (part 3's `P-7`); a wrong value is a run-time symptom, not a build failure |
 | P-14 | `HARNESS_MAX_OUTPUT_TOKENS` | int (tokens) | *(none — required for arms that have the key)* | As `HARNESS_CONTEXT_WINDOW` | Written into the harness configuration (part 3's `P-8`) |
-| P-15 | `DOCKER_PROXY_URL` | string (URL) | `http://socket-proxy:2375` | The Docker-access part's endpoint on its own network: proxy service name and port (its `P-5`, `P-6`) | What a consumer sets as `DOCKER_HOST`; the only Docker path an agent has (`D-6`) |
+| P-15 | `DOCKER_PROXY_URL` | string (URL) | `tcp://socket-proxy:2375` | The Docker-access part's endpoint on its own network — proxy service name and port (its `P-5`, `P-6`) under a Docker client scheme, `tcp://`; the part documents the same endpoint as the HTTP URL `http://socket-proxy:2375` for its own audit script, and that form is not a `DOCKER_HOST` value | The `DOCKER_HOST` a consumer exports to reach the daemon through the proxy; the only Docker path an agent has (`D-6`, exercised by `A-13`) |
 | P-16 | `DOCKER_PROXY_ALLOWLIST` | string | *(none — required)* | What the agents genuinely need: read image and container state, for example — nothing that changes the host | The proxy's allowed endpoint groups (the Docker-access part's `P-4`). An allowlist wider than the need is the whole risk of this row |
 | P-17 | `SECRETS_KEY_DIR` | path (host) | `~/sops/age` | Where the operator keeps age keys; the store part's `P-1` | Where the key material for `D-5` lives. The master key never leaves this directory into a container; each service's dedicated key is `<SECRETS_KEY_DIR>/<service>-keys.txt` |
 | P-18 | `SECRETS_STORE_DIR` | path (host) | *(none — required)* | Where the operator keeps each service's encrypted dotenv file: one directory per service, `<service>/.env.encrypted` (the store part's `P-4`, `P-11`) | Where the two encrypted stores the set needs are read from when the compose file declares them as secrets |
 | P-19 | `ROUTER_SECRETS_SERVICE` | string | `llm-router` | The name of the store service holding the router's provider keys; it is also the router's own service-name parameter (the router part's `P-3`) | Which encrypted file and dedicated key the router boots with (the store part's `P-3`) |
-| P-20 | `AGENT_HOST_SECRETS_SERVICE` | string | `agent-host` | The name of the store service holding the one credential an agent needs: `P-9 ROUTER_CREDENTIAL_ENV`'s value | Which encrypted file and dedicated key the host container decrypts at boot (the store part's `P-3`) |
+| P-20 | `AGENT_HOST_SECRETS_SERVICE` | string | `agent-host` | The name of the store service holding the one credential an agent needs, as a dotenv entry under the name `P-9` resolves to for this arm | Which encrypted file and dedicated key the host container decrypts at boot (the store part's `P-3`) |
 | P-21 | `HARNESS_CONFIG_PATH` | path (in-container) | *(none — required)* | The layer part's harness-home parameter (`P-9`) plus the file name that arm writes | The CLI's configuration file inside the image, which `A-10` reads to prove the wiring names only aliases and carries no provider credential |
 
 ## Modules
@@ -284,9 +284,12 @@ to a part and is named by pin, never restated.
   resolves that alias to a provider and a model. No harness configuration names
   a provider, a provider key, or a model id that is not an alias.
 - The credential path: provider keys live only in the router's encrypted store;
-  the router credential (`ROUTER_CREDENTIAL_ENV`) is the only credential a
-  harness process sees, and it arrives in that process's environment at run
-  time.
+  the router credential is the only credential a harness process sees, and it
+  arrives in that process's environment at run time under the name `P-9`
+  resolves to for this arm — `ANTHROPIC_AUTH_TOKEN` when `HARNESS_ID=claude`,
+  the layer's `ROUTER_CREDENTIAL_ENV` (default `ROUTER_API_KEY`) when
+  `HARNESS_ID=codex` — and the store's dotenv entry must carry the credential
+  under that same name.
 
 **Compose merge order** (each part ships a fragment; the deployment merges *its
 own filled-in copy* of each — several fragments are starting points a deployment
@@ -512,19 +515,34 @@ reported as a pass.
   `P-11`), and by this composition's own gate (`A-11`, Phase 3 step 3) either
   way. Stated limit: the build check proves reachability, not alias membership —
   a credential cannot be a build argument (part 3's `R-8`).
-- **A-5** (covers R-4, R-6): `docker inspect` on every container in the set —
-  the proxy included, when `PROXY_CONTAINER` is supplied — reports no published
+- **A-5** (covers R-4, R-6): `docker inspect` on every container of the set,
+  read from `docker ps -a` so a stopped container is inspected too — the proxy
+  included, when `PROXY_CONTAINER` is supplied — reports no published
   port, no `Privileged`, no added `CapAdd`, no `Devices`, and no bind from
   `/var/run/docker.sock`, with exactly one exception: the proxy's own socket
   mount, which must be the only one and read-only. expected: nothing published,
   nothing privileged, and the socket in the one container whose job it is, under
-  the mode the Docker-access part requires.
+  the mode the Docker-access part requires. The row asserts the whole set or
+  SKIPs: a container the script cannot name, or an inspect it cannot read
+  (denied, empty, no `priv=` field), SKIPs the row naming that container —
+  a subset inspected is not the set.
 - **A-6** (covers R-6): the same inspect output lists exactly one read-write
   host path (the agent tree, equal to `AGENT_TREE_DIR`) plus read-only or secret
   mounts. expected: one stateful path.
 - **A-7** (covers R-4): the user reported by the running host container is the
-  base's account and is not `root` (`docker inspect … '{{.Config.User}}'` and
-  the process's own `id -u`). expected: non-root everywhere.
+  base's account and the process's own `id -u` is not `0` (`docker inspect …
+  '{{.Config.User}}'` and `docker exec … id -u`); the script reads `id -u` in
+  every other container of the set too. expected: no container of the set is
+  host root. R-4's prohibition is host root, and a uid of `0` **inside** a
+  container that holds no host namespace, no socket and no bind of `/` is not
+  that — so a container other than the host reporting uid 0 is printed in a note
+  rather than failed, naming the two this composition's parts ship that way (the
+  Docker-access proxy, whose own `SCHEMATIC.md` states it runs as root inside
+  its container, and the router, whose `Containerfile` declares no `USER`). The
+  note is there because a deployment should know; the row does not fail them,
+  because R-4 does not reach them and `A-5` covers their privileged, capability
+  and device half. A uid the script cannot read SKIPs the row naming the
+  container — an unread container is not a clean one.
 - **A-8** (covers R-7): the harness image reports `AGENT_HARNESS` set, its
   entrypoint and `CMD` are the base image's unchanged, its history carries no
   credential-shaped value, and a
@@ -536,33 +554,71 @@ reported as a pass.
   history scan is what covers that case, and neither sees a value assembled at
   build time and never written.
 - **A-9** (covers R-7): an agent pane, started through the host's own boot
-  program, has the harness CLI as its process. expected: the pane runs that CLI
-  and not a shell wrapper — the harness is what the pane's process tree contains.
-- **A-10** (covers R-9): from inside an agent pane, the environment carries
-  `ROUTER_BASE_URL` and `ROUTER_CREDENTIAL_ENV`, and the CLI's own configuration
-  names only aliases from `ROUTER_ALIAS_SET`. expected: the wiring is the one
-  this document specifies, read from inside the container that matters.
-- **A-11** (covers R-9): from inside an agent pane, a request to
+  program, has the harness CLI as its process, and each such process runs in its
+  own agent workspace: the `AGENT_WORKSPACE_DIR` read from that pane's **own**
+  process environment (the multiplexer exports one per pane, as its
+  `agent-loop.sh` does) ends in `workspace` with a directory name that is one of
+  the host's rostered agents, and the pane's working directory equals it — under
+  an `AGENT_WORKSPACE_DIR` the row is given, when it is given, rather than under
+  a default this composition cannot honour. expected: the pane runs that CLI and
+  not a shell wrapper, in the state directory it was given — the harness is what
+  the pane's process tree contains, and the tree is where `R-6` says state
+  lives. A pane carrying no such variable, or one outside the tree it was given,
+  FAILs naming the process.
+- **A-10** (covers R-9): the pane's own process environment carries the router
+  credential under the name `P-9` resolves to for this arm, and carries no other
+  credential-shaped variable — **names only are read, never values**, so a
+  second entry in the encrypted store, or a provider key left in the
+  environment, shows up here as a failure. The endpoint is deliberately not
+  required of the environment: the harness layer writes it into the arm's own
+  configuration (`ANTHROPIC_BASE_URL` for Claude Code, `base_url` for Codex),
+  which is where the CLI reads it, so the row reads it there and compares it
+  against `P-8` (the root, or the root plus `/v1` for Codex). It also checks, at
+  that arm's own keys, that the model equals `P-10`'s alias, the fast model
+  equals `P-12`'s when the arm has one, every model the configuration names is a
+  member of `ROUTER_ALIAS_SET` (`P-11`), Codex's `env_key` is the derived
+  credential name, and the configuration names no provider credential or key. A
+  `ROUTER_BASE_URL` that **is** present in the environment is compared with
+  `P-8`'s root rather than ignored; its absence is a note, because this
+  composition's endpoint lives elsewhere and requiring it would fail a set wired
+  exactly as specified. expected: the wiring is the one this document specifies,
+  read from inside the container that matters and at the keys each arm actually
+  uses — a wrong value can no longer satisfy the row the way a string match
+  could.
+- **A-11** (covers R-9): a request to
   `ROUTER_BASE_URL` + `/v1/models` (P-8 is the router ROOT; the protocol path is
-  appended here exactly as the harness layer appends it per arm) with the router
-  credential returns 200 and a
-  body whose ids include `ROUTER_ALIAS`; the same request without the credential
-  is rejected (401/403). expected: the alias path works end to end and the
-  router's own credential gate is intact. **If the router credential cannot be
+  appended here exactly as the harness layer appends it per arm), made from
+  inside the host container — the container the panes run in, and **not** the
+  pane's own shell — carries the credential the pane's process itself holds
+  (read from that process's environment and used in place, never printed) and
+  returns 200 with a body whose `id` values include `ROUTER_ALIAS`; the same
+  request without the credential is rejected (401/403). Membership is compared
+  against the model list's ids, so an alias that appears only as another field's
+  metadata does not satisfy the row. expected: the alias path works end to end
+  and the router's own credential gate is intact. Stated limit: a portable check
+  cannot drive the CLI's interactive call — that is what `A-9` and `A-10` prove
+  — so this row issues the request the way any client of the router does, and
+  proves the router's path, the alias and the credential, not the CLI's own
+  turn. **If the router credential cannot be
   obtained:** `SKIP` with that reason — never assert.
-- **A-12** (covers R-9): with the router stopped, the same request from the pane
+- **A-12** (covers R-9): with the router stopped, the same request
+  (`<root>/v1/models`, issued from inside the host container as `A-11` issues it)
   fails visibly and no completion is produced elsewhere. expected: a failure
   that names the router, not a silent fallback.
 - **A-13** (covers R-4): from inside the host container,
   `DOCKER_HOST="$DOCKER_PROXY_URL" docker version` answers, a denied verb is
   refused by policy in terms that name the proxy's own decision (any other
   daemon error SKIPs — it is not evidence of a refusal), and the socket path is
-  absent from the container's filesystem. With `PROXY_CONTAINER` supplied it
-  also checks the network contract: every network the proxy is attached to
-  reports `internal=true`, and the router container cannot resolve the proxy by
-  name while the host container can. expected: Docker works through the proxy,
+  absent from the container's filesystem. It also checks the network contract:
+  every network the proxy is attached to reports `internal=true`, and the router
+  container cannot resolve the proxy by name while the host container can.
+  expected: Docker works through the proxy,
   the socket is not reachable from where the agent runs, and the proxy is not
-  exposed to the rest of the set.
+  exposed to the rest of the set. **Without either `PROXY_CONTAINER` or
+  `ROUTER_CONTAINER` the row SKIPs** rather than passing on the half it could
+  still read: the proxy's network contract is the point of that half, and a
+  green row over an unchecked contract is the failure mode this row exists to
+  prevent.
 - **A-14** (covers R-8): a container started without its key material exits
   non-zero, and its own output names the credential path — not some unrelated
   startup failure. expected: the credential path fails loudly and identifiably.

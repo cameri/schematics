@@ -15,9 +15,13 @@
 # Inputs (environment; none of these is written anywhere):
 #   AGENT_SET_NETWORK     network every service of the set joins   (no default)
 #   AGENT_TREE_DIR        host directory bind-mounted as the agent tree
-#   AGENT_IDS             space-separated agent ids                (no default)
-#   AGENT_WORKSPACE_DIR   where the agent tree is mounted INSIDE a container
-#                                                          (default: /workspace)
+#   AGENT_IDS             the agent ids the host runs (space- or
+#                         comma-separated, as the parts take them)  (no default)
+#   AGENT_WORKSPACE_DIR   the container path the agent tree is mounted at
+#                         (optional: with it, every pane's own
+#                         AGENT_WORKSPACE_DIR must lie under it; the row reads
+#                         each pane's own value for the exact path, because the
+#                         multiplexer gives each pane its own workspace)
 #   AGENT_HOST_IMAGE      the host image reference                 (no default)
 #   HARNESS_IMAGE         the harness layer image reference        (no default)
 #   HARNESS_ID            the single CLI the layer installs        (no default)
@@ -29,17 +33,27 @@
 #                         models endpoint is read at <root>/v1/models
 #                                                                  (no default)
 #   ROUTER_CREDENTIAL_ENV name of the variable carrying the router
-#                         credential                               (default: ROUTER_API_KEY)
+#                         credential; the name actually checked is derived from
+#                         HARNESS_ID (ANTHROPIC_AUTH_TOKEN for claude, this
+#                         name for codex)               (default: ROUTER_API_KEY)
 #   ROUTER_ALIAS          the model alias the harness sends        (no default)
 #   ROUTER_ALIAS_SET      space-separated ids the router serves    (no default)
-#   DOCKER_PROXY_URL      the Docker-access endpoint consumers use (no default)
+#   DOCKER_PROXY_URL      the Docker-access endpoint consumers use, as a
+#                         DOCKER_HOST value
+#                                 (default: tcp://socket-proxy:2375; the Docker-
+#                                 access part's http://socket-proxy:2375 is the
+#                                 URL its own audit script uses, and the Docker
+#                                 client refuses that scheme outright)
 #   DOCKER_PROXY_ALLOWLIST  the proxy's allowed endpoint groups    (no default)
 #   SECRETS_KEY_DIR       host directory holding the age key material
 #   HOST_CONTAINER        the running host container's name        (no default)
-#   ROUTER_CONTAINER      the running router container's name      (optional)
-#   PROXY_CONTAINER       the running Docker-access proxy's name   (optional:
-#                         without it A-5 cannot inspect the proxy, and cannot
-#                         apply its one sanctioned socket mount)
+#   ROUTER_CONTAINER      the running router container's name      (no default:
+#                         the whole-set rows A-5, A-6, A-7 and A-13 cannot
+#                         inspect every container of the set without it, and
+#                         print SKIP rather than green over a subset)
+#   PROXY_CONTAINER       the running Docker-access proxy's name   (same rule:
+#                         without it A-5 cannot see the proxy's one sanctioned
+#                         socket mount, nor A-13 the proxy's network contract)
 #   PART_SCRIPTS          space-separated name:path entries for the parts'
 #                         own acceptance scripts (optional; A-3)
 #   COMPOSE_FILES         space-separated paths of the parts' compose fragments
@@ -77,6 +91,16 @@ fail() { CHECKS=$((CHECKS + 1)); FAILURES=$((FAILURES + 1)); printf 'FAIL  %s\n'
 skip() { SKIPPED=$((SKIPPED + 1)); printf 'SKIP  %s\n' "$1"; }
 note() { printf '      %s\n' "$1"; }
 usage_error() { printf 'verify-set: %s\n' "$1" >&2; exit 2; }
+# The verdict lives in one place: a row that has to stop the run (A-3's part
+# gate) reports the same summary as the end of the script, never a second format.
+verdict() {
+    printf '\n%d check(s): %d failed, %d skipped\n' "$CHECKS" "$FAILURES" "$SKIPPED"
+    if [ "$SKIPPED" -gt 0 ]; then
+        printf 'Skipped rows are not passes: each SKIP above names what the host could not provide.\n'
+    fi
+    [ "$FAILURES" -eq 0 ] || exit 1
+    exit 0
+}
 
 # A throwaway tag this script owns, removed at the end when it was created.
 PROBE_TAG="agent-set-verify:probe-$$"
@@ -119,16 +143,66 @@ denied() {
     esac
 }
 
+# A Docker socket, recognized by what it is rather than by its name alone: a
+# bind mount whose host source is a Unix socket (`-S`, which is how a socket at
+# the Docker-access part's configurable P-2 path is caught), or a mount whose
+# source or destination names docker.sock. Every other mount in this set is a
+# directory or a file.
+is_socket_mount() {  # is_socket_mount SOURCE DESTINATION
+    case "$1$2" in
+        *docker.sock*) return 0 ;;
+    esac
+    [ -S "$1" ] && return 0
+    return 1
+}
+
+# One value out of the arm's own configuration: Claude Code's settings.json (a
+# JSON string under a key) or Codex's config.toml (`key = "value"`). The caller
+# compares the value whole, so no substring of a value can satisfy it.
+cfg_value() {  # cfg_value CONFIG KEY
+    case "$HARNESS_ID" in
+        claude) printf '%s' "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1 ;;
+        *)      printf '%s' "$1" | sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1 ;;
+    esac
+}
+
 require() {  # require NAME VALUE
     [ -n "${2:-}" ] || usage_error "$1 is not set"
 }
 for v in AGENT_SET_NETWORK AGENT_TREE_DIR AGENT_IDS AGENT_HOST_IMAGE HARNESS_IMAGE \
          HARNESS_ID HARNESS_CONFIG_PATH ROUTER_BASE_URL ROUTER_ALIAS ROUTER_ALIAS_SET \
-         DOCKER_PROXY_URL DOCKER_PROXY_ALLOWLIST HOST_CONTAINER; do
+         DOCKER_PROXY_ALLOWLIST HOST_CONTAINER; do
     require "$v" "${!v:-}"
 done
+# P-15 has a default, so it is applied rather than required: a caller that omits
+# it is a caller using the documented value, not one with a missing input.
+DOCKER_PROXY_URL="${DOCKER_PROXY_URL:-tcp://socket-proxy:2375}"
+# P-15 is the value a consumer exports as DOCKER_HOST, and the Docker client
+# takes only a client scheme: `docker -H http://… version` fails before any
+# connection with "invalid bind address format", while `tcp://…` initializes the
+# client and then dials. The proxy part's own http:// URL is its audit script's.
+case "$DOCKER_PROXY_URL" in
+    tcp://*|unix://*|ssh://*|fd://*|npipe://*) ;;
+    *) printf 'note: DOCKER_PROXY_URL=%s carries no Docker client scheme; P-15 is the value consumers set as DOCKER_HOST (tcp://socket-proxy:2375)\n' "$DOCKER_PROXY_URL" ;;
+esac
 ROUTER_CREDENTIAL_ENV="${ROUTER_CREDENTIAL_ENV:-ROUTER_API_KEY}"
-AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-/workspace}"
+AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-}"
+# The credential's NAME is arm-dependent, not chosen. The pinned harness layer
+# records the name the CLI it installed reads at
+# /usr/local/share/agent-harness/credential-env: ANTHROPIC_AUTH_TOKEN for the
+# Claude arm, whose settings.json carries no credential because the process
+# environment does, and ROUTER_CREDENTIAL_ENV for the Codex arm, whose
+# config.toml names it as env_key. One name is derived here and used by every
+# row that reads it — A-10, A-11 and A-15 — so a deployment cannot pass by
+# populating a variable no CLI reads.
+case "$HARNESS_ID" in
+    claude) CREDENTIAL_ENV="ANTHROPIC_AUTH_TOKEN" ;;
+    *)      CREDENTIAL_ENV="$ROUTER_CREDENTIAL_ENV" ;;
+esac
+# The ids this host runs, in one spelling: the parts take AGENT_IDS
+# comma-separated, the alias sets space-separated, and the rows read either.
+AGENT_ID_LIST="$(printf '%s' "$AGENT_IDS" | tr ',' ' ')"
+ALIAS_SET_LIST="$(printf '%s' "$ROUTER_ALIAS_SET" | tr ',' ' ')"
 # P-8 is the router root; the API path is appended here, exactly as the harness
 # layer appends it per arm. A value that already ends in /v1 would double it.
 ROUTER_ROOT="${ROUTER_BASE_URL%/}"
@@ -282,20 +356,32 @@ fi
 if [ -z "${PART_SCRIPTS:-}" ]; then
     skip "A-3 no part acceptance scripts supplied (set PART_SCRIPTS='name:path …')"
 else
+    part_failed=0
     for entry in $PART_SCRIPTS; do
         name="${entry%%:*}"; script="${entry#*:}"
         if [ ! -f "$script" ]; then
             skip "A-3 $name: no script at $script"
         elif [ ! -x "$script" ]; then
-            fail "A-3 $name: $script is not executable"
+            fail "A-3 $name: $script is not executable, so its part has not been verified"
+            part_failed=1
         else
             bash "$script" >/dev/null 2>&1
             rc=$?
-            [ "$rc" -eq 0 ] \
-                && pass "A-3 $name: its own acceptance script exits 0" \
-                || fail "A-3 $name: $script exited $rc; a part that fails its own rows must stop the assembly"
+            if [ "$rc" -eq 0 ]; then
+                pass "A-3 $name: its own acceptance script exits 0"
+            else
+                fail "A-3 $name: $script exited $rc; a part that fails its own rows must stop the assembly"
+                part_failed=1
+            fi
         fi
     done
+    if [ "$part_failed" -eq 1 ]; then
+        # R-3: the gate is a gate. Continuing would run the rows that observe an
+        # assembled set over a part known to be broken, and a green row there
+        # would be a claim about a chain nobody may bring up.
+        note "R-3: a part that fails its own acceptance rows stops the assembly, so the rows that observe the assembled set are not run"
+        verdict
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -344,86 +430,116 @@ fi
 # ---------------------------------------------------------------------------
 # A-5, A-6: isolation — nothing published, nothing privileged, no socket
 # ---------------------------------------------------------------------------
+# Both rows are claims about EVERY container of the set, so both need every
+# member's name: with one missing, the inspect covers a subset, and a subset is
+# not the row — a stopped proxy that publishes a port, or one with an extra
+# read-write host path, would be invisible behind a green.
+set_missing=""
+[ -n "${ROUTER_CONTAINER:-}" ] || set_missing="$set_missing ROUTER_CONTAINER"
+[ -n "${PROXY_CONTAINER:-}" ] || set_missing="$set_missing PROXY_CONTAINER"
+set_missing_list="$(printf '%s' "$set_missing" | sed 's/^ //;s/ /, /g')"
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-5 docker is not available"
     skip "A-6 docker is not available"
+elif [ -n "$set_missing" ]; then
+    skip "A-5 $set_missing_list not set, so the row cannot inspect every container of the set; nothing is asserted about the containers it did not see"
+    skip "A-6 $set_missing_list not set, so the row cannot inspect every container of the set"
 else
-    containers="$(docker ps --format '{{.Names}}' 2>&1)"
+    # -a: a stopped service of the set still carries its port bindings, its
+    # privileges, its devices and its mounts, and the row is specified over the
+    # set, not over what happens to be up.
+    containers="$(docker ps -a --format '{{.Names}}' 2>&1)"
     if denied "$containers"; then
         skip "A-5 docker refused the request on this host: $(printf '%s' "$containers" | head -1)"
         skip "A-6 docker refused the request on this host"
     else
-        # Every service of the set, the proxy included: it is the one container
-        # whose socket mount is by design, so leaving it out of the set would hide
-        # both the exception and any second socket mount.
-        set_pattern="^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__}|${PROXY_CONTAINER:-__none__})$"
-        set_containers="$(printf '%s' "$containers" | grep -E "$set_pattern" || true)"
-        if [ -z "$set_containers" ]; then
-            skip "A-5 no container of the set is running (expected $HOST_CONTAINER${ROUTER_CONTAINER:+, $ROUTER_CONTAINER}${PROXY_CONTAINER:+, $PROXY_CONTAINER})"
-            skip "A-6 no container of the set is running"
+        set_absent=""
+        for c in "$HOST_CONTAINER" "$ROUTER_CONTAINER" "$PROXY_CONTAINER"; do
+            printf '%s\n' "$containers" | grep -qxF "$c" || set_absent="$set_absent $c"
+        done
+        if [ -n "$set_absent" ]; then
+            skip "A-5 not every container of the set exists on this host, running or stopped — missing:$set_absent — so the row is not asserted"
+            skip "A-6 not every container of the set exists on this host, running or stopped — missing:$set_absent — so the row is not asserted"
         else
-            bad_pub=""; bad_priv=""; bad_cap=""; bad_dev=""; bad_sock=""; ro_ok=1; rw_paths=""; sock_ok=0
-            for c in $set_containers; do
-                cfg="$(docker inspect "$c" 2>/dev/null)"
-                [ -n "$cfg" ] || continue
-                printf '%s' "$cfg" | grep -q '"PortBindings":{}\|"PortBindings": *null' \
-                    || bad_pub="$bad_pub $c"
-                printf '%s' "$cfg" | grep -q '"Privileged": *false' \
-                    || bad_priv="$bad_priv $c"
-                printf '%s' "$cfg" | grep -q '"CapAdd": *null\|"CapAdd": *\[\]' \
-                    || bad_cap="$bad_cap $c"
-                printf '%s' "$cfg" | grep -q '"Devices": *\[\]\|"Devices": *null' \
-                    || bad_dev="$bad_dev $c"
-                mounts="$(docker inspect "$c" --format '{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' 2>/dev/null)"
-                sock_n=0
-                while IFS='|' read -r src dst rw; do
+            bad_pub=""; bad_priv=""; bad_cap=""; bad_dev=""; bad_sock=""; bad_rw=""
+            rw_paths=""; unreadable=""; tree_rw=0; proxy_sock=0
+            # Every service of the set, the proxy included: it is the one
+            # container whose socket mount is by design, so leaving it out would
+            # hide both the exception and any second socket mount.
+            for c in "$HOST_CONTAINER" "$ROUTER_CONTAINER" "$PROXY_CONTAINER"; do
+                rec="$(docker inspect "$c" --format '{{.Name}}|ports={{json .HostConfig.PortBindings}}|priv={{.HostConfig.Privileged}}|caps={{json .HostConfig.CapAdd}}|devs={{json .HostConfig.Devices}}{{println}}{{range .Mounts}}M|{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' 2>&1)"
+                case "$rec" in
+                    *"priv="*) ;;
+                    # An unreadable container is not a clean one: the row reports
+                    # the gap rather than a green over the containers it could read.
+                    *) unreadable="$unreadable $c"
+                       continue ;;
+                esac
+                printf '%s' "$rec" | grep -q 'ports={}\|ports=null' || bad_pub="$bad_pub $c"
+                printf '%s' "$rec" | grep -q 'priv=false' || bad_priv="$bad_priv $c"
+                printf '%s' "$rec" | grep -q 'caps=null\|caps=\[\]' || bad_cap="$bad_cap $c"
+                printf '%s' "$rec" | grep -q 'devs=\[\]\|devs=null' || bad_dev="$bad_dev $c"
+                while IFS='|' read -r tag src dst rw; do
+                    [ "$tag" = "M" ] || continue
                     [ -n "$src" ] || continue
-                    case "$src" in
-                        *docker.sock*)
-                            sock_n=$((sock_n + 1))
-                            # The proxy's own socket mount is the design: one
-                            # mount, read-only (the Docker-access part's R-6).
-                            # Anywhere else, or a writable one, is a failure.
-                            if [ -n "$PROXY_CONTAINER" ] && [ "$c" = "$PROXY_CONTAINER" ] && [ "$rw" = "false" ] && [ "$sock_n" -le 1 ]; then
-                                sock_ok=1
-                            else
-                                bad_sock="$bad_sock $c"
-                            fi ;;
-                    esac
-                    if [ "$rw" = "true" ]; then
-                        rw_paths="$rw_paths $src"
-                        if [ -n "${AGENT_TREE_DIR:-}" ] && [ "$src" != "$AGENT_TREE_DIR" ]; then
-                            ro_ok=0
+                    if is_socket_mount "$src" "$dst"; then
+                        # The proxy's own socket mount is the design: one mount,
+                        # read-only (the Docker-access part's R-6). Anywhere else,
+                        # or a writable one, is a failure — and the proxy without
+                        # the socket it exists to carry is not this set either.
+                        if [ "$c" = "$PROXY_CONTAINER" ] && [ "$rw" = "false" ]; then
+                            proxy_sock=$((proxy_sock + 1))
+                        else
+                            bad_sock="$bad_sock $c"
                         fi
                     fi
+                    if [ "$rw" = "true" ]; then
+                        rw_paths="$rw_paths $src"
+                        [ "$src" = "$AGENT_TREE_DIR" ] || bad_rw="$bad_rw $src"
+                        [ "$c" = "$HOST_CONTAINER" ] && [ "$src" = "$AGENT_TREE_DIR" ] && tree_rw=1
+                    fi
                 done <<EOF
-$mounts
+$rec
 EOF
             done
-            [ -z "$bad_pub" ] \
-                && pass "A-5 no container of the set publishes a port" \
-                || fail "A-5 published ports on:$bad_pub"
-            if [ -z "$bad_priv$bad_cap$bad_dev$bad_sock" ]; then
-                if [ "$sock_ok" = "1" ]; then
-                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket — with the proxy's own read-only socket mount as the one sanctioned exception"
-                elif [ -n "$PROXY_CONTAINER" ]; then
-                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket"
-                else
-                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket (PROXY_CONTAINER is unset, so the proxy was not inspected and its sanctioned mount was not seen)"
-                fi
+            if [ -n "$unreadable" ]; then
+                skip "A-5 docker inspect could not read:$unreadable — an unreadable container is not a clean one, so this row is not asserted"
+                skip "A-6 docker inspect could not read:$unreadable — an unreadable container is not a clean one, so this row is not asserted"
             else
-                fail "A-5 forbidden properties — privileged:$bad_priv cap:$bad_cap device:$bad_dev socket:$bad_sock"
+                [ -z "$bad_pub" ] \
+                    && pass "A-5 no container of the set publishes a port" \
+                    || fail "A-5 published ports on:$bad_pub"
+                if [ -n "$bad_priv$bad_cap$bad_dev$bad_sock" ]; then
+                    fail "A-5 forbidden properties — privileged:$bad_priv cap:$bad_cap device:$bad_dev socket:$bad_sock"
+                elif [ "$proxy_sock" -ne 1 ]; then
+                    fail "A-5 the proxy ($PROXY_CONTAINER) does not hold exactly one read-only Docker socket mount ($proxy_sock seen); the socket must reach that container, and no other, under the mode the Docker-access part's R-6 requires"
+                else
+                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket — with the proxy's own single read-only socket mount as the one sanctioned exception"
+                fi
+                # The tree mount itself, not merely the absence of others: a set
+                # whose agent state has no host path behind it would pass a check
+                # that only rejects extra read-write paths.
+                [ -z "$bad_rw" ] \
+                    && pass "A-6 no read-write host path in the set lies outside the agent tree ($AGENT_TREE_DIR)" \
+                    || fail "A-6 read-write host paths outside the agent tree:$bad_rw"
+                [ "$tree_rw" -eq 1 ] \
+                    && pass "A-6 the agent tree $AGENT_TREE_DIR is mounted read-write into $HOST_CONTAINER" \
+                    || fail "A-6 $AGENT_TREE_DIR is not mounted read-write into $HOST_CONTAINER (read-write host paths seen:$rw_paths); the agents' state would live in the container layer"
             fi
-            [ "$ro_ok" = "1" ] \
-                && pass "A-6 the only read-write host path in the set is $AGENT_TREE_DIR" \
-                || fail "A-6 read-write host paths outside the agent tree:$rw_paths"
         fi
     fi
 fi
 
 # ---------------------------------------------------------------------------
-# A-7: nothing in the set runs as root
+# A-7: no host root — the account contract, for every container of the set
 # ---------------------------------------------------------------------------
+# R-4's no-host-root binds the containers built from the base whose unprivileged
+# account part 1's R-1 fixes: the harness image and the agent host. The row reads
+# every container of the set's process uid all the same — a container it never
+# looked at is not a clean one, and A-5 covers only its privileged/capability/
+# device half — and reports the containers whose own images carry root by design
+# (the Docker-access part's context says of its own container: "the proxy runs as
+# root inside its container") instead of failing a correct deployment over them.
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-7 docker is not available"
 else
@@ -438,13 +554,32 @@ else
         fail "A-7 the harness image runs as root ($img_user)"
     else
         pass "A-7 the harness image's runtime account is '$img_user', not root"
-        proc_user="$(docker exec "$HOST_CONTAINER" id -u 2>&1)"
-        if denied "$proc_user"; then
-            skip "A-7 running-process uid: $(exec_reason)"
-        elif [ "$proc_user" = "0" ]; then
-            fail "A-7 the host container's process runs as uid 0"
-        else
-            pass "A-7 the host container's process runs as uid $proc_user"
+    fi
+    # The images are one claim; the uid a container's process actually has is
+    # another, and only the running containers can answer it.
+    if [ -n "$set_missing" ]; then
+        skip "A-7 $set_missing_list not set, so the process accounts of the set's containers were not inspected"
+    else
+        root_bad=""; uid_unreadable=""; uid_host=""; uid_other=""
+        for c in "$HOST_CONTAINER" "$ROUTER_CONTAINER" "$PROXY_CONTAINER"; do
+            uid="$(docker exec "$c" id -u 2>&1)"
+            if denied "$uid" || absent "$uid"; then
+                uid_unreadable="$uid_unreadable $c"
+            elif [ "$uid" = "0" ]; then
+                if [ "$c" = "$HOST_CONTAINER" ]; then root_bad="$root_bad $c"; else uid_other="$uid_other $c=0"; fi
+            else
+                if [ "$c" = "$HOST_CONTAINER" ]; then uid_host="$uid"; else uid_other="$uid_other $c=$uid"; fi
+            fi
+        done
+        if [ -n "$uid_host" ]; then
+            pass "A-7 the host container's process runs as uid $uid_host, not 0"
+        fi
+        [ -z "$root_bad" ] \
+            || fail "A-7 the host container's process runs as uid 0; a pane's account is the base's unprivileged one (part 1's R-1, R-4)"
+        [ -z "$uid_unreadable" ] \
+            || skip "A-7 the process uid could not be read in:$uid_unreadable — an unread container is not a clean one ($(exec_reason))"
+        if [ -n "$uid_other" ]; then
+            note "A-7 the set's other containers' process accounts read:${uid_other# }. R-4's no-host-root binds the containers built from the base whose unprivileged account part 1's R-1 fixes (the harness image and the agent host); the Docker-access part states of its own container that the proxy runs as root inside it, and the router image declares no account, so this row does not fail those. A-5 covers their privileged, capability and device half"
         fi
     fi
 fi
@@ -465,10 +600,14 @@ else
     elif [ -z "$env_json" ] || [ "$env_json" = "<no value>" ]; then
         skip "A-8 $HARNESS_IMAGE reports no environment"
     else
-        if printf '%s' "$env_json" | grep -q "AGENT_HARNESS=$HARNESS_ID"; then
-            pass "A-8 AGENT_HARNESS is set to $HARNESS_ID in the image"
+        # The entry has to be the WHOLE entry: `grep "AGENT_HARNESS=claude"` also
+        # matches AGENT_HARNESS=claude-old, so the match is anchored to the JSON
+        # array's element boundary (the array is a flat list of strings, which is
+        # what Config.Env is).
+        if printf '%s' "$env_json" | grep -oE '"[^"]*"' | grep -qxF "\"AGENT_HARNESS=$HARNESS_ID\""; then
+            pass "A-8 AGENT_HARNESS is set to $HARNESS_ID in the image (that exact environment entry, not a longer value starting with it)"
         else
-            fail "A-8 AGENT_HARNESS=$HARNESS_ID is not in the image's environment: $env_json"
+            fail "A-8 AGENT_HARNESS=$HARNESS_ID is not an environment entry of the image: $env_json"
         fi
         # Inheritance, not absence: `docker image inspect` reports the base's
         # entrypoint on every image built FROM it, so comparing against `null`
@@ -543,8 +682,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# A-9: an agent pane runs the harness CLI
+# A-9: an agent pane runs the harness CLI, in its own workspace
 # ---------------------------------------------------------------------------
+# The multiplexer gives each pane its own workspace — AGENT_TREE/<id>/workspace
+# (its R-3, and `agent-loop.sh` exports it as AGENT_WORKSPACE_DIR) — so there is
+# no one path every pane shares: comparing all of them against a single default
+# would fail a correct deployment and pass a pane that ran anywhere the operator
+# happened to name. The row reads each pane's own variable and requires its
+# working directory to be exactly that, and that path to be a rostered agent's
+# workspace under the tree.
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-9 docker is not available"
 else
@@ -555,7 +701,9 @@ else
             [ "$pid" = "$$" ] && continue
             cmd="$(tr "\0" " " < "$p/cmdline" 2>/dev/null)"
             case "$cmd" in
-                *"'"$HARNESS_ID"'"*) printf "%s|%s|%s\n" "$pid" "$cmd" "$(readlink "$p/cwd" 2>/dev/null)" ;;
+                *"'"$HARNESS_ID"'"*)
+                    ws="$(tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^AGENT_WORKSPACE_DIR=//p" | head -1)"
+                    printf "%s|%s|%s|%s\n" "$pid" "$(readlink "$p/cwd" 2>/dev/null)" "$ws" "$cmd" ;;
             esac
         done' 2>&1)"
     if denied "$panes"; then
@@ -565,49 +713,95 @@ else
     else
         n="$(printf '%s\n' "$panes" | wc -l | tr -d ' ')"
         pass "A-9 $n process(es) in $HOST_CONTAINER run $HARNESS_ID (a pane's process tree contains the harness)"
-        cwd_bad=0
-        while IFS='|' read -r pid cmd cwd; do
-            [ -z "$cwd" ] && continue
-            case "$cwd" in
-                "$AGENT_WORKSPACE_DIR"|"$AGENT_WORKSPACE_DIR"/*) ;;
-                *) cwd_bad=$((cwd_bad + 1)) ;;
+        pane_bad=""
+        while IFS='|' read -r pid cwd ws cmd; do
+            [ -n "$pid" ] || continue
+            if [ -z "$ws" ]; then
+                pane_bad="$pane_bad ${pid}(no AGENT_WORKSPACE_DIR)"
+                continue
+            fi
+            if [ -n "$AGENT_WORKSPACE_DIR" ]; then
+                case "$ws" in
+                    "$AGENT_WORKSPACE_DIR"|"$AGENT_WORKSPACE_DIR"/*) ;;
+                    *) pane_bad="$pane_bad ${pid}($ws is outside $AGENT_WORKSPACE_DIR)"; continue ;;
+                esac
+            fi
+            case "$ws" in
+                */workspace) ;;
+                *) pane_bad="$pane_bad ${pid}($ws is not a per-agent workspace)"; continue ;;
             esac
+            ws_id="${ws%/workspace}"; ws_id="${ws_id##*/}"
+            case " $AGENT_ID_LIST " in
+                *" $ws_id "*) ;;
+                *) pane_bad="$pane_bad ${pid}($ws_id is not one of the host's agents)"; continue ;;
+            esac
+            [ "$cwd" = "$ws" ] || pane_bad="$pane_bad ${pid}(cwd $cwd, workspace $ws)"
         done <<EOF
 $panes
 EOF
-        [ "$cwd_bad" -eq 0 ] \
-            && pass "A-9 every harness process runs inside the agent workspace ($AGENT_WORKSPACE_DIR)" \
-            || fail "A-9 $cwd_bad harness process(es) run outside the agent workspace"
+        [ -z "$pane_bad" ] \
+            && pass "A-9 every harness process runs in its own agent workspace, the AGENT_WORKSPACE_DIR that pane was given (<tree>/<id>/workspace for a rostered id)" \
+            || fail "A-9 harness process(es) not in their own agent workspace:$pane_bad"
     fi
 fi
 
 # ---------------------------------------------------------------------------
 # A-10: the pane's environment and configuration carry the wiring
 # ---------------------------------------------------------------------------
+# The endpoint is not an environment variable of this composition: the harness
+# layer writes it into the arm's own configuration file (ANTHROPIC_BASE_URL for
+# Claude Code, base_url for Codex) and the host fragment adds no ROUTER_BASE_URL
+# of its own, so requiring that variable of the process would fail a set that is
+# wired exactly as specified. What the process must carry is the credential —
+# and no second credential, because `sops exec-env` injects every entry of the
+# encrypted store into it — while the endpoint and the aliases are read where
+# the CLI reads them, from its configuration.
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-10 docker is not available"
 else
-    wire="$(docker exec -e CRED_NAME="$ROUTER_CREDENTIAL_ENV" -e CFG="$HARNESS_CONFIG_PATH" "$HOST_CONTAINER" sh -c '
+    wire="$(docker exec -e CRED_NAME="$CREDENTIAL_ENV" -e CFG="$HARNESS_CONFIG_PATH" "$HOST_CONTAINER" sh -c '
+        pane=""
         for p in /proc/[0-9]*; do
             cmd="$(tr "\0" " " < "$p/cmdline" 2>/dev/null)"
             case "$cmd" in
-                *"'"$HARNESS_ID"'"*)
-                    tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^ROUTER_BASE_URL=/ROUTER_BASE_URL=/p;s/^${CRED_NAME}=/CREDENTIAL_PRESENT=/p" | sed "s/^CREDENTIAL_PRESENT=.*/CREDENTIAL_PRESENT=yes/"
-                    break ;;
+                *"'"$HARNESS_ID"'"*) pane="$p"; break ;;
             esac
         done
-        [ -f "$CFG" ] && printf "CONFIG_PRESENT=%s\n" "$CFG"' 2>&1)"
+        [ -n "$pane" ] || { printf "NO_PANE\n"; exit 0; }
+        # Names only: which variables the pane carries, never what they hold.
+        names="$(tr "\0" "\n" < "$pane/environ" 2>/dev/null | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p")"
+        printf "VARIABLES_READ=%s\n" "$(printf "%s\n" "$names" | grep -c .)"
+        if printf "%s\n" "$names" | grep -qxF "$CRED_NAME"; then printf "CREDENTIAL_PRESENT=yes\n"; else printf "CREDENTIAL_PRESENT=no\n"; fi
+        printf "%s\n" "$names" | grep -xE "([A-Za-z0-9]+_)*(API_)?(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CREDENTIALS)" | grep -vxF "$CRED_NAME" | sed "s/^/OTHER_CREDENTIAL=/"
+        env_ep="$(tr "\0" "\n" < "$pane/environ" 2>/dev/null | sed -n "s/^ROUTER_BASE_URL=//p" | head -1)"
+        [ -n "$env_ep" ] && printf "ENDPOINT_ENV=%s\n" "$env_ep"
+        [ -f "$CFG" ] && printf "CONFIG_PRESENT=%s\n" "$CFG"
+        exit 0' 2>&1)"
     if denied "$wire"; then
         skip "A-10 $(exec_reason)"
-    elif [ -z "$wire" ]; then
-        fail "A-10 could not read a harness process's environment in $HOST_CONTAINER"
+    elif printf '%s' "$wire" | grep -q "^NO_PANE"; then
+        fail "A-10 no process in $HOST_CONTAINER runs $HARNESS_ID, so there is no pane environment to read (A-9 selects the same processes)"
     else
-        printf '%s' "$wire" | grep -q "^ROUTER_BASE_URL=" \
-            && pass "A-10 the harness process carries ROUTER_BASE_URL" \
-            || fail "A-10 the harness process has no ROUTER_BASE_URL"
-        printf '%s' "$wire" | grep -q "^CREDENTIAL_PRESENT=yes" \
-            && pass "A-10 the harness process carries $ROUTER_CREDENTIAL_ENV (presence only; the value is never printed)" \
-            || fail "A-10 the harness process has no $ROUTER_CREDENTIAL_ENV"
+        vars="$(printf '%s' "$wire" | sed -n 's/^VARIABLES_READ=//p' | head -1)"
+        if [ -z "$vars" ] || [ "$vars" = "0" ]; then
+            fail "A-10 the pane's environment could not be read in $HOST_CONTAINER (${vars:-no count} variables); an unreadable environment is not an unwired one"
+        else
+            printf '%s' "$wire" | grep -q "^CREDENTIAL_PRESENT=yes" \
+                && pass "A-10 the pane's process carries $CREDENTIAL_ENV (presence only; the value is never read out here)" \
+                || fail "A-10 the pane's process has no $CREDENTIAL_ENV (the name this arm's CLI reads)"
+            other="$(printf '%s' "$wire" | sed -n 's/^OTHER_CREDENTIAL=//p' | tr '\n' ' ')"
+            [ -z "$other" ] \
+                && pass "A-10 the pane's process carries no other credential-shaped variable; $CREDENTIAL_ENV is the only one (a second entry in the encrypted store, or a provider key, would appear here)" \
+                || fail "A-10 the pane's process carries credential-shaped variable(s) besides $CREDENTIAL_ENV:$other — a pane may hold no credential but the router's"
+            if printf '%s' "$wire" | grep -q "^ENDPOINT_ENV="; then
+                env_ep="$(printf '%s' "$wire" | sed -n 's/^ENDPOINT_ENV=//p' | head -1)"
+                [ "$env_ep" = "$ROUTER_ROOT" ] \
+                    && pass "A-10 the pane's process carries ROUTER_BASE_URL=$env_ep, the P-8 root" \
+                    || fail "A-10 the pane's process carries ROUTER_BASE_URL=$env_ep, not P-8's root $ROUTER_ROOT"
+            else
+                note "A-10 the pane's process carries no ROUTER_BASE_URL; this composition's endpoint lives in the CLI's own configuration instead, read below"
+            fi
+        fi
         cfg="$(docker exec "$HOST_CONTAINER" cat "$HARNESS_CONFIG_PATH" 2>/dev/null)"
         if [ -z "$cfg" ]; then
             skip "A-10 configuration check: $HARNESS_CONFIG_PATH is unreadable or absent"
@@ -618,6 +812,46 @@ else
             else
                 pass "A-10 the harness configuration names no provider credential or key"
             fi
+            # P-8 against the arm's own keys, and P-10/P-11/P-12 for every model
+            # it names. The keys differ per arm because the layer writes the
+            # arm's own file: Claude Code's settings.json under `env`, Codex's
+            # config.toml as TOML keys.
+            case "$HARNESS_ID" in
+                claude) ep_key="ANTHROPIC_BASE_URL"; model_key="ANTHROPIC_MODEL"; fast_key="ANTHROPIC_DEFAULT_HAIKU_MODEL"; cred_key=""; want_endpoint="$ROUTER_ROOT" ;;
+                *)      ep_key="base_url"; model_key="model"; fast_key=""; cred_key="env_key"; want_endpoint="$ROUTER_ROOT/v1" ;;
+            esac
+            got_endpoint="$(cfg_value "$cfg" "$ep_key")"
+            [ "$got_endpoint" = "$want_endpoint" ] \
+                && pass "A-10 the harness configuration's $ep_key is $want_endpoint, the endpoint P-8 fixes for this arm" \
+                || fail "A-10 the harness configuration's $ep_key is '${got_endpoint:-absent}', not the endpoint P-8 fixes for this arm ($want_endpoint): the pane is wired elsewhere"
+            got_model="$(cfg_value "$cfg" "$model_key")"
+            [ "$got_model" = "$ROUTER_ALIAS" ] \
+                && pass "A-10 the harness configuration's $model_key is $ROUTER_ALIAS, P-10's alias" \
+                || fail "A-10 the harness configuration's $model_key is '${got_model:-absent}', not P-10's alias $ROUTER_ALIAS"
+            alias_bad=""
+            for key in "$model_key" $fast_key; do
+                val="$(cfg_value "$cfg" "$key")"
+                [ -n "$val" ] || continue
+                case " $ALIAS_SET_LIST " in
+                    *" $val "*) ;;
+                    *) alias_bad="$alias_bad $key=$val" ;;
+                esac
+            done
+            [ -z "$alias_bad" ] \
+                && pass "A-10 every model the harness configuration names is a member of P-11's alias set" \
+                || fail "A-10 the harness configuration names model(s) outside ROUTER_ALIAS_SET:$alias_bad"
+            if [ -n "$fast_key" ] && [ -n "${ROUTER_FAST_ALIAS:-}" ]; then
+                got_fast="$(cfg_value "$cfg" "$fast_key")"
+                [ "$got_fast" = "$ROUTER_FAST_ALIAS" ] \
+                    && pass "A-10 the harness configuration's $fast_key is $ROUTER_FAST_ALIAS, P-12's alias" \
+                    || fail "A-10 the harness configuration's $fast_key is '${got_fast:-absent}', not P-12's alias $ROUTER_FAST_ALIAS"
+            fi
+            if [ -n "$cred_key" ]; then
+                got_cred="$(cfg_value "$cfg" "$cred_key")"
+                [ "$got_cred" = "$CREDENTIAL_ENV" ] \
+                    && pass "A-10 the harness configuration reads its credential from $CREDENTIAL_ENV, the name the layer records for this arm" \
+                    || fail "A-10 the harness configuration's $cred_key is '${got_cred:-absent}', not this arm's credential variable $CREDENTIAL_ENV"
+            fi
         fi
     fi
 fi
@@ -627,23 +861,46 @@ fi
 # ---------------------------------------------------------------------------
 # P-8 is the ROOT; the models endpoint is <root>/v1/models, which is the path
 # the harness layer's own P-11 check reads at build time.
+#
+# The credential is read out of the PANE's own process environment: a fresh
+# `docker exec` shell gets the container's configuration environment, not the
+# boot process's, so an exec'd `printenv` finds nothing even in a set where the
+# store injected the credential correctly. The value stays inside the container
+# — it is used by the request and never printed. The request is issued from
+# inside that container, which runs the panes: a portable check cannot drive an
+# interactive CLI, so the pane ITSELF is what A-9 and A-10 prove.
 # ---------------------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-11 docker is not available"
 else
-    code="$(docker exec -e CRED_NAME="$ROUTER_CREDENTIAL_ENV" "$HOST_CONTAINER" sh -c '
-        v="$(printenv "$CRED_NAME" 2>/dev/null)"
+    code="$(docker exec -e CRED_NAME="$CREDENTIAL_ENV" "$HOST_CONTAINER" sh -c '
+        v=""
+        for p in /proc/[0-9]*; do
+            cmd="$(tr "\0" " " < "$p/cmdline" 2>/dev/null)"
+            case "$cmd" in
+                *"'"$HARNESS_ID"'"*)
+                    v="$(tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^${CRED_NAME}=//p" | head -1)"
+                    [ -n "$v" ] && break ;;
+            esac
+        done
         [ -n "$v" ] || { echo "NO_CREDENTIAL"; exit 0; }
         curl -s -o /tmp/agent-set-models -w "%{http_code}" -H "Authorization: Bearer $v" "'"$MODELS_URL"'"' 2>&1 | tail -1)"
     if denied "$code"; then
         skip "A-11 $(exec_reason)"
     elif [ "$code" = "NO_CREDENTIAL" ]; then
-        skip "A-11 the host container carries no $ROUTER_CREDENTIAL_ENV in its environment; the store did not inject it"
+        skip "A-11 the pane's process carries no $CREDENTIAL_ENV, so no authenticated request can be made; the store did not inject it (P-20's store, not the chain)"
     elif [ "$code" = "200" ]; then
-        got="$(docker exec "$HOST_CONTAINER" cat /tmp/agent-set-models 2>/dev/null | grep -o "\"$ROUTER_ALIAS\"" | head -1)"
-        [ -n "$got" ] \
-            && pass "A-11 the pane's request to $MODELS_URL returns 200 and the alias '$ROUTER_ALIAS' is in the answer" \
-            || fail "A-11 the router answered 200 but does not list the alias '$ROUTER_ALIAS'"
+        body="$(docker exec "$HOST_CONTAINER" cat /tmp/agent-set-models 2>/dev/null)"
+        # The model list's ids, by field: a raw-body grep for the alias also
+        # matches a provider name or any other metadata that happens to carry it.
+        ids="$(printf '%s' "$body" | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -e 's/^[^:]*:[[:space:]]*"//' -e 's/"$//')"
+        if [ -z "$ids" ]; then
+            skip "A-11 the model list's id values could not be read from the answer, so alias membership is not asserted: $(printf '%s' "$body" | tr -d '\n' | cut -c1-80)"
+        elif printf '%s\n' "$ids" | grep -qxF "$ROUTER_ALIAS"; then
+            pass "A-11 a request from inside $HOST_CONTAINER (the container the panes run in) to $MODELS_URL returns 200 and the model list's ids include '$ROUTER_ALIAS'"
+        else
+            fail "A-11 the router answered 200 but the model list's ids do not include '$ROUTER_ALIAS' (ids read: $(printf '%s' "$ids" | tr '\n' ' '))"
+        fi
         nocode="$(docker exec "$HOST_CONTAINER" sh -c 'curl -s -o /dev/null -w "%{http_code}" "'"$MODELS_URL"'"' 2>/dev/null | tail -1)"
         case "$nocode" in
             401|403) pass "A-11 a request without the router credential is rejected ($nocode)" ;;
@@ -651,7 +908,7 @@ else
             *) fail "A-11 a request without the router credential returned $nocode, not 401/403" ;;
         esac
     else
-        fail "A-11 the pane's request to $MODELS_URL returned '$code', not 200"
+        fail "A-11 the request from $HOST_CONTAINER to $MODELS_URL returned '$code', not 200"
     fi
 fi
 
@@ -665,7 +922,10 @@ elif [ -z "${ROUTER_CONTAINER:-}" ]; then
 else
     docker stop "$ROUTER_CONTAINER" >/dev/null 2>&1
     stopped=$?
-    out="$(docker exec "$HOST_CONTAINER" sh -c 'curl -sS -m 10 "'"$ROUTER_BASE_URL"'/models" 2>&1' 2>&1)"
+    # The real models path, not <root>/models: this router serves <root>/v1/…, so
+    # the shorter path would test a route that does not exist and could report
+    # the edge it exists for (and its opposite) for the wrong reason.
+    out="$(docker exec "$HOST_CONTAINER" sh -c 'curl -sS -m 10 "'"$MODELS_URL"'" 2>&1' 2>&1)"
     rc=$?
     docker start "$ROUTER_CONTAINER" >/dev/null 2>&1
     if [ "$stopped" -ne 0 ]; then
@@ -673,15 +933,27 @@ else
     elif [ "$rc" -eq 0 ]; then
         fail "A-12 the request succeeded while the router was stopped: another provider answered"
     else
-        pass "A-12 with the router stopped the request fails visibly ($(printf '%s' "$out" | tail -1 | cut -c1-60)) and no other provider answers"
+        pass "A-12 with the router stopped the request to $MODELS_URL fails visibly ($(printf '%s' "$out" | tail -1 | cut -c1-60)) and no other provider answers"
     fi
 fi
 
 # ---------------------------------------------------------------------------
 # A-13: Docker access goes through the proxy, and the socket is not reachable
 # ---------------------------------------------------------------------------
+# The row's own expectation includes the network contract — Docker works through
+# the proxy AND the proxy is not exposed to the rest of the set — so it needs
+# both container names: without the proxy's there is nothing to inspect, and
+# without the router's the half that proves a service of the set cannot reach
+# the proxy would be dropped behind a green. Either way the row prints SKIP
+# instead of a partial pass.
+a13_missing=""
+[ -n "${PROXY_CONTAINER:-}" ] || a13_missing="$a13_missing PROXY_CONTAINER"
+[ -n "${ROUTER_CONTAINER:-}" ] || a13_missing="$a13_missing ROUTER_CONTAINER"
+a13_missing_list="$(printf '%s' "$a13_missing" | sed 's/^ //;s/ /, /g')"
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-13 docker is not available"
+elif [ -n "$a13_missing" ]; then
+    skip "A-13 $a13_missing_list not set, so the proxy's network contract cannot be inspected; the row is not asserted rather than reported green without it"
 else
     ver="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker version --format "{{.Server.Version}}" 2>&1' 2>&1)"
     if denied "$ver" || absent "$ver"; then
@@ -689,6 +961,8 @@ else
     elif ! printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+'; then
         skip "A-13 the container's docker client reached no daemon through $DOCKER_PROXY_URL: $(printf '%s' "$ver" | tail -1 | cut -c1-80)"
     else
+        # This is also the host container's half of the resolution contract: its
+        # client resolves the proxy's name out of DOCKER_PROXY_URL.
         pass "A-13 the host container reaches the Docker daemon through $DOCKER_PROXY_URL (server $ver)"
         sock="$(docker exec "$HOST_CONTAINER" sh -c 'ls -l /var/run/docker.sock 2>&1 || true' 2>/dev/null)"
         case "$sock" in
@@ -712,9 +986,7 @@ else
         # set's other services must not be on it. A proxy attached to the set's
         # network puts an unauthenticated daemon port in front of every service —
         # which is what the Docker-access part's own isolation module forbids.
-        if [ -z "$PROXY_CONTAINER" ]; then
-            skip "A-13 proxy network check: PROXY_CONTAINER is not set"
-        elif absent "$(docker inspect "$PROXY_CONTAINER" --format '{{.Id}}' 2>&1)"; then
+        if absent "$(docker inspect "$PROXY_CONTAINER" --format '{{.Id}}' 2>&1)"; then
             skip "A-13 proxy network check: no container named $PROXY_CONTAINER"
         else
             nets="$(docker inspect "$PROXY_CONTAINER" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' 2>/dev/null | tr -d '\r')"
@@ -730,12 +1002,16 @@ else
             else
                 pass "A-13 the proxy is attached only to internal network(s): $(printf '%s' "$nets" | tr '\n' ' ')"
             fi
-            if [ -n "${ROUTER_CONTAINER:-}" ]; then
-                if docker exec "$ROUTER_CONTAINER" sh -c 'getent hosts '"$PROXY_CONTAINER"' >/dev/null 2>&1' 2>/dev/null; then
-                    fail "A-13 the router container resolves the proxy by name, so it shares the proxy's network: the set's services must not"
-                else
-                    pass "A-13 the router container cannot resolve the proxy by name (it is not on the proxy's network)"
-                fi
+            # A refusal from `docker exec` is not a name that does not resolve:
+            # the pass is only printed when the name was actually looked up and
+            # came back empty.
+            res="$(docker exec "$ROUTER_CONTAINER" sh -c 'getent hosts '"$PROXY_CONTAINER"' 2>&1' 2>&1)"; res_rc=$?
+            if [ "$res_rc" -eq 0 ]; then
+                fail "A-13 the router container resolves the proxy by name, so it shares the proxy's network: the set's services must not"
+            elif printf '%s' "$res" | grep -qiE 'not found|not running|denied|permission|cannot connect'; then
+                skip "A-13 router-resolution check: the router container's name lookup could not be read: $(printf '%s' "$res" | tail -1 | cut -c1-80)"
+            else
+                pass "A-13 the router container cannot resolve the proxy by name (it is not on the proxy's network)"
             fi
         fi
     fi
@@ -798,15 +1074,31 @@ if [ "${PROVIDER_CREDENTIAL:-0}" != "1" ]; then
 elif ! command -v docker >/dev/null 2>&1; then
     skip "A-15 docker is not available"
 else
-    code="$(docker exec -e CRED_NAME="$ROUTER_CREDENTIAL_ENV" -e ALIAS="$ROUTER_ALIAS" "$HOST_CONTAINER" sh -c '
-        v="$(printenv "$CRED_NAME" 2>/dev/null)"
+    # The credential comes out of the PANE's process environment, not out of a
+    # fresh exec shell's: `docker exec` starts with the container's configuration
+    # environment, which never holds what `sops exec-env` injected into the boot
+    # process, so the old form sent an empty bearer token and failed a set that
+    # was correctly wired. The value stays inside the container.
+    code="$(docker exec -e CRED_NAME="$CREDENTIAL_ENV" -e ALIAS="$ROUTER_ALIAS" "$HOST_CONTAINER" sh -c '
+        v=""
+        for p in /proc/[0-9]*; do
+            cmd="$(tr "\0" " " < "$p/cmdline" 2>/dev/null)"
+            case "$cmd" in
+                *"'"$HARNESS_ID"'"*)
+                    v="$(tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^${CRED_NAME}=//p" | head -1)"
+                    [ -n "$v" ] && break ;;
+            esac
+        done
+        [ -n "$v" ] || { echo "NO_CREDENTIAL"; exit 0; }
         curl -s -o /tmp/agent-set-completion -w "%{http_code}" -X POST "'"$ROUTER_ROOT"'/v1/chat/completions" \
             -H "Authorization: Bearer $v" -H "Content-Type: application/json" \
             -d "{\"model\":\"$ALIAS\",\"messages\":[{\"role\":\"user\",\"content\":\"reply with the single word: ok\"}],\"max_tokens\":8}"' 2>&1 | tail -1)"
     if denied "$code"; then
         skip "A-15 $(exec_reason)"
+    elif [ "$code" = "NO_CREDENTIAL" ]; then
+        skip "A-15 the pane's process carries no $CREDENTIAL_ENV, so no authenticated completion can be made (the store did not inject it); the alias path is still proven by A-11"
     elif [ "$code" = "200" ]; then
-        pass "A-15 one real completion through the alias '$ROUTER_ALIAS' returns 200. Stated limit: this exercises the router's own path to its provider, not the harness CLI's interactive call"
+        pass "A-15 one real completion through the alias '$ROUTER_ALIAS' returns 200, made with the credential the pane's own process carries. Stated limit: this exercises the router's own path to its provider, not the harness CLI's interactive call"
     else
         fail "A-15 the completion through alias '$ROUTER_ALIAS' returned '$code', not 200"
     fi
@@ -826,18 +1118,35 @@ else
         # The network removal's own status is part of the row: a refusal here means
         # the network survived the teardown, which the previous version of this row
         # reported as removed because it never looked.
+        # The absence has to be OBSERVED, not inferred from a failed command: a
+        # refused or unreachable daemon answers the same way a removed network
+        # does, and calling that "gone" is exactly the pass this row must not
+        # invent. Only the daemon's own not-found answer counts.
         rm_out="$(docker network rm "$AGENT_SET_NETWORK" 2>&1)"; rm_rc=$?
-        if docker network inspect "$AGENT_SET_NETWORK" >/dev/null 2>&1; then
+        insp="$(docker network inspect "$AGENT_SET_NETWORK" 2>&1)"; insp_rc=$?
+        if [ "$insp_rc" -eq 0 ]; then
             fail "A-16 the network $AGENT_SET_NETWORK still exists after teardown (docker network rm exited $rm_rc: $(printf '%s' "$rm_out" | tail -1 | cut -c1-80))"
-        else
+        elif printf '%s' "$insp" | grep -qiE 'no such network|network .* not found|not found'; then
             pass "A-16 the network $AGENT_SET_NETWORK is gone (docker network rm exited $rm_rc)"
+        else
+            skip "A-16 the network's absence could not be observed: $(printf '%s' "$insp" | tail -1 | cut -c1-90) — a refused or unreachable daemon is not a removal"
         fi
         # -a, and the proxy included: a stopped leftover is still a container the
-        # teardown failed to detach, and the proxy is a service of the set.
-        left="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__}|${PROXY_CONTAINER:-__none__})$" || true)"
-        [ -z "$left" ] \
-            && pass "A-16 no container of the set remains, running or stopped (host${ROUTER_CONTAINER:+, router}${PROXY_CONTAINER:+, proxy})" \
-            || fail "A-16 containers still present after teardown: $left"
+        # teardown failed to detach, and the proxy is a service of the set. An
+        # unreadable list is a gap, never "no container remains".
+        if [ -n "$set_missing" ]; then
+            skip "A-16 container check: $set_missing_list not set, so the set's completeness after teardown cannot be asserted"
+        else
+            left_all="$(docker ps -a --format '{{.Names}}' 2>&1)"; left_rc=$?
+            if [ "$left_rc" -ne 0 ]; then
+                skip "A-16 the container list could not be read after teardown: $(printf '%s' "$left_all" | tail -1 | cut -c1-90)"
+            else
+                left="$(printf '%s\n' "$left_all" | grep -E "^(${HOST_CONTAINER}|${ROUTER_CONTAINER}|${PROXY_CONTAINER})$" || true)"
+                [ -z "$left" ] \
+                    && pass "A-16 no container of the set remains, running or stopped (host, router, proxy)" \
+                    || fail "A-16 containers still present after teardown: $(printf '%s' "$left" | tr '\n' ' ')"
+            fi
+        fi
     else
         skip "A-16 no COMPOSE_FILES supplied, so this row cannot detach the composition; the tree and part checks below still run"
     fi
@@ -862,9 +1171,4 @@ fi
 # ---------------------------------------------------------------------------
 # Verdict
 # ---------------------------------------------------------------------------
-printf '\n%d check(s): %d failed, %d skipped\n' "$CHECKS" "$FAILURES" "$SKIPPED"
-if [ "$SKIPPED" -gt 0 ]; then
-    printf 'Skipped rows are not passes: each SKIP above names what the host could not provide.\n'
-fi
-[ "$FAILURES" -eq 0 ] || exit 1
-exit 0
+verdict

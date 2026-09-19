@@ -5,12 +5,12 @@
 #
 # ## What this file is
 #
-# An ordinary POSIX shell script — `sh`, no agent tooling, no vendor construct —
-# whose only subject is ORDER. It walks the dependency edges of SCHEMATIC.md
-# § Implementation Phases 2–5 as nine guarded steps and REFUSES a step whose
-# input does not exist yet. It is the composition's answer to the question the
-# parts each answer for themselves and none answers for the set: what has to
-# exist before what.
+# An ordinary shell script — `sh` syntax throughout, no agent tooling, no vendor
+# construct — whose only subject is ORDER. It walks the dependency edges of
+# SCHEMATIC.md § Implementation Phases 2–5 as nine guarded steps and REFUSES a
+# step whose input does not exist yet. It is the composition's answer to the
+# question the parts each answer for themselves and none answers for the set:
+# what has to exist before what.
 #
 # It creates nothing that a part owns. It builds no image of its own, defines no
 # service, writes no configuration, and never creates or decrypts a secret: it
@@ -30,51 +30,73 @@
 #
 # ## Inputs
 #
-# | Variable | Parameter | Must be |
-# |----------|-----------|---------|
-# | `AGENT_SET_NETWORK` | `P-1` | the shared network name |
-# | `AGENT_TREE_DIR` | `P-2` | an existing host directory holding the agent tree |
-# | `AGENT_IDS` | `P-3` | space-separated agent ids (used by the acceptance script, not this one) |
-# | `AGENT_BASE_REF` | `P-4` | a local tag or a `name@sha256:<manifest list digest>` reference |
-# | `AGENT_HOST_IMAGE` | `P-5` | the host image reference to build or find |
-# | `HARNESS_IMAGE` | `P-6` | the harness layer reference to build or find |
-# | `HARNESS_ID` | `P-7` | the single CLI the layer installs |
-# | `ROUTER_BASE_URL` | `P-8` | the router endpoint, e.g. `http://<router-service>:<port>/v1` |
-# | `ROUTER_CREDENTIAL_ENV` | `P-9` | the variable name the harness reads (default `ROUTER_API_KEY`) |
-# | `ROUTER_ALIAS` | `P-10` | a model id the router serves |
-# | `ROUTER_ALIAS_SET` | `P-11` | the served ids (used by the acceptance script) |
-# | `ROUTER_FAST_ALIAS` | `P-12` | the secondary role's alias, if that arm has one |
-# | `HARNESS_CONTEXT_WINDOW` | `P-13` | tokens for the chosen alias |
-# | `HARNESS_MAX_OUTPUT_TOKENS` | `P-14` | tokens for the chosen alias |
-# | `SECRETS_KEY_DIR` | `P-17` | host directory holding each service's dedicated key |
-# | `SECRETS_STORE_DIR` | `P-18` | host directory holding each service's `.env.encrypted` |
-# | `ROUTER_SECRETS_SERVICE` | `P-19` | the store service for the router's provider keys |
-# | `AGENT_HOST_SECRETS_SERVICE` | `P-20` | the store service for the harness's router credential |
-# | `PARTS_ROOT` | — | a directory holding each part's package checkout, laid out as `<PARTS_ROOT>/<part-name>/` |
-# | `COMPOSE_FILES` | — | the compose files in merge order, glue last |
+# Every input, with the default the script applies and what it must be. A
+# default here and a default in SCHEMATIC.md § Parameters are the same value:
+# the script applies the table's defaults before any guard, so a deployment that
+# follows the table as written is never refused.
 #
-# Optional inputs: `ROUTER_HEALTH_URL` (default: `ROUTER_BASE_URL` with
-# `/health/liveliness` appended — `P-8` is the router root, so nothing is
-# stripped), `ROUTER_CREDENTIAL_FILE` or `ROUTER_CREDENTIAL` for reading
-# `/v1/models` (`P-8` plus `/v1`, appended here exactly as the harness layer
-# appends it per arm), `HARNESS_HOME` (passed to the layer build when set; the
-# layer has the same default), `HARNESS_VERIFY_ENDPOINT=1` (passes the layer's
-# own `P-11` endpoint check through), `BASE_ACCOUNT_UID`/`BASE_ACCOUNT_GID` for
-# the tree-ownership check, `BUILD_BASE=1`, `BUILDKIT=1`, `NO_CACHE=1`.
+# | Variable | Parameter | Default | Must be |
+# |----------|-----------|---------|---------|
+# | `AGENT_SET_NETWORK` | `P-1` | `agent-set` | the shared network name; every service of the set joins it, and step 1 creates it when absent |
+# | `AGENT_TREE_DIR` | `P-2` | *(none — required)* | an existing host directory holding the agent tree |
+# | `AGENT_IDS` | `P-3` | *(none — required)* | space-separated agent ids; the host fragment and the acceptance script read it |
+# | `AGENT_BASE_REF` | `P-4` | *(none — required for step 4)* | a local tag, or a `name@sha256:<manifest list digest>` reference |
+# | `AGENT_HOST_IMAGE` | `P-5` | *(none — required)* | the host image reference to build or find; it is also the image steps 6 and 7 run their probe container from |
+# | `HARNESS_IMAGE` | `P-6` | *(none — required)* | the harness layer reference to build or find |
+# | `HARNESS_ID` | `P-7` | *(none — required for step 8)* | the single CLI the layer installs |
+# | `ROUTER_BASE_URL` | `P-8` | `http://llm-router:4000` | the router **root**, e.g. `http://<router-service>:<port>` — with no `/v1`, because the harness layer derives each arm's protocol path from it; the model list is read here at `<root>/v1/models` |
+# | `ROUTER_CREDENTIAL_ENV` | `P-9` | *derived from `HARNESS_ID`*: `ANTHROPIC_AUTH_TOKEN` for `claude`, `ROUTER_API_KEY` for `codex` | the variable name the CLI the layer installed reads its router credential from — the layer's record at `/usr/local/share/agent-harness/credential-env` inside the image is the authority. The `claude` arm reads a fixed name and ignores this input; one derived name is passed to the build and is the name the host's encrypted store must carry the credential under |
+# | `ROUTER_ALIAS` | `P-10` | *(none — required)* | a model **id** the router serves |
+# | `ROUTER_ALIAS_SET` | `P-11` | *(none — required)* | the served ids, space-separated |
+# | `ROUTER_FAST_ALIAS` | `P-12` | *(empty — the `claude` arm requires it)* | the secondary role's alias, where that arm has one |
+# | `HARNESS_CONTEXT_WINDOW` | `P-13` | *(none — required for step 8)* | tokens for the chosen alias |
+# | `HARNESS_MAX_OUTPUT_TOKENS` | `P-14` | *(empty — the `claude` arm requires it)* | tokens for the chosen alias; the arm whose configuration carries no max-output field is not asked for it |
+# | `SECRETS_KEY_DIR` | `P-17` | `$HOME/sops/age` | host directory holding each service's dedicated key |
+# | `SECRETS_STORE_DIR` | `P-18` | *(none — required)* | host directory holding each service's `.env.encrypted` |
+# | `ROUTER_SECRETS_SERVICE` | `P-19` | `llm-router` | the store service for the router's provider keys; it must differ from `P-20`, because one name would make both containers decrypt one file with one key |
+# | `AGENT_HOST_SECRETS_SERVICE` | `P-20` | `agent-host` | the store service for the harness's router credential; it must differ from `P-19` |
+# | `PARTS_ROOT` | — | *(empty)* | a directory holding each part's package checkout, laid out as `<PARTS_ROOT>/<part-name>/`; without it the three build steps skip and the rest still run |
+# | `COMPOSE_FILES` | — | *(empty)* | the compose files in merge order, glue last; without it no step starts anything and the run exits 3 |
+# | `PART_SCRIPTS` | — | *(empty)* | space-separated `name:path` entries for the parts' own acceptance scripts — `R-3`'s gate, run by step 9 before it starts anything, in the same form `scripts/verify-set.sh` takes for its `A-3` |
+# | `AGENT_HOST_STATE` | — | `AGENT_TREE_DIR` | the host fragment's own parameter for the tree directory. Step 9 derives it from `P-2` when unset and refuses a value naming a different directory, so Compose mounts the tree whose owner step 2 checked |
+# | `BASE_DISTRO_DIGEST` | — | *(none — required by the base build)* | the base part's `P-2`: the manifest list digest of `BASE_DISTRO_IMAGE`, passed to the base build only when `BUILD_BASE=1`. The base part has no default for it, by design |
 #
-# Two rules hold for the step labels and for the checks that follow them:
+# Optional inputs, with this script's default for each: `ROUTER_HEALTH_URL`
+# (`ROUTER_BASE_URL` with `/health/liveliness` appended — `P-8` is the router
+# root, so nothing is stripped), `ROUTER_CREDENTIAL_FILE` or `ROUTER_CREDENTIAL`
+# (unset: the value for reading `/v1/models` is taken from the file when one is
+# named, otherwise from the variable; the path is `P-8` plus `/v1`, appended here
+# exactly as the harness layer appends its own per arm), `HARNESS_HOME` (unset:
+# the layer's own default applies, the base account's home plus the CLI's name),
+# `HARNESS_VERIFY_ENDPOINT` (unset; `=1` passes the layer's `P-11` endpoint check
+# through — that check accepts any HTTP answer, so it proves reachability and
+# never alias membership, and step 7 is the gate that decides membership),
+# `BASE_ACCOUNT_UID` and `BASE_ACCOUNT_GID` (unset: the tree-ownership check
+# skips), `BUILD_BASE` (unset: a missing local base is a refusal, not a build),
+# `BUILDKIT` (default `1`: `DOCKER_BUILDKIT=1` is passed unless it is `0`),
+# `NO_CACHE` (unset: an existing image is accepted as-is).
+#
+# Three rules hold for the labels, the defaults and the checks:
 #
 # - A label is printed BEFORE its step validates its input, so every expansion in
 #   a label uses the empty-default form (`${VAR:-not set}`). `${VAR}` there would
 #   abort the script under `set -u` with the shell's own message instead of the
 #   documented exit 2.
+# - The parameter table's declared defaults (`P-1`, `P-8`, `P-9`, `P-17`, `P-19`,
+#   `P-20`) are applied before the guard that reads them, and the ones Compose
+#   interpolates (`P-1`, `P-17`, `P-19`, `P-20`) are exported: step 9 hands this
+#   script's *environment* to `docker compose`, and an unexported shell variable
+#   would send the merge looking for a value that was never there.
 # - `PARTS_ROOT` gates the three BUILD steps only. The router checks (6, 7) and
-#   the start step (9) have their own inputs and run without it, so a run with no
-#   part checkout is not a run in which every step skipped.
+#   the start step (9) have their own inputs — steps 6 and 7 need `P-1`'s network
+#   and `P-5`'s image to run their probe in, and no part checkout at all — so a
+#   run with no part checkout is not a run in which every step skipped.
 #
 # Neither credential variable is ever printed, and no value read from them
 # appears in any command line this script echoes: the only thing printed about
-# them is whether one was supplied.
+# them is whether one was supplied. The alias gate hands the value to the probe
+# container through its environment (`docker run -e NAME`, the name alone on the
+# command line), and reads the model list back from that container's stdout.
 #
 # ## The nine steps, and why each one refuses
 #
@@ -82,17 +104,19 @@
 # |------|------|--------------|--------------------|
 # | 1 network | creates `AGENT_SET_NETWORK` | the network cannot be created | it inspects first and creates only when absent |
 # | 2 agent tree | checks the directory exists and (when the account ids are supplied) that it is owned by them | the directory is missing, or owned by another uid:gid | it only reads |
-# | 3 store layout | checks each service's `.env.encrypted` and `<service>-keys.txt` exist | any of them is missing — the store part's phases create them, not this script | it only reads |
-# | 4 base image | accepts a published reference as-is, finds or builds a local one | a local base is absent and `BUILD_BASE` is not set | an existing image is accepted |
+# | 3 store layout | rejects two identical store service names, then checks each service's `.env.encrypted` and `<service>-keys.txt` exist | `P-19` and `P-20` are the same name — one store and one key would serve both consumers — or any of the four files is missing, because the store part's phases create them, not this script | it only reads |
+# | 4 base image | accepts a published reference as-is, finds or builds a local one | a local base is absent and `BUILD_BASE` is not set, or the base build is asked for and `BASE_DISTRO_DIGEST` is unset (exit 2) | an existing image is accepted |
 # | 5 host image | builds it `FROM` the base reference | the part's Containerfile is missing, or the build fails | an existing image is accepted unless `NO_CACHE=1` |
-# | 6 router readiness | calls the router's health endpoint | the router does not answer — it must be up before step 7, because step 7 is the gate the set's alias contract depends on | a healthy router is accepted |
-# | 7 alias check | reads `GET <router>/v1/models` with the credential and requires every id in `ROUTER_ALIAS`, `ROUTER_ALIAS_SET` and `ROUTER_FAST_ALIAS` to be in the answer | any of them is absent from the answer, or NO credential was supplied — a gate nobody can open is not a gate, so this refuses rather than skipping past the check the build and the start both follow | it only reads |
-# | 8 harness layer | builds the layer with every alias and window argument, `HARNESS_HOME` when set, and the layer's endpoint check when asked | the build fails — a missing argument or an unreachable endpoint fails HERE, and the refusal names which | an existing image is accepted unless `NO_CACHE=1` |
-# | 9 start the set | merges `COMPOSE_FILES` and runs `docker compose up -d` | a compose file is missing, or compose fails | compose converges an already-running set. Without `COMPOSE_FILES` the step skips and the run exits 3, because nothing was started |
+# | 6 router readiness | runs `curl` against the router's health endpoint **inside a container on `AGENT_SET_NETWORK`**, from `AGENT_HOST_IMAGE` | the router does not answer — it must be up before step 7, because step 7 is the gate the set's alias contract depends on. A probe from the operator's own namespace could not resolve `P-8` at all: the router's fragment publishes no host port | a healthy router is accepted |
+# | 7 alias check | reads `GET <router>/v1/models` with the credential, from a container on `AGENT_SET_NETWORK`, and requires every id in `ROUTER_ALIAS`, `ROUTER_ALIAS_SET` and `ROUTER_FAST_ALIAS` to be one of the answer's model **ids** | the read fails, the answer carries no model id, any named alias is absent from those ids, or NO credential was supplied — a gate nobody can open is not a gate, so this refuses rather than skipping past the check the build and the start both follow | it only reads |
+# | 8 harness layer | builds the layer with the arm-derived credential variable name, every alias and window argument the arm requires, `HARNESS_HOME` when set, and the layer's endpoint check when asked | the build fails — a missing required argument or an unreachable endpoint fails HERE, and the refusal names which; a parameter the table marks required (`P-13`, and `P-14`/`P-12` for the arm that has those fields) is refused with exit 2 rather than filled in with a plausible number | an existing image is accepted unless `NO_CACHE=1` |
+# | 9 start the set | runs the parts' acceptance gate (`PART_SCRIPTS`, `R-3`) and only then merges `COMPOSE_FILES` and runs `docker compose up -d` | a part's script fails, is missing or is not executable — a part that fails its own rows stops the assembly rather than being worked around inside the chain; `AGENT_HOST_STATE` names a tree other than `AGENT_TREE_DIR`; a compose file is missing; or compose fails. Without `COMPOSE_FILES` the step skips and the run exits 3, because nothing was started | compose converges an already-running set, and the parts' scripts give the same verdict when re-run |
 #
 # A refusal never blocks a later step silently: step 8 prints `skip` and says the
 # build would validate against a router that is not known good, rather than
-# producing an image that cannot work.
+# producing an image that cannot work. The one row this script cannot run without
+# its input — the parts' acceptance gate — prints `skip` with that reason, which
+# is a statement about what was not proved, never a pass.
 #
 # ## What it deliberately does not do
 #
@@ -111,5 +135,5 @@
 # |------|---------|
 # | 0 | every step was satisfied or created; the set is up (or the dry run finished) |
 # | 1 | at least one step refused; the summary names how many, and each refusal names the input to fix |
-# | 2 | the invocation is wrong — a required variable is unset |
+# | 2 | the invocation is wrong — a required variable is unset. This includes the inputs only one step needs (`P-4`, `P-13`, `BASE_DISTRO_DIGEST` when building the base, and `P-12`/`P-14` for the arm whose configuration carries those fields) |
 # | 3 | the run completed with no refusal, but no step that starts anything ran (no `COMPOSE_FILES`): nothing was brought up, and the run says so instead of reporting success |
