@@ -73,6 +73,12 @@ already decides it, and this module adds only the per-container view and one det
 - **Reaches:** the daemon, through the socket mounted read-only into this container and no other (Docker-access part's `R-1`,
   `R-6`; the spine's `D-6` row). Consumers reach it only on its internal network, at that part's `P-6`, never published (its
   `R-5`).
+- **Network:** the proxy keeps the internal network its own fragment declares (`docker-proxy`, `internal: true`) and is NOT
+  attached to `AGENT_SET_NETWORK`. The dependency that needs it — the host container in this composition — joins
+  `docker-proxy` instead. The asymmetry is the whole control: the Docker-access part's own module says "any container ON the
+  network can call the proxy. Keep the network's membership minimal; never attach general application containers to it", and a
+  proxy attached to the set's network would put an unauthenticated daemon port in front of every service of the set, the
+  router included. The allowlist bounds which verbs the proxy forwards, not who may ask.
 - **Mounts:** the socket read-only at that part's `P-2`, and its own configuration.
 - **Cannot:** mount the socket writable (its `R-6`); publish its endpoint (its `R-5`); serve an endpoint group not enabled
   with a documented reason (its `R-2`, `R-3`); enable container-control verbs without a written justification (its `R-7`).
@@ -101,7 +107,8 @@ including ones a later phase adds.
 | No added capability | The spine's `R-4`; part 1's `R-15` (none is required for the base's contract) | `docker inspect "$C" --format '{{json .HostConfig.CapAdd}}'` prints `null` |
 | No device | The spine's `R-4`; part 1's `R-15` | `docker inspect "$C" --format '{{json .HostConfig.Devices}}'` prints `[]` or `null` |
 | No host root: not uid 0, no host namespace, no bind of `/` | The spine's `R-4`; part 1's `R-1` (a fixed, unprivileged account) | `docker exec "$C" id -u` prints `1000`, not `0`; `docker inspect "$C" --format '{{.Config.User}} {{.HostConfig.PidMode}} {{.HostConfig.NetworkMode}} {{.HostConfig.IpcMode}}'` names no `host`; `docker inspect "$C" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| grep -xF /` prints nothing |
-| No Docker socket | Part 2's `R-9`, `R-13`; the spine's `R-4`; the Docker-access part's `R-1`, `R-6` (the socket reaches exactly one container, read-only) and `R-2`, `R-7` (that container is a deny-by-default proxy) | `docker inspect "$C" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| grep -F docker.sock` prints nothing; `docker exec "$C" test -S /var/run/docker.sock` exits non-zero |
+| No Docker socket | Part 2's `R-9`, `R-13`; the spine's `R-4`; the Docker-access part's `R-1`, `R-6` (the socket reaches exactly one container, read-only) and `R-2`, `R-7` (that container is a deny-by-default proxy) | Run against every container of the set **except** the proxy: `docker inspect "$C" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| grep -F docker.sock` prints nothing, and `docker exec "$C" test -S /var/run/docker.sock` exits non-zero. Against the proxy the mount IS expected — then it must be the only one, and read-only: `docker inspect "$PROXY_CONTAINER" --format '{{range .Mounts}}{{.Source}} {{.RW}}{{"\n"}}{{end}}' \| grep docker.sock` prints exactly one line ending in `false` |
+| No service of the set on the proxy's network | The Docker-access part's `R-2`, `R-5` (its isolation module: the network's membership stays minimal) | `docker network inspect <each network in the proxy's list> --format '{{.Name}} internal={{.Internal}}'` prints `internal=true` for every one of them, and `docker exec "$ROUTER_CONTAINER" getent hosts "$PROXY_CONTAINER"` exits non-zero while the host container's succeeds |
 | No provider credential in an image | Part 3's `R-8`; part 1's `R-9`; the router part's `R-4` | `docker image inspect "$REF" --format '{{json .Config.Env}}' \| grep -E '(_KEY\|_TOKEN\|_SECRET\|PASSWORD)='` prints nothing, and the store part's `A-3` digest scan run against the image's filesystem prints `0` |
 | No master key in any container | The store part's `R-3`; the spine's `R-8` | The store part's `A-3`: `docker exec "$C" sha256sum "$SECRET_TARGET_PATH"` equals the dedicated key's hash and differs from `$MASTER_KEY_FILE`'s, and the size-filtered `find … -exec sha256sum` prints `0` |
 

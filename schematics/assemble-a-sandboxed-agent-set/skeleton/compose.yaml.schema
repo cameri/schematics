@@ -47,7 +47,7 @@
 # Each line names a part's shipped fragment; what the deployment merges is its own
 # filled-in copy of each (the Docker-access fragment, for instance, ships with an
 # empty `environment:`, which a deployment must complete before the file parses).
-# | the Docker-access part's `skeleton/compose-socket-proxy.yml` | its proxy service, the socket mount (into the proxy only), and its network |
+# | the Docker-access part's `skeleton/compose-socket-proxy.yml` | its proxy service, the socket mount (into the proxy only), and its own internal network (`docker-proxy`, `internal: true`). The proxy is NOT attached to the set's network: the host container joins `docker-proxy` instead, because a proxy on the set's network would put an unauthenticated daemon port in front of every service (see `modules/isolation-rules.md`) |
 # | the host part's `skeleton/compose.service.yaml` | the `agent-host` service: image, entrypoint that starts the multiplexed panes, user, tty, mounts |
 # | the harness layer's `skeleton/compose.service.yaml` | the same `agent-host` service with the layer's image and its decrypt-at-boot entrypoint wrapper: last of the two, so its fields win and the host's keep the rest |
 #
@@ -90,5 +90,7 @@
 #
 # The output is the deployment Compose will actually create. Check three things
 # in it: every service of the set is present (`agent-host`, `llm-router`,
-# `socket-proxy`), every one of them lists the shared network, and no service's
-# `image`, `entrypoint`, or `user` came from this file.
+# `socket-proxy`); `agent-host` and `llm-router` each list `agent-set`, and
+# `agent-host` ALSO lists `docker-proxy` while `socket-proxy` lists only
+# `docker-proxy` (that asymmetry is the isolation contract, not an oversight);
+# and no service's `image`, `entrypoint`, or `user` came from this file.

@@ -55,10 +55,17 @@ secrets:
 # fragment named in the comment; if a service is missing from every fragment,
 # the merge fails with "neither an image nor a build context" — which is the
 # correct outcome: this file must not invent one.
+#
+# The proxy is deliberately NOT listed. It keeps the internal network its own
+# fragment declares (`docker-proxy`), and the container that needs it — the host
+# — joins that network instead. Attaching the proxy to `agent-set` would put an
+# unauthenticated daemon port in front of every service in the set, which the
+# Docker-access part's own isolation module forbids: "any container ON the
+# network can call the proxy. Keep the network's membership minimal; never attach
+# general application containers to it". The proxy publishes no ports (R-5), so
+# nothing else can reach it either way.
 services:
-  agent-host:                 # defined by the harness layer's compose.service.yaml
-    networks: [agent-set]
+  agent-host:                 # defined by the host part's, then the harness layer's, compose.service.yaml
+    networks: [agent-set, docker-proxy]
   llm-router:                 # defined by the router's compose.yml
-    networks: [agent-set]
-  socket-proxy:               # defined by the Docker-access part's compose.yml
     networks: [agent-set]

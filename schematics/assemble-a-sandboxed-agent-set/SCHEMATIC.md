@@ -125,7 +125,11 @@ end-to-end acceptance test. Everything it deploys belongs to a part.
 - **R-4**: Every container in the set MUST run with no published port, no
   `--privileged`, no added capability, no device, and no host root; Docker
   access from a container MUST go through the proxy endpoint the Docker-access
-  part provides, never a mounted socket.
+  part provides, never a mounted socket. The proxy MUST keep the internal
+  network its own fragment declares: no other container of the set is attached
+  to it, and the container that needs Docker joins that network — the proxy does
+  not join the set's, because a proxy on the set's network puts an
+  unauthenticated daemon port in front of every service in it.
 - **R-5**: The set MUST NOT require a registry: the whole chain MUST build and
   run from images on the local daemon. When a registry is used, the digest form
   of every image reference MUST be accepted unchanged.
