@@ -81,7 +81,7 @@
   ].join("\n");
 
   // ─── Catalog rendering ─────────────────────────────────────
-  function renderCatalog(plugins) {
+  function renderCatalog(entries) {
     var host = document.getElementById("catalog-list");
     if (!host) return;
 
@@ -91,9 +91,9 @@
     // The main page shows ONLY featured schematics - the featured flag is
     // the curation mechanism that keeps the page from growing indefinitely.
     // Everything else stays in the catalog and on GitHub.
-    var schematics = (plugins || [])
+    var schematics = (entries || [])
       .filter(function (p) { return p.category !== "authoring" && p.featured; });
-    var pluginEntry = (plugins || []).find(function (p) { return p.category === "authoring"; });
+    var pluginEntry = (entries || []).find(function (p) { return p.category === "authoring"; });
 
     // Hero stat: schematic count (the authoring plugin is not a schematic)
     var statCount = document.getElementById("stat-count");
@@ -181,7 +181,7 @@
         } catch (e) {
           throw new Error("marketplace.json is not valid JSON");
         }
-        renderCatalog(data.plugins);
+        renderCatalog(data.schematics);
       })
       .catch(function (err) {
         console.error("catalog load failed:", err);
