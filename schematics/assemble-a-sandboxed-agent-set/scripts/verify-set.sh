@@ -679,15 +679,49 @@ else
             *"No such file"*|"") pass "A-13 no Docker socket is present in the container's filesystem" ;;
             *) fail "A-13 a Docker socket is present in the container: $sock" ;;
         esac
-        deny="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -1' 2>&1)"
+        deny="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -2' 2>&1)"
         case "$deny" in
             *"failed to connect"*|*"Cannot connect"*|*"cannot connect"*|*"no such file"*)
                 skip "A-13 deny check: the probe reached no daemon through the proxy, so this row cannot see what the proxy answered" ;;
-            *denied*|*"not allowed"*|*"forbidden"*|*"not authorized"*|*"Error response from daemon"*)
-                pass "A-13 the proxy refuses a verb outside the allowlist ($DOCKER_PROXY_ALLOWLIST)" ;;
+            # Only a refusal that names the proxy's own decision counts. Any other
+            # daemon error (a missing image, a build failure, a timeout) is not
+            # evidence that the allowlist refused anything, and treating it as one
+            # would let a broken deployment satisfy this row.
+            *denied*|*"not allowed"*|*"not permitted"*|*"forbidden"*|*Forbidden*|*"not authorized"*|*403*)
+                pass "A-13 the proxy refuses a verb outside the allowlist ($DOCKER_PROXY_ALLOWLIST): $(printf '%s' "$deny" | tail -1 | cut -c1-70)" ;;
             "") skip "A-13 deny check: no answer from the proxy" ;;
-            *) fail "A-13 a privileged run was not refused by the proxy: $(printf '%s' "$deny" | cut -c1-80)" ;;
+            *) skip "A-13 deny check: the probe's answer is not a refusal this row can attribute to the proxy, so it is not evidence: $(printf '%s' "$deny" | tail -1 | cut -c1-90)" ;;
         esac
+        # The proxy's own reach: it must sit on an internal network only, and the
+        # set's other services must not be on it. A proxy attached to the set's
+        # network puts an unauthenticated daemon port in front of every service —
+        # which is what the Docker-access part's own isolation module forbids.
+        if [ -z "$PROXY_CONTAINER" ]; then
+            skip "A-13 proxy network check: PROXY_CONTAINER is not set"
+        elif absent "$(docker inspect "$PROXY_CONTAINER" --format '{{.Id}}' 2>&1)"; then
+            skip "A-13 proxy network check: no container named $PROXY_CONTAINER"
+        else
+            nets="$(docker inspect "$PROXY_CONTAINER" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' 2>/dev/null | tr -d '\r')"
+            external=""
+            for n in $nets; do
+                internal="$(docker network inspect "$n" --format '{{.Internal}}' 2>/dev/null)"
+                [ "$internal" = "true" ] || external="$external $n"
+            done
+            if [ -z "$nets" ]; then
+                fail "A-13 the proxy container is attached to no network"
+            elif [ -n "$external" ]; then
+                fail "A-13 the proxy is attached to a network that is not internal:$external — every service on it can reach the daemon port"
+            else
+                pass "A-13 the proxy is attached only to internal network(s): $(printf '%s' "$nets" | tr '\n' ' ')"
+            fi
+            if [ -n "${ROUTER_CONTAINER:-}" ]; then
+                if docker exec "$ROUTER_CONTAINER" sh -c 'getent hosts '"$PROXY_CONTAINER"' >/dev/null 2>&1' 2>/dev/null; then
+                    fail "A-13 the router container resolves the proxy by name, so it shares the proxy's network: the set's services must not"
+                else
+                    pass "A-13 the router container cannot resolve the proxy by name (it is not on the proxy's network)"
+                fi
+            fi
+        fi
     fi
 fi
 
