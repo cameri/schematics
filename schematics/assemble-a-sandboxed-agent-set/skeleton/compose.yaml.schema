@@ -1,0 +1,199 @@
+# compose.yaml.schema
+#
+# Companion document for `compose.yaml`, the composition's glue file. Read it
+# before editing the file, and read it before merging the file with the parts'
+# fragments for the first time.
+#
+# ## What this file is
+#
+# It is a Compose override file used as glue, not a service definition. Compose
+# lets one deployment be described by several files:
+#
+#   docker compose -f <first> -f <second> … config
+#
+# and merges them in the order given. The merge rule, measured on this file
+# type with `docker compose config` rather than quoted from memory:
+#
+#   * a single-value field (`image`, `command`, `entrypoint`, `user`, …) takes
+#     the value from the LAST file that sets it;
+#   * a map field (`environment`) merges per key, again with the last file
+#     winning a key it sets;
+#   * a list field (`networks`, and the parts' mount lists) is the UNION of the
+#     files' entries, so nothing a part declared is dropped.
+#
+# Two consequences this composition relies on:
+#
+#   1. The glue is merged LAST. It declares no single-value field, so a later
+#      position cannot be used to override a part — and an earlier position
+#      could not protect it from a part either.
+#   2. Attaching every service to the shared network is ADDITIVE. A service that
+#      a part already attached to its own network keeps that one and gains this
+#      one.
+#
+# ## What each top-level key means
+#
+# | Key | Meaning |
+# |-----|---------|
+# | `networks.agent-set.name` | The concrete Docker network name, from `AGENT_SET_NETWORK` (`P-1`, default `agent-set`). One network for the whole set: it is the only path between the parts that is not a bind mount, and it MUST be a non-internal bridge network, because the router needs provider egress on it. |
+# | `networks.agent-set.external` | `true`. The network's lifecycle belongs to the composition, not to Compose: `bring-up.sh` step 1 creates it only when absent and the Removal section removes it with `docker network rm` (`R-13`, row `A-16`). Declared external, the merge never creates it, so `docker compose up` fails with `network … declared as external, but could not be found` when step 1 was skipped — the ordering edge of `R-1` in mechanical form, instead of a network created quietly behind the bootstrap's back. Measured on Compose v5.5.1 against this daemon: a declared, non-external network whose name already exists carries no `com.docker.compose.*` label and draws `a network with name <n> exists but was not created by compose. Set external: true to use an existing network`; the same name with `external: true` and absent gives the hard error above; and `docker compose config` renders either way with the network absent, so the config-only rows that run before step 1 are unaffected. No `driver:` key is carried — Compose ignores it for an external network, and the create that decides the driver is step 1's (`docker network create`, the daemon's default). |
+# | `secrets.<name>.file` | The secret SOURCE: a host file Compose mounts into whichever service references that name. The four names here are contracts with the parts' fragments — a service that references a name nobody declares fails the merge with `secret … not found`, and a name declared here that no service references is dead weight. Two are the encrypted stores, `<SECRETS_STORE_DIR>/<service>/.env.encrypted`; two are the dedicated age keys, `<SECRETS_KEY_DIR>/<service>-keys.txt`. |
+# | `services.<name>.networks` | Network membership only. The service itself is defined by the fragment named in the comment above it. |
+#
+# ## The parts' fragments this file is merged with
+#
+# | Fragment | Owns |
+# |----------|------|
+# | the router's `skeleton/compose.yml` | its service, its port, its own network, its `secrets:` list and its secret names |
+# | the Docker-access part's `skeleton/compose-socket-proxy.yml` | its proxy service, the socket mount (into the proxy only), and its own internal network (`docker-proxy`, `internal: true`). The proxy is NOT attached to the set's network: the host container joins `docker-proxy` instead, because a proxy on the set's network would put an unauthenticated daemon port in front of every service (see `modules/isolation-rules.md`) |
+# | the host part's `skeleton/compose.service.yaml` | the `agent-host` service: image, entrypoint that starts the multiplexed panes, user, tty, mounts — and, in the copy a deployment fills in, `DOCKER_HOST` |
+# | the harness layer's `skeleton/compose.service.yaml` | the same `agent-host` service with the layer's image, its decrypt-at-boot entrypoint wrapper, its `secrets:` list with the `.env` target, and its `SOPS_AGE_KEY_FILE`: last of the two, so its fields win and the host's keep the rest |
+#
+# One part's shipped file is NOT merged, and MUST NOT be added to this list:
+# `encrypt-container-secrets/skeleton/compose-secrets.yml`. It is a generic
+# example of the wiring for ONE service, and merging it unchanged ADDS A SERVICE
+# NO PART DEFINES — measured, it carries `services.myservice` with
+# `image: myorg/myservice:1.4.2` and a `sops exec-env` command, and a merge that
+# includes it lists four services (`agent-host`, `llm-router`, `myservice`,
+# `socket-proxy`) where the composition's own rule (`R-2`, row `A-2`) is that the
+# merged configuration's services are exactly the parts' own. `A-2`'s
+# merged-config half checks both directions — every service in
+# `EXPECTED_SERVICES` present, and no service outside that list — so a merge
+# that picks this file up fails the row and names `myservice` rather than
+# reaching `up` and failing on the pull of an image no part names. That half
+# needs `EXPECTED_SERVICES` supplied; without it the row reports the service
+# count and says completeness was not asserted.
+#
+# This composition does not need the file: each consumer's own fragment already
+# carries its `secrets:` list, its target names and its `SOPS_AGE_KEY_FILE` (the
+# router's `compose.yml`, the harness layer's `compose.service.yaml`), and this
+# glue declares the four secret SOURCES those references resolve to. The store
+# part's own instruction is to "add the two secrets and the `SOPS_AGE_KEY_FILE`
+# environment entry to the service" — so a deployment that adds a service of its
+# own fills that wiring into THAT service's fragment, never by merging the
+# shipped example.
+#
+# Each row above names a part's shipped fragment; what the deployment merges is
+# its own filled-in copy of each. Two of them ship incomplete on purpose: the
+# Docker-access fragment ships with an empty `environment:` (complete it with the
+# endpoint groups the agents need, or the file does not parse — measured,
+# `docker compose config` refuses it as it ships with "services.socket-proxy
+# environment must be a mapping"), and the host fragment ships `DOCKER_HOST`
+# commented out, which the next section is about.
+#
+# ## Parameter placeholders
+#
+# Every value is a parameter (SCHEMATIC.md § Parameters), and the form follows
+# that parameter's own row: `${NAME:-value}` for a row that documents a default,
+# `${NAME:?message}` only for a row that documents none. `:-` substitutes the
+# documented default, so a deployment that sets nothing still merges; the
+# default is the documented one, copied here, not a value this file invents.
+# `:?` makes Compose fail the merge when the variable is unset or empty, which
+# is what a required parameter must do — `bring-up.sh` refuses the same way,
+# with `need` — so a parameter that documents a default must never reach it.
+#
+# | Placeholder | Parameter | Documented default | Form here |
+# |-------------|-----------|--------------------|-----------|
+# | `AGENT_SET_NETWORK` | `P-1` | `agent-set` | `:-agent-set` |
+# | `SECRETS_KEY_DIR` | `P-17` | `~/sops/age` | `:-$HOME/sops/age` — the same path in the form the parts' fragments already use (`${KEY_DIR:-$HOME/sops/age}`); measured, `docker compose config` renders both `$HOME` and `~` to the real home |
+# | `SECRETS_STORE_DIR` | `P-18` | *(none — required)* | `:?` — the only required parameter in this file |
+# | `ROUTER_SECRETS_SERVICE` | `P-19` | `llm-router` | `:-llm-router` |
+# | `AGENT_HOST_SECRETS_SERVICE` | `P-20` | `agent-host` | `:-agent-host` |
+#
+# What the store entry the host decrypts at boot must carry is the harness's own
+# credential variable name, and that name is a property of the image rather than
+# of this file: `/usr/local/share/agent-harness/credential-env` inside the layer
+# records `ANTHROPIC_AUTH_TOKEN` for `HARNESS_ID=claude` and the layer's
+# `ROUTER_CREDENTIAL_ENV` (default `ROUTER_API_KEY`) for `HARNESS_ID=codex`. One
+# name — the built arm's. A store carrying both names a variable no CLI reads.
+#
+# ## The host-fragment contract (`P-15` → `DOCKER_HOST`)
+#
+# `R-2` keeps `environment` out of this file, so the one variable that decides
+# whether the agents reach Docker at all can only come from the deployment's own
+# filled-in copy of the host part's `skeleton/compose.service.yaml`, where the
+# shipped file leaves it commented out:
+#
+#     # DOCKER_HOST: "tcp://<proxy-host>:<port>"
+#
+# Unfilled, the assembled host uses the Docker client's default endpoint,
+# `/var/run/docker.sock` — the path `R-4` forbids mounting and `A-13` requires to
+# be absent from the container's filesystem — so the composition would forbid the
+# socket in one row and hand its agents one in the next. Measured: merging every
+# fragment in the list above with the host fragment as it ships, the merged
+# `agent-host.environment` is `AGENT_IDS`, `AGENT_TREE`, `HERDR_SESSION` and
+# `SOPS_AGE_KEY_FILE` — and no `DOCKER_HOST`.
+#
+# That copy MUST therefore be completed before step 9 starts the set, with:
+#
+# * `DOCKER_HOST` set to `P-15 DOCKER_PROXY_URL` in its **`tcp://` form** — the
+#   Docker client's own scheme, the proxy's service name and port (the
+#   Docker-access part's `P-5`/`P-6`). That part's `http://socket-proxy:2375` is
+#   the URL its own audit script is run with, not a `DOCKER_HOST` value.
+#   Measured: `docker -H http://127.0.0.1:1 version` ends in `unable to resolve
+#   docker endpoint: invalid bind address format: http://127.0.0.1:1`, while
+#   `docker -H tcp://127.0.0.1:1 version` reaches the connection attempt and
+#   reports it cannot connect — the `http://` form is not a Docker client
+#   address at all.
+# * the copy's `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` lines left out: the
+#   Docker-access part puts authentication on its endpoint explicitly out of
+#   scope ("network isolation is the access control"), that endpoint is plain
+#   HTTP on its internal network, and a client told to verify TLS reaches
+#   nothing.
+#
+# The check is a read of the merged configuration, and this is the one to run
+# before `up`:
+#
+# ```sh
+# docker compose … config | grep -A 30 '^  agent-host:' \
+#   | grep -E 'DOCKER_HOST|DOCKER_TLS_VERIFY|DOCKER_CERT_PATH'
+# ```
+#
+# Expected: one `DOCKER_HOST` line in `tcp://` form and no TLS lines. No output
+# at all is the failure this section exists for — the copy was left as it ships.
+#
+# Stated limit, and why this is a contract rather than a check the package runs:
+# row `A-13` supplies the variable on its own command line (`docker exec -e
+# DOCKER_HOST="$DOCKER_PROXY_URL" … docker version`), so it proves the proxy
+# answers a client that was handed the URL — not that the container's own
+# environment carries the variable. Nothing in this package's shipped scripts
+# reads the host container's environment, so nothing here can fail the set over
+# an un-completed copy; the merged-config read above is the evidence until a row
+# reads that environment.
+#
+# ## What this file must never contain
+#
+# `image`, `build`, `command`, `entrypoint`, `environment`, `user`, `ports`,
+# `volumes`, `cap_add`, `privileged`, or `devices` under any service. Each of
+# those belongs to a part, and a second copy here would silently win the merge
+# and drift from the part the pin names. The acceptance row `A-2` fails when one
+# appears. `DOCKER_HOST` is the sharpest case of the rule: the set needs it and
+# this file still must not carry it (see the contract above).
+#
+# ## Verifying a merge
+#
+# ```
+# docker compose \
+#   -f <run-an-llm-router>/skeleton/compose.yml \
+#   -f <restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+#   -f <run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
+#   -f <add-an-agent-harness>/skeleton/compose.service.yaml \
+#   -f compose.yaml \
+#   config
+# ```
+#
+# The output is the deployment Compose will actually create. Check four things
+# in it:
+#
+# ```sh
+# docker compose … config --services      # agent-host, llm-router, socket-proxy — and nothing else
+# ```
+#
+# * exactly those three services are listed: a `myservice` here means the store's
+#   example slipped into the fragment list, which no shipped check catches (see
+#   the store paragraph above);
+# * `DOCKER_HOST` appears under `agent-host.environment` in `tcp://` form, with
+#   no `DOCKER_TLS_VERIFY` or `DOCKER_CERT_PATH` beside it (the contract above);
+# * `agent-host` and `llm-router` each list `agent-set`, and `agent-host` ALSO
+#   lists `docker-proxy` while `socket-proxy` lists only `docker-proxy` (that
+#   asymmetry is the isolation contract, not an oversight);
+# * and no service's `image`, `entrypoint`, or `user` came from `compose.yaml`.

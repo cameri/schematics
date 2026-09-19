@@ -1,0 +1,100 @@
+# The composition's glue. It defines no service.
+#
+# Every service in this deployment comes from a part's own compose fragment,
+# merged BEFORE this file. What this file adds is exactly the part no fragment
+# can own: the network every service joins, the secret sources the parts
+# reference by name, and the network membership of each service — Compose
+# attaches a network per service, so the shared network contract needs one line
+# per service here.
+#
+# Merge order: the LAST file wins a single-value field (image, entrypoint, user,
+# command, working_dir) and list-valued fields such as `networks`, `volumes` and
+# `ports` are UNIONED, not replaced. Measured with `docker compose config` on two
+# fragments that both set `image`, `environment` and `networks`: the later value
+# is the one that survives. Two things follow, and both are load-bearing:
+#
+#   * This file comes last, so nothing here can be overridden by a part — and it
+#     therefore declares no single-value field of its own (R-2, row A-2).
+#   * The harness layer's fragment must come AFTER the host part's: both define
+#     `agent-host`, and the layer's image and decrypt-at-boot entrypoint are the
+#     ones that must win. Reversed, the set runs the harness-free host.
+#
+#   docker compose \
+#     -f <run-an-llm-router>/skeleton/compose.yml \
+#     -f <restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+#     -f <run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
+#     -f <add-an-agent-harness>/skeleton/compose.service.yaml \
+#     -f compose.yaml \
+#     config
+#
+# The store part's `skeleton/compose-secrets.yml` is NOT in that list, and must
+# not be added to it: it is a generic example of the wiring for one service — it
+# defines `services.myservice`, with an image and a `sops exec-env` command — so
+# merging it unchanged adds a service no part defines, where this composition's
+# rule (R-2, row A-2) is that the merged configuration's services are exactly the
+# parts' own. Nothing here needs it: each consumer's own fragment already carries
+# its `secrets:` list, its mount targets and its SOPS_AGE_KEY_FILE (the router's
+# `skeleton/compose.yml`, the harness layer's `skeleton/compose.service.yaml`),
+# and the `secrets:` block below declares the four SOURCES those references
+# resolve to. A deployment that adds a service of its own merges THAT service's
+# own filled-in wiring file, never the shipped example.
+#
+# The other requirement on a deployment's copies is the host fragment's
+# `DOCKER_HOST`. This file may not set it (R-2, row A-2), the host part's copy
+# ships it commented out, and the Docker client's default endpoint is
+# /var/run/docker.sock — the path R-4 forbids mounting and A-13 requires to be
+# absent. See compose.yaml.schema § The host-fragment contract.
+#
+# Every value below comes from a parameter (SCHEMATIC.md § Parameters), in the
+# form that parameter's own row prescribes: a row documenting a default is `:-`
+# with that default, so a deployment that sets nothing still merges; a row
+# documenting none (`P-18` here) is `:?`, which fails the merge loudly rather
+# than handing a container an empty string.
+
+networks:
+  agent-set:
+    # The network's lifecycle is the composition's, not Compose's: `bring-up.sh`
+    # step 1 creates it only when absent (a plain `docker network create`, so
+    # the daemon's default bridge driver, and not internal, because the router
+    # needs provider egress on it) and the Removal section removes it by hand
+    # with `docker network rm` after `docker compose down` (R-13, A-16).
+    # `external: true` is what keeps that order enforceable: Compose never
+    # creates this network, so step 9 fails with "network … declared as
+    # external, but could not be found" when step 1 was skipped, instead of
+    # quietly creating one (R-1). No `driver:` key: Compose ignores it for an
+    # external network, and the create that decides the driver is step 1's.
+    name: ${AGENT_SET_NETWORK:-agent-set}
+    external: true
+
+# The secret SOURCES. The parts' fragments reference these names in their own
+# services' `secrets:` lists (with the targets that make the store's decryption
+# work), so the names are contracts, not choices: an `agent-host` service that
+# references a name nobody declares fails the merge with "secret … not found".
+secrets:
+  agent-host-env-encrypted:
+    file: ${SECRETS_STORE_DIR:?set SECRETS_STORE_DIR}/${AGENT_HOST_SECRETS_SERVICE:-agent-host}/.env.encrypted
+  agent-host-age-keys:
+    file: ${SECRETS_KEY_DIR:-$HOME/sops/age}/${AGENT_HOST_SECRETS_SERVICE:-agent-host}-keys.txt
+  router-env-encrypted:
+    file: ${SECRETS_STORE_DIR:?set SECRETS_STORE_DIR}/${ROUTER_SECRETS_SERVICE:-llm-router}/.env.encrypted
+  router-age-keys:
+    file: ${SECRETS_KEY_DIR:-$HOME/sops/age}/${ROUTER_SECRETS_SERVICE:-llm-router}-keys.txt
+
+# Network membership, and nothing else. Each service below is defined by the
+# fragment named in the comment; if a service is missing from every fragment,
+# the merge fails with "neither an image nor a build context" — which is the
+# correct outcome: this file must not invent one.
+#
+# The proxy is deliberately NOT listed. It keeps the internal network its own
+# fragment declares (`docker-proxy`), and the container that needs it — the host
+# — joins that network instead. Attaching the proxy to `agent-set` would put an
+# unauthenticated daemon port in front of every service in the set, which the
+# Docker-access part's own isolation module forbids: "any container ON the
+# network can call the proxy. Keep the network's membership minimal; never attach
+# general application containers to it". The proxy publishes no ports (R-5), so
+# nothing else can reach it either way.
+services:
+  agent-host:                 # defined by the host part's, then the harness layer's, compose.service.yaml
+    networks: [agent-set, docker-proxy]
+  llm-router:                 # defined by the router's compose.yml
+    networks: [agent-set]
