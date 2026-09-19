@@ -30,9 +30,10 @@
 #                                       manifest agrees on the name. No other
 #                                       file in the repository may declare that
 #                                       format
-#   schematics/*/SCHEMATIC.md           declares a spec: revision whose
+#   schematics/*/SCHEMATIC.md           declares a spec: revision NUMBER, whose
 #                                       schemas/spec-<N>/SCHEMATIC.md.schema
-#                                       companion exists; every modules/,
+#                                       companion exists (a path there is an
+#                                       error: the value resolves the companion); every modules/,
 #                                       scripts/, skeleton/, templates/,
 #                                       assets/ path it references exists in
 #                                       the package
@@ -313,9 +314,10 @@ if can_verify:
         except (UnicodeDecodeError, OSError):
             continue
         if HARNESS_SCHEMA in text:
-            errors.append(f"{path}: declares the harness plugin-marketplace format "
+            errors.append(f"{path}: names the harness plugin-marketplace format "
                           f"({HARNESS_SCHEMA}). Only {MARKETPLACE} implements it: this repository's "
-                          f"catalog of schematics is not a plugin marketplace")
+                          f"catalog of schematics is not a plugin marketplace, so a mention "
+                          f"elsewhere is either a copied claim or dead prose")
 
 # ─── Specs: referenced package files ─────────────────────────────
 # A package path anywhere in the text (prose, code spans, or code blocks), not
@@ -332,12 +334,26 @@ specs = sorted(glob.glob('schematics/*/SCHEMATIC.md'))
 # An inline YAML comment after the value is allowed: the template and the
 # companion both write one.
 FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*$', re.S | re.M)
-SPEC_REVISION = re.compile(r'^spec:\s*([^\s#]+)\s*(?:#.*)?$', re.M)
+# The value is a revision NUMBER: it is substituted into `schemas/spec-<N>/` to
+# find the companion, so any other value is a path this script would go looking
+# for rather than a revision a reader can resolve. `spec: 1/../../schemas/spec-1`
+# resolved back to a real companion under the old check, which only asked
+# whether that file existed — the same "does this path exist" shape as the
+# catalog's spec field. Confining the value to digits is the containment.
+SPEC_REVISION = re.compile(r'^spec:\s*([0-9]+)\s*(?:#.*)?$', re.M)
+ANY_SPEC = re.compile(r'^spec:\s*([^\s#]+)', re.M)
 for spec in specs:
     fm = FRONTMATTER.search(open(spec, encoding='utf-8').read())
-    declared = SPEC_REVISION.search(fm.group(1)) if fm else None
+    body = fm.group(1) if fm else ''
+    declared = SPEC_REVISION.search(body)
     if not declared:
-        errors.append(f"{spec}: frontmatter declares no spec: revision")
+        stray = ANY_SPEC.search(body)
+        if stray:
+            errors.append(f"{spec}: declares spec: {stray.group(1)!r}; a spec names its format "
+                          f"revision as a number (`spec: 1`), which resolves to schemas/spec-1/"
+                          f"SCHEMATIC.md.schema. Any other value is a path, not a revision")
+        else:
+            errors.append(f"{spec}: frontmatter declares no spec: revision")
         continue
     companion = f'schemas/spec-{declared.group(1)}/SCHEMATIC.md.schema'
     if not os.path.isfile(companion):
