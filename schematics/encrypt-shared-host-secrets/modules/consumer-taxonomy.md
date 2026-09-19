@@ -21,7 +21,10 @@ the parse-time mechanics (`compose-interpolation.md`), or rotation
 - The search roots that could name them: the stack directory, any repository
   holding the tooling that uses them, the operator's documented procedures.
 - `scripts/find-consumers.sh <VAR> <search-root>` output: one line per
-  reference, with the mechanism it detected.
+  reference, with the mechanism it detected. Its `--exclude` names the
+  directories that hold transcripts and logs rather than consumers: a session
+  record *about* the variable is not a consumer of it, and it is where the
+  value itself is most likely to be sitting in plaintext.
 - For each reference, one fact the search cannot establish: whether a command
   of yours can run before that consumer needs the value.
 

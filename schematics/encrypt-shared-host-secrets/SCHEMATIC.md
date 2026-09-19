@@ -358,7 +358,7 @@ and take them before their argument.
 ### The wrapper (host consumer interface)
 
 ```
-sops-env-exec [--store <file>] [--age-key <file>] [--require <NAME[,NAME…]>] [--pristine] <command string>
+sops-env-exec [--store <file>] [--age-key <file>] [--require <NAME[,NAME…]>] [--pristine] [--alias-dir <dir>] <command string>
 ```
 
 - `<command string>` is one argument, run through `/bin/sh -c`.
@@ -369,6 +369,9 @@ sops-env-exec [--store <file>] [--age-key <file>] [--require <NAME[,NAME…]>] [
   **before** exec'ing anything (R-5). Names are compared, never values.
 - Default key: `P-8 MASTER_KEY_FILE`. `--age-key` points at a projection's
   consumer key instead.
+- `--alias-dir` overrides where the `.env`-named symlink is created; the
+  default is `${RUNTIME_DIR}/sops-alias`, created 0700. The wrapper needs no
+  other state: it writes that one symlink and nothing else.
 - Exit status is the child's own, so a wrapped script's failure is not masked.
 - Missing or unreadable store: exit non-zero, nothing runs.
 
@@ -456,8 +459,10 @@ it with a class and a remedy.
 Steps:
 1. For each candidate variable: `scripts/find-consumers.sh <VAR> <search-root>`
    (the stack directory, plus any repository or tooling directory that names
-   it). Skip if the inventory already carries a row for that variable and its
-   reference count.
+   it), adding `--exclude <dir>` for every directory the host's tooling keeps
+   session transcripts or logs in — they discuss the variable, they do not
+   consume it, and one of them will hold the value. Skip if the inventory
+   already carries a row for that variable and its reference count.
 2. Assign each reference a class from `modules/consumer-taxonomy.md`
    (wrappable, path-reading, parse-time, or non-consumer) and the remedy
    (a), (b) or (c) for anything that cannot decrypt.

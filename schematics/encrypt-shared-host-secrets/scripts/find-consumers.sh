@@ -3,7 +3,7 @@
 # find-consumers.sh - inventory every consumer of a variable, with its mechanism.
 #
 # Usage:
-#   find-consumers.sh [--all] [--max-size <bytes>] <VAR> [<search-root> ...]
+#   find-consumers.sh [--all] [--max-size <bytes>] [--exclude <dir>]… <VAR> [<search-root> ...]
 #
 # Prints one tab-separated row per reference:
 #
@@ -32,10 +32,13 @@
 #                              before classifying it: documentation, an example,
 #                              and a real consumer all land here.
 #
-# Excluded by default, because they are transcripts rather than consumers and
-# one of them will be a session log: `.git`, `.omp`, `.omp-agent`,
-# `node_modules`, `vendor`, `.venv`, `site-packages`, and files at or above
-# `--max-size` (default 1048576 bytes). `--all` searches everything.
+# Excluded by default, because they are code rather than consumers: `.git`,
+# `node_modules`, `vendor`, `.venv`, `site-packages`; plus any file at or above
+# `--max-size` (default 1048576 bytes). A host whose tooling keeps session
+# transcripts or logs in its own directories adds them with `--exclude`, which
+# repeats: those directories hold conversations about the variable, not
+# consumers of it, and one of them will contain the value itself. `--all`
+# searches everything.
 #
 # Exit status: 0 when at least one reference was found, 1 when none was, 2 on a
 # usage error. The summary goes to stderr; only rows go to stdout.
@@ -46,16 +49,18 @@
 set -eu
 
 usage() {
-    sed -n '3,42p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,43p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
 }
 
 ALL=0
 MAXSIZE=1048576
+EXCLUDES=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --all)      ALL=1; shift ;;
         --max-size) [ "$#" -ge 2 ] || usage; MAXSIZE="$2"; shift 2 ;;
+        --exclude)  [ "$#" -ge 2 ] || usage; EXCLUDES="$EXCLUDES $2"; shift 2 ;;
         -h|--help)  usage ;;
         --)         shift; break ;;
         -*)         echo "find-consumers: unknown option: $1" >&2; usage ;;
@@ -86,7 +91,11 @@ for ROOT in "$@"; do
     if [ "$ALL" -eq 1 ]; then
         PRUNE=""
     else
-        PRUNE='( -name .git -o -name .omp -o -name .omp-agent -o -name node_modules -o -name vendor -o -name .venv -o -name site-packages ) -prune -o'
+        PRUNE='( -name .git -o -name node_modules -o -name vendor -o -name .venv -o -name site-packages'
+        for X in $EXCLUDES; do
+            PRUNE="$PRUNE -o -name $X"
+        done
+        PRUNE="$PRUNE ) -prune -o"
     fi
     # `--`-terminated file list piped to grep: no recursion, no argv limits, and
     # /dev/null keeps grep from ever reading stdin when the list is empty.
