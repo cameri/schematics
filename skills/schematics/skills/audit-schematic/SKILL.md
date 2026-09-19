@@ -12,17 +12,33 @@ whether each acceptance row can actually fail.
 </objective>
 
 <quick_start>
-`/schematics:audit-schematic <path-to-package-or-SCHEMATIC.md> [revision]`
+`/schematics:audit-schematic <path-to-package-or-SCHEMATIC.md | PR number> [revision] [base]`
 
 The second argument names the revision to audit (a sha, a branch, or a pull
-request head). Without it the auditor audits what is checked out and says so.
+request head) and the third its base branch; a pull request number resolves
+both. The revision is materialized before the auditor sees it, so the tree read
+and the sha reported are the same thing. Without a revision the auditor audits
+what is checked out and says so.
 </quick_start>
 
 <workflow>
-1. Resolve the target from `$ARGUMENTS`. A directory that contains `SCHEMATIC.md`
-   is the package; a path to `SCHEMATIC.md` means its directory. Resolve the
-   revision too: `git -C <repo> rev-parse <ref-or-HEAD>`, and if the argument is
-   a pull request, resolve its head with `gh pr view <n> --json headRefOid`.
+1. Resolve the target **and both sides of it**, then materialize the revision you
+   will report. An audit is of a revision, not of whatever a path happens to
+   hold, and a pull request's validator rule needs its base. A directory that
+   contains `SCHEMATIC.md` is the package; a path to `SCHEMATIC.md` means its
+   directory.
+   - head: `gh pr view <n> --json headRefOid` for a pull request, else
+     `git -C <repo> rev-parse <ref>`
+   - base: the pull request's base branch (`gh pr view <n> --json baseRefName`),
+     else the repository's default branch
+   - materialize the head so the auditor reads the tree it reports:
+     `git -C <repo> worktree add --detach <tmp-dir> <head-sha>`, or
+     `git archive <head-sha> | tar -x -C <tmp-dir>` when the repo is not local
+   - pass the auditor `<tmp-dir>/<package-path>`, the head sha, and the base ref;
+     remove the worktree when the audit ends
+   Auditing the supplied working-tree path under a different sha's name is the
+   false audit this skill exists to catch, and a pull request's `BASE_REF` check
+   silently skips when the base is missing.
    If no target was given, ask which package to audit — do not guess.
 2. Invoke the `schematics:schematic-auditor` subagent via the `Agent` tool,
    passing the resolved package path and revision. The auditor runs the

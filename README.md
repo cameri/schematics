@@ -143,7 +143,7 @@ build specification for the capability it provides:
 
 | Plugin | Kind | What it provides |
 |--------|------|------------------|
-| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` and `build-schematic` skills: author, reverse-engineer, maintain, and build schematics from any repo |
+| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic`, `build-schematic` and `audit-schematic` skills: author, reverse-engineer, maintain, build schematics from any repo, and audit a package against the claims inside it |
 | [`authorize-docker-requests`](schematics/authorize-docker-requests/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`authorize-docker-requests/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 | [`encrypt-container-secrets`](schematics/encrypt-container-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 | [`restrict-docker-api-access`](schematics/restrict-docker-api-access/SCHEMATIC.md) | infrastructure | A spec-only schematic: a deny-by-default Docker API proxy in front of docker.sock, with an audit script that proves the allowlist |

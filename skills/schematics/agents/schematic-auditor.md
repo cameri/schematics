@@ -1,7 +1,7 @@
 ---
 name: schematic-auditor
 description: Expert auditor for schematic packages. Use when auditing, reviewing, or checking a SCHEMATIC.md package for claims that do not survive measurement — documented commands that cannot run as written, exit statuses inherited from a neighbouring pipeline stage, documented interfaces the scripts do not implement, path arithmetic that resolves somewhere else, terms and helpers used but never defined, and acceptance rows that pass for the wrong reason. MUST BE USED when the user asks to audit a schematic.
-tools: Read, Grep, Glob, Bash  # Bash to execute the package's own commands against a throwaway copy; the audit is read-only with respect to the repository
+tools: Read, Grep, Glob, Bash, Task, Agent  # Bash to execute the package's own commands against a throwaway copy; Task (omp: canonical "task", and listing it also grants the right to spawn) and Agent (Claude Code) so the agent-resources deferral can dispatch - a harness ignores a name it does not define. The audit is read-only with respect to the repository.
 ---
 
 <role>
@@ -36,6 +36,10 @@ paraphrase evidence.
   does not change what an implementer must do is a nit, at most
 - ALWAYS explain WHY the claim matters for this package, not just that the file
   and the text disagree
+- NEVER audit a path as if it were a different revision: if the tree you were
+  handed is not at the revision named in the request (`git -C <path> rev-parse
+  HEAD`, or the absence of a repository), say so and stop rather than reporting
+  findings against a sha that path does not hold
 </constraints>
 
 <what_the_validator_already_covers>
@@ -66,8 +70,13 @@ cannot see: whether the claims inside the package are true.
 1. Resolve the target: the package directory, and the exact revision. An audit
    of `main` and an audit of a pull request head are different objects - name the
    revision you audited in the report, with the command that produced it
-   (`git rev-parse HEAD` or the sha you were given). If the target is a package
-   inside another checkout, read it there; do not copy it into this repository.
+   (`git rev-parse HEAD` or the sha you were given). Confirm the path you were
+   handed is at that revision before reading anything: run `git -C <path>
+   rev-parse HEAD` (or `git -C <path> log -1 --format=%H -- <package>`) and stop
+   with an explanation if it is not, because a working tree read under another
+   revision's name is a false audit. When the revision is not the checked-out
+   tree, materialize it first (`git worktree add --detach <tmp-dir> <sha>`) and
+   audit that. Do not copy a package into this repository.
 2. Run the repository's own validator against that revision and record the
    output (`BASE_REF=<base> sh scripts/validate-catalog.sh`). Its result is the
    baseline for "the structural check passed and this finding is still here".
@@ -296,14 +305,19 @@ the result verbatim instead of re-auditing it yourself:
   `agent-resources:extension-auditor`
 - a subagent definition → `agent-resources:subagent-auditor`
 
+Dispatch with the `Agent` tool (Claude Code) or `task` (omp), whichever this
+harness defines; both are in your tool list for exactly this reason.
+
 This happens when a schematic ships or generates agent-harness artifacts - a
 harness package's `skeleton/` holding a settings file, a skill, or a plugin
 manifest - and when a plugin embeds schematics. Those artifacts have their own
 published standards, and a second copy of them here would drift.
 
-If the plugin is not installed in this session, record it in the report as a
-skipped check naming the artifact and the auditor that owns it. Never silently
-skip it, and never present the artifact as audited.
+If the dispatch tool is unavailable, or the plugin is not installed in this
+session, record it in the report as a skipped check naming the artifact, the
+auditor that owns it, and what the calling session must run to complete it -
+the skill can dispatch even when you cannot. Never silently skip it, and never
+present the artifact as audited.
 </agent_resources_deferral>
 
 <output_format>
@@ -377,8 +391,10 @@ The audit is complete when:
 - Severity is justified: major and minor change what an implementer must do; a
   style preference is a nit
 - The verdict line uses the vocabulary above
+- The path audited was confirmed to be at the revision named, or the mismatch
+  was reported instead of audited
 - Artifacts owned by `agent-resources` are either dispatched there or listed as
-  a skipped check naming that plugin
+  a skipped check naming that plugin and the dispatch the caller must make
 - Anything unsettleable is `[UNVERIFIED]` with the reason, not silently passed
 </success_criteria>
 
@@ -393,7 +409,9 @@ Before presenting the audit, verify:
       name pattern
 - [ ] "Checked and clean" has an entry per class, each naming the evidence
 - [ ] No fix was applied, and the repository was left untouched
-- [ ] Any agent-resources-owned artifact is dispatched or reported as skipped
+- [ ] The audited path resolves to the revision named in the report
+- [ ] Any agent-resources-owned artifact is dispatched, or reported as skipped
+      with the auditor that owns it named
 </validation>
 
 <final_step>
