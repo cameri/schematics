@@ -186,9 +186,7 @@ for p in entries:
     # that walks out with a '..' segment or starts at '/'. Both sides are
     # resolved (symlinks included) and the resolved target must stay under the
     # resolved package directory. The schema rejects those shapes too; this is
-    # the check that holds whatever the reader of the catalog does with the
-    # value, and it is the one that would have caught a pinned path that leaves
-    # the package without leaving the repository.
+    # the check that holds whatever a reader of the catalog does with the value.
     base = os.path.realpath(src)
     target = os.path.realpath(os.path.join(src, spec))
     if os.path.commonpath([base, target]) != base:
