@@ -4,7 +4,13 @@
   "title": "Agentic Schematics catalog",
   "description": "The format of .agent-schematics/marketplace.json: a repository-local index of the schematic packages this repository publishes, one entry per package, so a builder can discover them without reading the tree. Revision 1, selected by the catalog's own $schema value — the same way a SCHEMATIC.md selects its format companion with its spec: frontmatter field. A catalog is NOT a plugin marketplace: it lists build specifications, not installable plugins, and no entry is installed by any harness. The repository's plugin marketplace, if it has one, is the Claude Code format file at .claude-plugin/marketplace.json, which lists plugins and nothing else.",
   "type": "object",
-  "required": ["$schema", "name", "description", "owner", "schematics"],
+  "required": [
+    "$schema",
+    "name",
+    "description",
+    "owner",
+    "schematics"
+  ],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -35,7 +41,9 @@
   "$defs": {
     "owner": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -54,7 +62,12 @@
     },
     "schematic": {
       "type": "object",
-      "required": ["name", "description", "source", "category"],
+      "required": [
+        "name",
+        "description",
+        "source",
+        "category"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -74,7 +87,8 @@
         "spec": {
           "type": "string",
           "default": "SCHEMATIC.md",
-          "description": "The file a reader fetches to read the capability, relative to source. Defaults to SCHEMATIC.md."
+          "description": "The file a reader fetches to read the capability, relative to source and inside the package: no leading '/', no '..' segment. Defaults to SCHEMATIC.md.",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
         },
         "category": {
           "type": "string",

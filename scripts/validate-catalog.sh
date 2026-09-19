@@ -11,17 +11,24 @@
 #                                       fields, types, patterns, and no field
 #                                       it does not define. Every entry is a
 #                                       schematic directory, names are unique,
-#                                       sources and spec files exist, exactly
-#                                       five featured, every `composes` entry
-#                                       names another entry
+#                                       sources and spec files exist inside the
+#                                       package they belong to (a spec path that
+#                                       resolves out of its package is an error,
+#                                       whether it leaves through a '..' segment
+#                                       or a symlink), exactly five featured,
+#                                       every `composes` entry names another
+#                                       entry
 #   .claude-plugin/marketplace.json     the plugin marketplace, in the harness's
 #     (the plugin marketplace)           own format: a real directory (never a
 #                                       symlink, which would put the catalog at
-#                                       this path), declaring that format and
-#                                       listing exactly one plugin — the
-#                                       authoring plugin — whose source carries
-#                                       a plugin manifest. No other file in the
-#                                       repository may declare that format
+#                                       this path), declaring that format
+#                                       exactly, under the marketplace id every
+#                                       documented install names, and listing
+#                                       exactly one plugin — the authoring
+#                                       plugin — at its canonical source, whose
+#                                       manifest agrees on the name. No other
+#                                       file in the repository may declare that
+#                                       format
 #   schematics/*/SCHEMATIC.md           declares a spec: revision whose
 #                                       schemas/spec-<N>/SCHEMATIC.md.schema
 #                                       companion exists; every modules/,
@@ -174,7 +181,20 @@ for p in entries:
         continue                     # the shape is the schema check's business
     src = p['source'][2:] if p['source'].startswith('./') else p['source']
     spec = p.get('spec', 'SCHEMATIC.md')
-    if not os.path.isfile(os.path.join(src, spec)):
+    # The row is "the entry names a file inside its package", not "that file
+    # exists": 'exists' is answered by any path on this machine, including one
+    # that walks out with a '..' segment or starts at '/'. Both sides are
+    # resolved (symlinks included) and the resolved target must stay under the
+    # resolved package directory. The schema rejects those shapes too; this is
+    # the check that holds whatever the reader of the catalog does with the
+    # value, and it is the one that would have caught a pinned path that leaves
+    # the package without leaving the repository.
+    base = os.path.realpath(src)
+    target = os.path.realpath(os.path.join(src, spec))
+    if os.path.commonpath([base, target]) != base:
+        errors.append(f"{CATALOG}: {p['name']}: spec {spec!r} resolves to {target}, outside its "
+                      f"package {base}. A catalog entry names a file the package owns")
+    elif not os.path.isfile(target):
         errors.append(f"{CATALOG}: {p['name']}: missing {src}/{spec}")
     for c in p.get('composes', []):
         if c not in names:
@@ -191,7 +211,16 @@ if len(featured) != 5:
 # plausible-looking symptom (the client installs something), so it is an error
 # rather than a style note.
 MARKETPLACE = '.claude-plugin/marketplace.json'
-HARNESS_SCHEMA = 'anthropic.com/claude-code/marketplace.schema.json'
+HARNESS_SCHEMA = 'https://anthropic.com/claude-code/marketplace.schema.json'
+# The two identities a plugin client resolves: the marketplace a plugin installs
+# from and the plugin it installs, which together are the name a user types
+# (`schematics@cameri-schematics`) and the install path under the cache. They are
+# stated here rather than inferred from the file, because a check that reads the
+# value it is checking accepts any value — including a rename that silently
+# breaks every documented install path.
+MARKETPLACE_NAME = 'cameri-schematics'
+PLUGIN_NAME = 'schematics'
+PLUGIN_SOURCE = './skills/schematics'
 if os.path.islink('.claude-plugin'):
     errors.append(f".claude-plugin is a symlink. The plugin marketplace must be a real file: "
                   f"a symlink to the catalog puts a schematic index where a plugin client "
@@ -206,9 +235,17 @@ else:
         errors.append(f"{MARKETPLACE}: does not parse ({e})")
         market = None
     if market is not None:
-        if HARNESS_SCHEMA not in str(market.get('$schema', '')):
+        if market.get('$schema') != HARNESS_SCHEMA:
             errors.append(f"{MARKETPLACE}: $schema is {market.get('$schema')!r}; a plugin "
-                          f"marketplace declares the harness format it implements")
+                          f"marketplace declares the harness format it implements, exactly "
+                          f"{HARNESS_SCHEMA!r} — a value that merely mentions it is a different "
+                          f"format with a familiar name")
+        if market.get('name') != MARKETPLACE_NAME:
+            errors.append(f"{MARKETPLACE}: name is {market.get('name')!r}; it must be "
+                          f"{MARKETPLACE_NAME!r}, because that string is the marketplace id every "
+                          f"documented install names (<plugin>@{MARKETPLACE_NAME})")
+        if not isinstance(market.get('owner'), dict):
+            errors.append(f"{MARKETPLACE}: has no 'owner' object")
         listed = market.get('plugins')
         if not isinstance(listed, list):
             errors.append(f"{MARKETPLACE}: has no 'plugins' list")
@@ -219,13 +256,32 @@ else:
                           f"marketplace ships exactly one plugin: the repository's schematics "
                           f"are catalog entries, not plugins, and do not belong here")
         for p in listed:
-            if not isinstance(p, dict) or not p.get('source'):
+            if not isinstance(p, dict):
+                errors.append(f"{MARKETPLACE}: a plugin entry is {type(p).__name__}, not an object")
                 continue
-            src = p['source'][2:] if p['source'].startswith('./') else p['source']
-            manifest = os.path.join(src, '.claude-plugin/plugin.json')
-            if not os.path.isfile(manifest):
-                errors.append(f"{MARKETPLACE}: {p.get('name')}: source {p['source']} carries no "
-                              f"{manifest}, so nothing installs from this entry")
+            if p.get('name') != PLUGIN_NAME:
+                errors.append(f"{MARKETPLACE}: plugin name is {p.get('name')!r}; it must be "
+                              f"{PLUGIN_NAME!r} — that is the name a user installs, and the "
+                              f"description's own words name its skills")
+            if p.get('source') != PLUGIN_SOURCE:
+                errors.append(f"{MARKETPLACE}: {p.get('name')}: source is {p.get('source')!r}; it "
+                              f"must be {PLUGIN_SOURCE!r}. Stating the source rather than accepting "
+                              f"any path that happens to resolve stops an entry from pointing the "
+                              f"plugin client at another directory — or outside the repository")
+            manifest_path = os.path.join(PLUGIN_SOURCE[2:], '.claude-plugin/plugin.json')
+            if not os.path.isfile(manifest_path):
+                errors.append(f"{MARKETPLACE}: {PLUGIN_SOURCE} carries no {manifest_path}, so "
+                              f"nothing installs from this entry")
+            else:
+                try:
+                    manifest = json.load(open(manifest_path))
+                except ValueError as e:
+                    errors.append(f"{manifest_path}: does not parse ({e})")
+                    manifest = {}
+                if manifest.get('name') != PLUGIN_NAME:
+                    errors.append(f"{manifest_path}: name is {manifest.get('name')!r} but "
+                                  f"{MARKETPLACE} lists it as {PLUGIN_NAME!r}; the installed plugin "
+                                  f"takes its name from the manifest, so the two must agree")
 
 # ─── No other file may declare the harness marketplace format ────
 # The catalog used to, by pointing its $schema at that schema while listing

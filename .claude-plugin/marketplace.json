@@ -11,7 +11,6 @@
       "name": "schematics",
       "description": "The authoring plugin — authors, reverse-engineers, and maintains agentic schematics: self-contained build specifications anyone can implement independently, without central coordination. Provides the create-schematic, build-schematic and audit-schematic skills.",
       "source": "./skills/schematics",
-      "spec": "skills/create-schematic/SKILL.md",
       "category": "authoring",
       "author": {
         "name": "Ricardo Arturo Cabral Mejía",
