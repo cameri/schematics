@@ -406,6 +406,37 @@ for spec in specs:
                 continue
             pins_verified += 1
 
+# ─── llms.txt: every catalogued schematic is listed, inside its section ──
+# llms.txt is the first file a builder's model reads, and nothing generates
+# it: the two lists drifted silently until a package shipped in the catalog
+# and nowhere else. The catalog is the source; llms.txt is checked against it
+# here, including that each entry sits in the Schematics section rather than
+# appended somewhere below it.
+if os.path.exists('llms.txt'):
+    llms = open('llms.txt', encoding='utf-8').read()
+    lines = llms.splitlines()
+    heads = [i for i, l in enumerate(lines) if l.startswith('## ')]
+    start = next((i for i, l in enumerate(lines) if l.strip() == '## Schematics'), None)
+    if start is None:
+        errors.append("llms.txt: no '## Schematics' section")
+    else:
+        end = next((i for i in heads if i > start), len(lines))
+        section = "\n".join(lines[start:end])
+        listed = set(re.findall(
+            r'\[([a-z0-9-]+)\]\(https://schemaformat\.ai/schematics/\1/SCHEMATIC\.md\)', section))
+        outside = set(re.findall(
+            r'\[([a-z0-9-]+)\]\(https://schemaformat\.ai/schematics/\1/SCHEMATIC\.md\)',
+            "\n".join(lines[:start] + lines[end:])))
+        catalogued = {p['name'] for p in plugins if p.get('source', '').startswith('./schematics/')}
+        for name in sorted(catalogued - listed):
+            where = " (listed outside the Schematics section)" if name in outside else ""
+            errors.append(f"llms.txt: {name!r} is in the catalog but not listed in the Schematics section{where}")
+        for name in sorted(listed - catalogued):
+            errors.append(f"llms.txt: {name!r} is listed but is not a schematic in the catalog")
+        for i, line in enumerate(lines):
+            if line.count('](https://schemaformat.ai/schematics/') > 1:
+                errors.append(f"llms.txt:{i + 1}: two entries on one line; they render as one")
+
 for w in warnings:
     print('WARN: ' + w)
 if errors:
