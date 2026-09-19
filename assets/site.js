@@ -81,7 +81,7 @@
   ].join("\n");
 
   // ─── Catalog rendering ─────────────────────────────────────
-  function renderCatalog(entries) {
+  function renderCatalog(entries, pluginEntries) {
     var host = document.getElementById("catalog-list");
     if (!host) return;
 
@@ -93,7 +93,7 @@
     // Everything else stays in the catalog and on GitHub.
     var schematics = (entries || [])
       .filter(function (p) { return p.category !== "authoring" && p.featured; });
-    var pluginEntry = (entries || []).find(function (p) { return p.category === "authoring"; });
+    var pluginEntry = (pluginEntries || []).find(function (p) { return p.category === "authoring"; });
 
     // Hero stat: schematic count (the authoring plugin is not a schematic)
     var statCount = document.getElementById("stat-count");
@@ -173,6 +173,25 @@
 
   // ─── Init ──────────────────────────────────────────────────
   function init() {
+    // The catalog and the authoring plugin are two files since the split:
+    // .agent-schematics/marketplace.json holds the schematics, and
+    // .claude-plugin/marketplace.json holds the plugin that authors them.
+    // This page renders both, so it reads both - the plugin entry no longer
+    // travels inside the schematics array, and searching that array for it
+    // leaves the plugin section empty.
+    function fetchPluginEntries() {
+      return fetchText(RAW_BASE + ".claude-plugin/marketplace.json")
+        .then(function (json) {
+          return JSON.parse(json).plugins || [];
+        })
+        .catch(function (err) {
+          // The catalog is the page; the plugin card is a convenience. Report
+          // the failure and still render the schematics.
+          console.error("plugin marketplace load failed:", err);
+          return [];
+        });
+    }
+
     fetchText(RAW_BASE + ".agent-schematics/marketplace.json")
       .then(function (json) {
         var data;
@@ -181,7 +200,9 @@
         } catch (e) {
           throw new Error("marketplace.json is not valid JSON");
         }
-        renderCatalog(data.schematics);
+        return fetchPluginEntries().then(function (plugins) {
+          renderCatalog(data.schematics, plugins);
+        });
       })
       .catch(function (err) {
         console.error("catalog load failed:", err);
