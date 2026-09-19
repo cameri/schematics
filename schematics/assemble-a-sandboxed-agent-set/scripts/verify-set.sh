@@ -438,7 +438,51 @@ else
             if [ -n "$hits" ]; then
                 fail "A-8 the image history carries a credential-shaped value: $(printf '%s' "$hits" | head -1 | cut -c1-80)"
             else
-                pass "A-8 the image history carries no credential-shaped value. Stated limit: a credential COPYed as a file, or assembled from parts at build time, is not seen by this scan"
+                pass "A-8 the image history carries no credential-shaped value. Stated limit: a credential assembled from parts at build time is not seen by a history scan — the filesystem scan below covers the file case"
+            fi
+        fi
+        # The filesystem, not only the history. An earlier version of this row
+        # scanned history alone, which cannot see a credential COPYed in as a file
+        # — the shape the layer's R-8 actually forbids. The scan is run inside a
+        # container made from the image (create/start/logs, because `docker exec`
+        # is denied on hosts whose daemon is behind an authorization proxy).
+        cid="$(docker create --label org.testcontainers=true --entrypoint sh "$HARNESS_IMAGE" -c '
+            set -u
+            H="${CLAUDE_CONFIG_DIR:-${CODEX_HOME:-}}"
+            found=""
+            for d in "$H" /home/* /root; do
+                [ -n "$d" ] && [ -d "$d" ] || continue
+                found="$found$(find "$d" -maxdepth 3 -type f \( -name auth.json -o -name credentials.json -o -name "*.credentials*" -o -name .env -o -name "*.pem" -o -name "id_rsa" -o -name id_ed25519 \) 2>/dev/null | head -5)
+"
+            done
+            for f in "$HOME/.aws/credentials" "$HOME/.netrc" "$HOME/.npmrc" "$HOME/.git-credentials" "$HOME/.docker/config.json" "$HOME/.config/gh/hosts.yml"; do
+                [ -f "$f" ] && found="$found$f
+"
+            done
+            for d in "$H" "$HOME/.aws" "$HOME/.ssh"; do
+                [ -d "$d" ] || continue
+                found="$found$(grep -rlE "sk-[A-Za-z0-9_-]{20,}|BEGIN [A-Z ]*PRIVATE KEY|_TOKEN=[A-Za-z0-9_-]{16,}|_API_KEY=[A-Za-z0-9_-]{16,}" "$d" 2>/dev/null | head -5)
+"
+            done
+            printf "SCAN|%s\n" "$(printf "%s" "$found" | tr "\n" " " | sed "s/  */ /g")"
+        ' 2>&1)"
+        if absent "$cid" || denied "$cid"; then
+            skip "A-8 filesystem scan: docker refused to create a container from the image"
+        else
+            docker start "$cid" >/dev/null 2>&1
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "false" ] && break
+                sleep 1
+            done
+            scan_log="$(docker logs "$cid" 2>&1 | grep -m1 '^SCAN|' | cut -d'|' -f2-)"
+            docker rm -f "$cid" >/dev/null 2>&1
+            scan_hits="$(printf '%s' "$scan_log" | tr -d ' \t')"
+            if [ -z "$scan_log" ]; then
+                skip "A-8 filesystem scan produced no result line (the container reported nothing)"
+            elif [ -z "$scan_hits" ]; then
+                pass "A-8 the image's filesystem holds no credential-shaped file or value, scanned inside the image itself (the harness configuration directory and every account home). Stated limit: a value written in one layer and deleted in a later one is absent from this filesystem while remaining in the earlier layer's tar"
+            else
+                fail "A-8 the image's filesystem holds credential-shaped content: $scan_log"
             fi
         fi
     fi
