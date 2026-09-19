@@ -76,13 +76,18 @@ The fragments are merged in one order, and the order is itself a contract:
 ```sh
 docker compose \
   -f <part: run-an-llm-router>/skeleton/compose.yml \
-  -f <part: encrypt-container-secrets>/skeleton/compose-secrets.yml \
   -f <part: restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
   -f <part: run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
   -f <part: add-an-agent-harness>/skeleton/compose.service.yaml \
   -f <this package>/skeleton/compose.yaml \
   config
 ```
+
+Five fragments, not one per part: the store part's
+`<part: encrypt-container-secrets>/skeleton/compose-secrets.yml` is an example
+for one service (`services.myservice`) and is **not** in this list, because
+merging it would define a service no part owns — `R-2`, row `A-2`, and
+`skeleton/compose.yaml`'s own header.
 
 Compose's rule, measured with `docker compose config` on two fragments that both set
 `image`, `environment` and `networks`: **the last file wins a single-value field,

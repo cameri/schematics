@@ -191,6 +191,15 @@ need SECRETS_KEY_DIR "${SECRETS_KEY_DIR:-}"
 need SECRETS_STORE_DIR "${SECRETS_STORE_DIR:-}"
 need ROUTER_SECRETS_SERVICE "${ROUTER_SECRETS_SERVICE:-}"
 need AGENT_HOST_SECRETS_SERVICE "${AGENT_HOST_SECRETS_SERVICE:-}"
+# Every variable the glue interpolates has to reach `docker compose` through this
+# script's environment, not merely through its own shell: the schema suggests
+# keeping them in a file the operator sources, and a plain (unexported)
+# assignment is visible here but not to a child process — the merge would then
+# fail on `${SECRETS_STORE_DIR:?}` with the raw Compose error this step's named
+# refusals exist to preempt. `P-1`, `P-19` and `P-20` are exported where their
+# defaults are applied above; the two store paths are exported here, after the
+# checks that read them.
+export SECRETS_KEY_DIR SECRETS_STORE_DIR
 # One store service per consumer. Two equal names are not a shorter spelling of
 # this step: the glue maps the router's secret source and the host's from these
 # two names, so one name makes both containers decrypt the same file with the

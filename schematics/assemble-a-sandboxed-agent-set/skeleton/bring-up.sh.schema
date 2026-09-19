@@ -83,10 +83,13 @@
 #   abort the script under `set -u` with the shell's own message instead of the
 #   documented exit 2.
 # - The parameter table's declared defaults (`P-1`, `P-8`, `P-9`, `P-17`, `P-19`,
-#   `P-20`) are applied before the guard that reads them, and the ones Compose
-#   interpolates (`P-1`, `P-17`, `P-19`, `P-20`) are exported: step 9 hands this
-#   script's *environment* to `docker compose`, and an unexported shell variable
-#   would send the merge looking for a value that was never there.
+#   `P-20`) are applied before the guard that reads them, and every variable the
+#   glue interpolates is exported unconditionally: `P-1`, `P-19` and `P-20` where
+#   their defaults are applied, and `P-17`/`P-18` (the key and store
+#   directories) after their checks — so a deployment that set one with a plain
+#   assignment still reaches Compose, because step 9 hands this script's
+#   *environment* to `docker compose` and an unexported shell variable would send
+#   the merge looking for a value that was never there.
 # - `PARTS_ROOT` gates the three BUILD steps only. The router checks (6, 7) and
 #   the start step (9) have their own inputs — steps 6 and 7 need `P-1`'s network
 #   and `P-5`'s image to run their probe in, and no part checkout at all — so a

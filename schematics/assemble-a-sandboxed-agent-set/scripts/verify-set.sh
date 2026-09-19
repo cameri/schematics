@@ -55,7 +55,12 @@
 #                         without it A-5 cannot see the proxy's one sanctioned
 #                         socket mount, nor A-13 the proxy's network contract)
 #   PART_SCRIPTS          space-separated name:path entries for the parts'
-#                         own acceptance scripts (optional; A-3)
+#                         own acceptance scripts (optional; A-3). Both this
+#                         list and COMPOSE_FILES are split on whitespace, so a
+#                         path containing a space cannot be given here; a
+#                         COMPOSE_FILES path that does not exist makes A-2
+#                         SKIP, and a PART_SCRIPTS one makes A-3 FAIL — neither
+#                         list is silently shortened
 #   COMPOSE_FILES         space-separated paths of the parts' compose fragments
 #                         and this package's glue, in merge order (A-2)
 #   EXPECTED_SERVICES     service names the merged configuration must define
@@ -183,7 +188,7 @@ DOCKER_PROXY_URL="${DOCKER_PROXY_URL:-tcp://socket-proxy:2375}"
 # client and then dials. The proxy part's own http:// URL is its audit script's.
 case "$DOCKER_PROXY_URL" in
     tcp://*|unix://*|ssh://*|fd://*|npipe://*) ;;
-    *) printf 'note: DOCKER_PROXY_URL=%s carries no Docker client scheme; P-15 is the value consumers set as DOCKER_HOST (tcp://socket-proxy:2375)\n' "$DOCKER_PROXY_URL" ;;
+    *) usage_error "DOCKER_PROXY_URL=$DOCKER_PROXY_URL carries no Docker client scheme, so no probe here can reach a daemon through it; P-15 is the value consumers set as DOCKER_HOST (tcp://socket-proxy:2375) — the Docker-access part's own http:// URL is its audit script's, and the client refuses that scheme before it dials anything" ;;
 esac
 ROUTER_CREDENTIAL_ENV="${ROUTER_CREDENTIAL_ENV:-ROUTER_API_KEY}"
 AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-}"
@@ -207,7 +212,7 @@ ALIAS_SET_LIST="$(printf '%s' "$ROUTER_ALIAS_SET" | tr ',' ' ')"
 # layer appends it per arm. A value that already ends in /v1 would double it.
 ROUTER_ROOT="${ROUTER_BASE_URL%/}"
 case "$ROUTER_ROOT" in
-    */v1) printf 'note: ROUTER_BASE_URL ends in /v1, but P-8 is the router root; the models endpoint is read at %s/v1/models\n' "$ROUTER_ROOT" ;;
+    */v1) usage_error "ROUTER_BASE_URL=$ROUTER_BASE_URL ends in /v1, but P-8 is the router ROOT: every row here appends its own path, so the models endpoint would be read at $ROUTER_ROOT/v1/models — the /v1 doubled. The harness layer derives each arm's path from the root and refuses a /v1 suffix at build time for exactly this reason; pass the root" ;;
 esac
 MODELS_URL="$ROUTER_ROOT/v1/models"
 PROXY_CONTAINER="${PROXY_CONTAINER:-}"
@@ -247,10 +252,18 @@ else
   $path: commit ${commit%????????????????????????????????} is not reachable from HEAD"
             continue
         fi
-        blob_hash="$(git -C "$REPO_DIR" show "$commit:$path" 2>/dev/null | sha256sum | cut -d' ' -f1)"
-        if [ -z "$blob_hash" ] || [ "$blob_hash" = "$(printf '' | sha256sum | cut -d' ' -f1)" ]; then
+        # Existence and emptiness are different answers: `git show` of a missing
+        # path and of an empty file both hash to the same value, so testing the
+        # hash first reported an empty pinned file as one that is not there.
+        if ! git -C "$REPO_DIR" cat-file -e "$commit:$path" 2>/dev/null; then
             pins_bad="$pins_bad
   $path: not present at commit ${commit%????????????????????????????????}"
+            continue
+        fi
+        blob_hash="$(git -C "$REPO_DIR" show "$commit:$path" | sha256sum | cut -d' ' -f1)"
+        if [ "$blob_hash" = "$(printf '' | sha256sum | cut -d' ' -f1)" ]; then
+            pins_bad="$pins_bad
+  $path: present at commit ${commit%????????????????????????????????} but empty, so it cannot be the pinned file"
             continue
         fi
         if [ "$blob_hash" != "$hash" ]; then
@@ -335,13 +348,30 @@ else
                     for s in $EXPECTED_SERVICES; do
                         printf '%s' "$merged" | grep -qE "^  $s:" || absent_svc="$absent_svc $s"
                     done
+                    # The other direction, and the one R-2's "exactly" needs: a
+                    # file in the merge that defines a service no part owns. The
+                    # store part's `compose-secrets.yml` carries
+                    # `services.myservice`, so a merge list that includes it
+                    # produces a service this set does not have — and a
+                    # presence-only check passes it, leaving `up` to fail on the
+                    # pull of an image no part names.
+                    extra_svc=""
+                    for s in $(printf '%s' "$merged" | sed -n '/^services:/,/^[a-z]/p' | grep -oE '^  [A-Za-z0-9._-]+:' | tr -d ' :'); do
+                        case " $EXPECTED_SERVICES " in
+                            *" $s "*) ;;
+                            *) extra_svc="$extra_svc $s" ;;
+                        esac
+                    done
                     if [ -n "$absent_svc" ]; then
                         fail "A-2 the merged configuration is missing service(s):$absent_svc — a fragment is absent from COMPOSE_FILES, and the set would come up without that service"
+                    elif [ -n "$extra_svc" ]; then
+                        fail "A-2 the merged configuration defines service(s) no expected part owns:$extra_svc — a file in COMPOSE_FILES defines a service this set does not have (the store part's compose-secrets.yml, whose services.myservice no part owns, is the usual cause); R-2's rule is that the merged services are exactly the parts' own, so drop that fragment from the merge list instead of starting a service nobody verified"
                     else
-                        pass "A-2 the merged configuration defines every expected service ($EXPECTED_SERVICES); the glue contributed network membership and secret sources only"
+                        pass "A-2 the merged configuration defines exactly the expected services ($EXPECTED_SERVICES); the glue contributed network membership and secret sources only"
                     fi
                 else
-                    pass "A-2 the merged configuration has $svc_all service(s), all from the parts' fragments"
+                    note "A-2 no EXPECTED_SERVICES supplied, so this row does not assert that nothing else is defined: the merged service list could not be compared with the parts' own"
+                    pass "A-2 the merged configuration renders with $svc_all service(s) from the fragments in COMPOSE_FILES"
                 fi
             fi
         fi
@@ -354,13 +384,18 @@ fi
 # A-3: every part passed its own acceptance rows before the chain was assembled
 # ---------------------------------------------------------------------------
 if [ -z "${PART_SCRIPTS:-}" ]; then
-    skip "A-3 no part acceptance scripts supplied (set PART_SCRIPTS='name:path …')"
+    skip "A-3 no part acceptance scripts supplied (set PART_SCRIPTS='name:path …'): with no script named, neither this row nor the bring-up script's step-9 gate can run, so R-3 is unmet here rather than satisfied"
 else
     part_failed=0
     for entry in $PART_SCRIPTS; do
         name="${entry%%:*}"; script="${entry#*:}"
         if [ ! -f "$script" ]; then
-            skip "A-3 $name: no script at $script"
+            # A name:path entry is the deployment's assertion that this part's
+            # rows can be run, so a path that is not on disk is R-3's gate unmet
+            # rather than a check the host could not perform — and bring-up.sh's
+            # step 9 refuses on exactly this condition, so the two paths agree.
+            fail "A-3 $name: no script at $script — R-3's gate has nothing to run for this part (the bring-up script's step 9 refuses on the same condition)"
+            part_failed=1
         elif [ ! -x "$script" ]; then
             fail "A-3 $name: $script is not executable, so its part has not been verified"
             part_failed=1
@@ -667,10 +702,16 @@ else
                 [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "false" ] && break
                 sleep 1
             done
-            scan_log="$(docker logs "$cid" 2>&1 | grep -m1 '^SCAN|' | cut -d'|' -f2-)"
+            # The result line's PRESENCE and its CONTENT are two different
+            # answers: a clean scan prints `SCAN|` with an empty payload, so
+            # taking the payload alone made a clean image indistinguishable from
+            # a container that printed nothing at all — and left the PASS branch
+            # below unreachable for every clean image.
+            scan_line="$(docker logs "$cid" 2>&1 | grep -m1 '^SCAN|' || true)"
             docker rm -f "$cid" >/dev/null 2>&1
+            scan_log="${scan_line#SCAN|}"
             scan_hits="$(printf '%s' "$scan_log" | tr -d ' \t')"
-            if [ -z "$scan_log" ]; then
+            if [ -z "$scan_line" ]; then
                 skip "A-8 filesystem scan produced no result line (the container reported nothing)"
             elif [ -z "$scan_hits" ]; then
                 pass "A-8 the image's filesystem holds no credential-shaped file or value, scanned inside the image itself (the harness configuration directory and every account home). Stated limit: a value written in one layer and deleted in a later one is absent from this filesystem while remaining in the earlier layer's tar"
@@ -927,9 +968,15 @@ else
     # the edge it exists for (and its opposite) for the wrong reason.
     out="$(docker exec "$HOST_CONTAINER" sh -c 'curl -sS -m 10 "'"$MODELS_URL"'" 2>&1' 2>&1)"
     rc=$?
-    docker start "$ROUTER_CONTAINER" >/dev/null 2>&1
+    # Putting the set back is part of the row: a restart that fails leaves the
+    # deployment worse than the row found it, and the previous version ignored
+    # this result and could print PASS over a router it left stopped.
+    start_out="$(docker start "$ROUTER_CONTAINER" 2>&1)"; start_rc=$?
+    running="$(docker inspect "$ROUTER_CONTAINER" --format '{{.State.Running}}' 2>&1)"
     if [ "$stopped" -ne 0 ]; then
         skip "A-12 could not stop $ROUTER_CONTAINER on this host"
+    elif [ "$start_rc" -ne 0 ] || [ "$running" != "true" ]; then
+        fail "A-12 the router did not come back: docker start exited $start_rc and the container reports Running=$running ($(printf '%s' "$start_out" | tail -1 | cut -c1-70)) — start it again before leaving this host"
     elif [ "$rc" -eq 0 ]; then
         fail "A-12 the request succeeded while the router was stopped: another provider answered"
     else
@@ -955,21 +1002,38 @@ if ! command -v docker >/dev/null 2>&1; then
 elif [ -n "$a13_missing" ]; then
     skip "A-13 $a13_missing_list not set, so the proxy's network contract cannot be inspected; the row is not asserted rather than reported green without it"
 else
-    ver="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker version --format "{{.Server.Version}}" 2>&1' 2>&1)"
-    if denied "$ver" || absent "$ver"; then
+    ver="$(docker exec "$HOST_CONTAINER" sh -c 'docker version --format "{{.Server.Version}}" 2>&1' 2>&1)"
+    # DOCKER_HOST is READ from the container, never injected: the wiring this row
+    # exists for is whether the deployment's copy of the host fragment sets it
+    # (the shipped copy ships it commented out), and an injected `-e` proves only
+    # that the proxy answers — a host with no wiring at all would pass. A pane's
+    # process is what the agents actually use, so it is read first; the
+    # container's own configured environment is the fallback for a host whose
+    # panes are not up yet.
+    host_dh="$(docker exec "$HOST_CONTAINER" sh -c '
+        v="${DOCKER_HOST:-}"
+        if [ -z "$v" ]; then
+            v="$(tr "\0" "\n" < /proc/1/environ 2>/dev/null | sed -n "s/^DOCKER_HOST=//p" | head -1)"
+        fi
+        printf "%s" "$v"' 2>&1)"
+    if denied "$host_dh" || absent "$host_dh"; then
         skip "A-13 $(exec_reason)"
+    elif [ -z "$host_dh" ]; then
+        fail "A-13 $HOST_CONTAINER carries no DOCKER_HOST, so nothing in it can reach the Docker daemon: the deployment's copy of the host fragment left it unset (the shipped copy ships it commented out — see compose.yaml.schema, The host-fragment contract)"
+    elif [ "$host_dh" != "$DOCKER_PROXY_URL" ]; then
+        fail "A-13 $HOST_CONTAINER's DOCKER_HOST is '$host_dh' while P-15 (DOCKER_PROXY_URL) is '$DOCKER_PROXY_URL': the container and the parameter name different endpoints"
     elif ! printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+'; then
-        skip "A-13 the container's docker client reached no daemon through $DOCKER_PROXY_URL: $(printf '%s' "$ver" | tail -1 | cut -c1-80)"
+        skip "A-13 the container's docker client reached no daemon through its own DOCKER_HOST ($host_dh): $(printf '%s' "$ver" | tail -1 | cut -c1-80)"
     else
         # This is also the host container's half of the resolution contract: its
-        # client resolves the proxy's name out of DOCKER_PROXY_URL.
-        pass "A-13 the host container reaches the Docker daemon through $DOCKER_PROXY_URL (server $ver)"
+        # client resolves the proxy's name out of its own DOCKER_HOST.
+        pass "A-13 the host container's own DOCKER_HOST ($host_dh) reaches the Docker daemon (server $ver)"
         sock="$(docker exec "$HOST_CONTAINER" sh -c 'ls -l /var/run/docker.sock 2>&1 || true' 2>/dev/null)"
         case "$sock" in
             *"No such file"*|"") pass "A-13 no Docker socket is present in the container's filesystem" ;;
             *) fail "A-13 a Docker socket is present in the container: $sock" ;;
         esac
-        deny="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -2' 2>&1)"
+        deny="$(docker exec "$HOST_CONTAINER" sh -c 'docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -2' 2>&1)"
         case "$deny" in
             *"failed to connect"*|*"Cannot connect"*|*"cannot connect"*|*"no such file"*)
                 skip "A-13 deny check: the probe reached no daemon through the proxy, so this row cannot see what the proxy answered" ;;
@@ -1030,9 +1094,15 @@ else
     # failure a deployment hits when the key material never arrived. Stated limit:
     # this exercises the wrapper and sops, not the deployment's encrypted file,
     # which needs the real key.
+    # The key path the probe hands sops must not exist, and the row accepts only
+    # a failure that names THAT path: the probe also points at an encrypted file
+    # it cannot open, so a message about the file is indistinguishable from one
+    # about the key — and accepting both would let this row pass without ever
+    # touching the key path it is about.
+    A14_KEY="/run/secrets/agent-set-verify-missing-key"
     PROBE_CID="$(docker create --label org.testcontainers=true --name "agent-set-verify-probe-$$" \
         --entrypoint sh \
-        -e SOPS_AGE_KEY_FILE="/run/secrets/agent-set-verify-missing-key" \
+        -e SOPS_AGE_KEY_FILE="$A14_KEY" \
         "$HARNESS_IMAGE" \
         -c 'exec sops exec-env /run/secrets/agent-set-verify-missing.env /usr/local/bin/agent-host-boot' 2>&1)"
     if denied "$PROBE_CID" || [ -z "$PROBE_CID" ]; then
@@ -1058,10 +1128,12 @@ else
             fail "A-14 a container started without its key material kept running; the store's failure is not loud"
         elif [ "$rc" = "0" ]; then
             fail "A-14 a container started without its key material exited 0; the credential path failed silently"
-        elif [ -n "$logs" ] && printf '%s' "$logs" | grep -qiE 'sops|age|decrypt|secret|key'; then
-            pass "A-14 a container started without its key material exits $rc, and its own output names the credential path ($(printf '%s' "$logs" | tail -1 | cut -c1-60))"
+        elif [ -n "$logs" ] && printf '%s' "$logs" | grep -qF "$A14_KEY"; then
+            pass "A-14 a container started without its key material exits $rc, and its own output names the key file it was given ($(printf '%s' "$logs" | tail -1 | cut -c1-60))"
+        elif [ -n "$logs" ] && printf '%s' "$logs" | grep -qiE 'failed to load age identities|no identities|age: error'; then
+            pass "A-14 a container started without its key material exits $rc, and its own output names the missing age identities ($(printf '%s' "$logs" | tail -1 | cut -c1-60))"
         else
-            skip "A-14 the probe exited $rc without naming the credential path, so this is not evidence about the store: $(printf '%s' "$logs" | tail -1 | cut -c1-60)"
+            skip "A-14 the probe exited $rc without naming the key path it was given ($A14_KEY), so its failure cannot be attributed to the key: $(printf '%s' "$logs" | tail -1 | cut -c1-60)"
         fi
     fi
 fi
@@ -1098,7 +1170,16 @@ else
     elif [ "$code" = "NO_CREDENTIAL" ]; then
         skip "A-15 the pane's process carries no $CREDENTIAL_ENV, so no authenticated completion can be made (the store did not inject it); the alias path is still proven by A-11"
     elif [ "$code" = "200" ]; then
-        pass "A-15 one real completion through the alias '$ROUTER_ALIAS' returns 200, made with the credential the pane's own process carries. Stated limit: this exercises the router's own path to its provider, not the harness CLI's interactive call"
+        # 200 alone is not a completion: a proxy, a landing page or an error
+        # handler answers 200 too. The body was written inside the container by
+        # the probe above, so it is read back and required to carry the API's own
+        # `choices`.
+        body="$(docker exec "$HOST_CONTAINER" sh -c 'cat /tmp/agent-set-completion 2>/dev/null' 2>&1)"
+        if printf '%s' "$body" | grep -q '"choices"'; then
+            pass "A-15 one real completion through the alias '$ROUTER_ALIAS' returns 200 with a completion body, made with the credential the pane's own process carries. Stated limit: this exercises the router's own path to its provider, not the harness CLI's interactive call"
+        else
+            fail "A-15 the request through alias '$ROUTER_ALIAS' returned 200 but the body carries no \"choices\", so it is not a completion: $(printf '%s' "$body" | tr -d '\n' | cut -c1-90)"
+        fi
     else
         fail "A-15 the completion through alias '$ROUTER_ALIAS' returned '$code', not 200"
     fi
@@ -1114,7 +1195,14 @@ else
         args=""
         for f in $COMPOSE_FILES; do args="$args -f $f"; done
         down_out="$(docker compose $args down 2>&1)"; down_rc=$?
-        [ "$down_rc" -eq 0 ] || printf 'note: A-16 `docker compose down` exited %s: %s\n' "$down_rc" "$(printf '%s' "$down_out" | tail -1 | cut -c1-90)"
+        # Teardown is what this row is about, so the composition's own command
+        # failing is a FAIL rather than a note: every observation below would
+        # otherwise be about a teardown that did not complete.
+        if [ "$down_rc" -eq 0 ]; then
+            pass "A-16 docker compose down exited 0"
+        else
+            fail "A-16 docker compose down exited $down_rc: $(printf '%s' "$down_out" | tail -1 | cut -c1-100)"
+        fi
         # The network removal's own status is part of the row: a refusal here means
         # the network survived the teardown, which the previous version of this row
         # reported as removed because it never looked.
@@ -1158,7 +1246,10 @@ else
     if [ -n "${PART_SCRIPTS:-}" ]; then
         for entry in $PART_SCRIPTS; do
             name="${entry%%:*}"; script="${entry#*:}"
-            [ -x "$script" ] || continue
+            if [ ! -x "$script" ]; then
+                fail "A-16 $name: no executable acceptance script at $script, so the part cannot be re-checked after the teardown"
+                continue
+            fi
             if bash "$script" >/dev/null 2>&1; then
                 pass "A-16 $name still passes its own acceptance script after the teardown"
             else

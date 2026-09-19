@@ -214,7 +214,7 @@ without recomputing it.
 | D-6 | schematic | [restrict-docker-api-access v0.3.1](https://github.com/cameri/schematics/blob/d405389a80eb1bc3019ecabf312535d072b1559a/schematics/restrict-docker-api-access/SCHEMATIC.md) `sha256:7444bdd603df29c072a7f7ebf9b09dda23e8c211dd9dc55d76f9a36a6ee22c58` | Docker access for the agents without a socket: a deny-by-default HTTP proxy on an internal network, socket mounted read-only into the proxy only. Chosen because the host part names it (part 2's `D-2`) and forbids socket mounts (part 2's `R-9`) | Its audit script matches its allowlist (its `A-2`); no consumer mounts a socket (its `A-1`) | Agents have no Docker at all. Mounting the socket instead is refused by this composition's `R-4`, not offered as a fallback |
 | D-7 | system | Docker Engine with the Compose plugin, and BuildKit usable by the build | Merges the parts' fragments, starts the set, and builds the base image | `docker version`, `docker compose version`, `docker buildx version`, and one real build that gets past the architecture guard | Hard fail at Phase 4: a host that cannot build the base image cannot assemble the set. Do not substitute a legacy-builder build of the base image — it fails at its architecture guard and its cache mounts |
 | D-8 | system | Outbound HTTPS at build time to the distribution's and the parts' pinned release hosts | Installs the toolchain, the multiplexer and the harness CLI at their pinned versions | The builds' own download and package steps | Hard fail at the failing step; never substitute an unreviewed mirror for a checksum-verified asset |
-| D-9 | system | A real provider credential, held by the operator, present only in the deployment's encrypted store | `A-15` (a completion through the alias) needs a provider that actually answers. Every other row is credential-free | The deployment's own store, in the form `D-5` defines | Degrade by design: without it the alias path is still proven (`A-14`) and the completion row skips with its reason printed. Never invented, never committed |
+| D-9 | system | A real provider credential, held by the operator, present only in the deployment's encrypted store | `A-15` (a completion through the alias) needs a provider that actually answers. Every other row is credential-free | The deployment's own store, in the form `D-5` defines | Degrade by design: without it the alias path is still proven (`A-11`) and the completion row skips with its reason printed. Never invented, never committed |
 
 **Recommended** (declinable — every phase and every row above completes with all
 of these declined):
@@ -232,7 +232,7 @@ that parameter's contract lives.
 
 | Id   | Name | Type | Default | Discovery | Effect |
 |------|------|------|---------|-----------|--------|
-| P-1  | `AGENT_SET_NETWORK` | string | `agent-set` | `docker network ls` — pick a name that does not collide | The internal network every service of the set joins, and the only path between them that is not a bind mount |
+| P-1  | `AGENT_SET_NETWORK` | string | `agent-set` | `docker network ls` — pick a name that does not collide | The internal network every service of the set joins — every service **except** the Docker-access proxy, which keeps the internal network its own fragment declares and is reached only by the host container (`R-4`) — and the only path between them that is not a bind mount |
 | P-2  | `AGENT_TREE_DIR` | path (host) | *(none — required)* | Operator's choice of a directory on the host; `stat -c '%u:%g'` reads its owner | The bind mount that holds every agent's workspace and home. It is the set's only stateful host path (part 2's `P-30`) |
 | P-3  | `AGENT_IDS` | list | *(none — required)* | The operator's agent names; each becomes one herdr workspace | Which agents exist in the host, and the workspace labels their panes carry (part 2's `P-11`) |
 | P-4  | `AGENT_BASE_REF` | string | *(none — required)* | `<name>:<tag>` for a base built on this host, `<registry>/…/<name>@sha256:<manifest list digest>` for a published one | The `FROM` of the host image build (part 2's `P-1`). The digest form is required whenever the base came from a registry |
@@ -275,7 +275,11 @@ to a part and is named by pin, never restated.
 **Between the parts (what the composition guarantees):**
 
 - One Docker network, `P-1 AGENT_SET_NETWORK`, joined by every service of the
-  set and by nothing else. All in-network addressing is by service name.
+  set and by nothing else — with one deliberate exception: the Docker-access
+  proxy keeps the internal network its own fragment declares and is not attached
+  to this one, so the host container joins both and the proxy's port never faces
+  the set (`R-4`, checked by `A-13`). All in-network addressing is by service
+  name.
 - The image chain, in one direction: `AGENT_BASE_REF` → `AGENT_HOST_IMAGE` →
   `HARNESS_IMAGE`. Each reference is a complete image reference: a local tag
   when built here, `name@sha256:<manifest list digest>` when published.
@@ -299,13 +303,26 @@ consumer enables the groups it needs — and the composition ships the glue, las
 ```sh
 docker compose \
   -f <part: run-an-llm-router>/skeleton/compose.yml \
-  -f <part: encrypt-container-secrets>/skeleton/compose-secrets.yml \
   -f <part: restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
   -f <part: run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
   -f <part: add-an-agent-harness>/skeleton/compose.service.yaml \
   -f skeleton/compose.yaml \
   config
 ```
+
+Five fragments, not one per part. The store part ships
+`<part: encrypt-container-secrets>/skeleton/compose-secrets.yml`, and that file
+is **not** merged and MUST NOT be added to this list: it is a generic example of
+the wiring for ONE service, carrying `services.myservice` with an image and a
+`sops exec-env` command, so merging it adds a service no part defines where
+`R-2` and `A-2` require the merged configuration's services to be exactly the
+parts' own — and since the later file wins a single-value field, a copy that
+named `llm-router` would override the router fragment's own `command`. Nothing
+in the set needs it: each consumer's own fragment already carries its `secrets:`
+list, its mount targets and its `SOPS_AGE_KEY_FILE`, and the glue declares the
+four secret **sources** those references resolve to. A deployment that adds a
+service of its own fills that service's wiring into THAT service's fragment.
+`skeleton/compose.yaml`'s header states the same rule beside the list it ships.
 
 Compose merges in the order given, and the **later** file wins a single-value
 field while list-valued fields such as `networks:` are unioned (measured with
@@ -404,8 +421,9 @@ Steps:
    (`ROUTER_ALIAS_SET`) and its store file.
 3. Wait for its health gate, then read `GET /v1/models` with the router
    credential and compare it to the decided set. A mismatch stops the assembly
-   here: the harness build in Phase 4 validates against whatever this endpoint
-   returns.
+   here: this is the only place membership is decided, because the harness build
+   in Phase 4 can prove the endpoint answers but cannot carry the credential
+   such a check needs.
 
 Skip condition: the router already runs and `GET /v1/models` returns the
 decided set.
@@ -428,9 +446,13 @@ Steps:
 3. Build the harness layer from `D-3` with the router **up**: `AGENT_BASE_REF`
    set to `AGENT_HOST_IMAGE`, `HARNESS_ID`, `ROUTER_BASE_URL`,
    `ROUTER_CREDENTIAL_ENV`, `ROUTER_ALIAS`, `ROUTER_FAST_ALIAS`,
-   `HARNESS_CONTEXT_WINDOW`, `HARNESS_MAX_OUTPUT_TOKENS`. The build validates
-   the alias against the running router; a router that is down, or an alias
-   that is not in the set, fails the build here rather than at run time.
+   `HARNESS_CONTEXT_WINDOW`, `HARNESS_MAX_OUTPUT_TOKENS`. The router is up
+   because the layer's endpoint check (part 3's `P-11`, opt-in) proves the
+   endpoint answers at build time; what that check cannot decide is alias
+   membership, because a credential cannot be a build argument (part 3's `R-8`).
+   Membership is this composition's own gate: step 7 of `bring-up.sh`, row
+   `A-11`, reads the router's model list back and refuses to start a set whose
+   alias is not in it.
 4. Confirm the layer's config: `AGENT_HARNESS` set, no `ENTRYPOINT`, no `CMD`,
    no credential-shaped file.
 
@@ -500,12 +522,17 @@ reported as a pass.
   row. expected: every pin resolves and matches; a mismatch names the row.
 - **A-2** (covers R-2): the glue file's every `services:` entry carries only
   `networks:`, and merging it with the parts' fragments produces a configuration
-  whose services are exactly the parts' own. expected: the composition defines
-  no service, and every service in the merged configuration belongs to a part.
-- **A-3** (covers R-3): each part's own acceptance script is present and, where
-  this host can run it, exits 0; where it cannot, the script prints `SKIP` and
-  the reason. expected: no part is assembled before it is verified, and the
-  skipped ones are named.
+  whose services are exactly the parts' own — every service in
+  `EXPECTED_SERVICES` present, and no service outside that list. expected: the
+  composition defines no service, and every service in the merged configuration
+  belongs to a part. Stated limit: the "no service outside it" half needs
+  `EXPECTED_SERVICES`; without it the row checks that the merge renders and says
+  in its own output that completeness was not asserted.
+- **A-3** (covers R-3): each part's own acceptance script is present — a script
+  named in `PART_SCRIPTS` that is not on disk FAILS the row, the same condition
+  the bring-up script's step 9 refuses — and, where this host can run it, exits
+  0; where the host cannot run it, the check prints `SKIP` and the reason.
+  expected: no part is assembled before it is verified, and every gap is named.
 - **A-4** (covers R-1): building the harness layer with its endpoint check
   pointed at an address nothing answers at fails with the layer's own refusal
   code (`78`) and a line naming the parameter — the row supplies every argument
@@ -605,45 +632,51 @@ reported as a pass.
   (`<root>/v1/models`, issued from inside the host container as `A-11` issues it)
   fails visibly and no completion is produced elsewhere. expected: a failure
   that names the router, not a silent fallback.
-- **A-13** (covers R-4): from inside the host container,
-  `DOCKER_HOST="$DOCKER_PROXY_URL" docker version` answers, a denied verb is
+- **A-13** (covers R-4): the host container's own environment carries
+  `DOCKER_HOST` — read from one of the container's pane processes, falling back
+  to its configured environment, never injected by the check — and
+  `docker version` through that value answers; a denied verb is
   refused by policy in terms that name the proxy's own decision (any other
-  daemon error SKIPs — it is not evidence of a refusal), and the socket path is
+  daemon error SKIPs — it is not evidence of a refusal); and the socket path is
   absent from the container's filesystem. It also checks the network contract:
   every network the proxy is attached to reports `internal=true`, and the router
   container cannot resolve the proxy by name while the host container can.
-  expected: Docker works through the proxy,
-  the socket is not reachable from where the agent runs, and the proxy is not
+  expected: Docker works through the proxy the deployment wired the container
+  to, the socket is not reachable from where the agent runs, and the proxy is not
   exposed to the rest of the set. **Without either `PROXY_CONTAINER` or
   `ROUTER_CONTAINER` the row SKIPs** rather than passing on the half it could
   still read: the proxy's network contract is the point of that half, and a
   green row over an unchecked contract is the failure mode this row exists to
   prevent.
 - **A-14** (covers R-8): a container started without its key material exits
-  non-zero, and its own output names the credential path — not some unrelated
-  startup failure. expected: the credential path fails loudly and identifiably.
+  non-zero, and its own output names **the key file it was given** — the probe
+  supplies a key path that does not exist, so a message about the encrypted
+  store file it also cannot open is not evidence about the key path and is not
+  accepted as one. expected: the credential path fails loudly and identifiably.
   The positive half (a container *with* the store reaches its application) is
   Phase 3's verification, because it needs the store prepared to be meaningful.
   **If the probe cannot be created on this host, or the failure does not name
-  the credential path:** `SKIP` with that reason — an unrelated failure is not
-  evidence about the store. The probe runs the composition's own boot command —
-  `sops exec-env <file> <program>` — inside the harness image, with a key path
-  that does not exist; it needs no store of its own, and its log is read while
-  the container still exists so a genuine failure cannot be lost.
+  the key path:** `SKIP` with that reason — an unrelated failure is not evidence
+  about the store, and this row never turns one into a pass. The probe runs the
+  composition's own boot command — `sops exec-env <file> <program>` — inside the
+  harness image, with a key path that does not exist; it needs no store of its
+  own, and its log is read while the container still exists so a genuine failure
+  cannot be lost.
 - **A-15** (covers R-9, R-11): one real completion through the alias returns
-  200, made from inside the agent pane with the router credential. expected: a
-  real answer, not a simulated one. Stated limit: the request is issued the way
-  any client of the router issues one, so this proves the router's path to its
-  provider and the alias, not the harness CLI's interactive call — that is
-  checked by `A-9` and `A-10`. **If no real provider credential exists:** `SKIP`
-  with that reason — this row is never asserted, and the alias path is still
-  proven by `A-11`.
-- **A-16** (covers R-13): after `docker compose down`, the network is gone
-  (its removal is verified, not merely attempted), no container of the set
-  remains — running or stopped, the proxy included — and every part's own
-  acceptance script still runs against its images while the agent tree
-  directory is untouched. expected: removal detaches the composition and changes
-  no part.
+  200 **and a completion body** (the `choices` the API contract carries),
+  requested with the router credential the pane's own process carries. The
+  request itself is issued from the host container, the way any client of the
+  router issues one, not from inside an interactive pane — a portable check
+  cannot drive one. expected: a real answer, not a simulated one. Stated limit:
+  this proves the router's path to its provider and the alias, not the harness
+  CLI's interactive call — that is checked by `A-9` and `A-10`. **If no real
+  provider credential exists:** `SKIP` with that reason — this row is never
+  asserted, and the alias path is still proven by `A-11`.
+- **A-16** (covers R-13): after `docker compose down` exits 0, the network is
+  gone (its removal is verified, not merely attempted), no container of the set
+  remains — running or stopped, the proxy included — every part's own acceptance
+  script still runs against its images, and the agent tree directory is
+  untouched. expected: removal detaches the composition and changes no part.
 
 ## Failure Modes and Rollback
 
@@ -705,23 +738,26 @@ Decisions:
   as a declinable recommendation (`D-10`) with the case where it wins: policy
   a proxy cannot see, on a host that already runs the mechanism.
 - 2026-09-19 — **The store and router precede the harness build, because the
-  alias check is a build-time check.** The layer part validates the alias
-  against the running router; treating that as a run-time concern would move a
-  cheap failure to the most expensive place. Phase 3 therefore completes before
-  Phase 4, and `A-4` asserts the edge by building with the router stopped.
+  build reaches for the router.** The layer's endpoint check (part 3's `P-11`)
+  runs at build time when the deployment asks for it, and it needs the endpoint
+  to answer; treating that as a run-time concern would move a cheap failure to
+  the most expensive place. The check proves reachability, not alias membership
+  (`A-4`), so membership stays this composition's gate (`A-11`). Phase 3
+  therefore completes before Phase 4, and `A-4` asserts the edge by building
+  with the router stopped.
 - 2026-09-19 — **The completion row skips, never asserts.** A chain test that
   reports a pass it did not obtain is worse than one that admits a gap: `A-15`
   needs a real provider credential and prints `SKIP` with that reason when the
   operator has none, while `A-11` proves the alias path without one.
 - 2026-09-19 — **Pins name a commit reachable from the checked-out history.**
   A pin written at a branch tip passes that branch's checks and fails only after
-  a squash merge, which has already turned a default branch red. `D-3` pins the
-  harness layer at its branch commit, which this branch can reach; when that
-  part's pull request merges, its squash commit is the pin's destination and the
-  version stays `v0.1.1` while the commit and the URL change. Whoever moves it
-  recomputes the hash at the new commit — the file's content is unchanged by a
-  squash, so the hash is expected to be identical, and expected is not the same
-  as checked.
+  a squash merge, which has already turned a default branch red. `D-3` therefore
+  names the harness layer's **squash commit** `8d87d2a4` — reachable from
+  `main` — at v0.2.0, and its hash was recomputed at that commit rather than
+  carried over from the branch. The method was control-tested by reproducing the
+  value pinned before the move (`d170abc7…` at `2b3e4b08`), because a hash that
+  matches nothing is indistinguishable from a hash computed the wrong way.
+  Moving a pin is a change to the Dependencies table, not a formality.
 
 Open questions:
 
