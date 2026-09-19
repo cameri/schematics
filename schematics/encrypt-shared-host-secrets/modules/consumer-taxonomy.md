@@ -46,7 +46,7 @@ must carry as a hand-written row).
 |---|---|---|
 | **Wrappable** | A command of yours can run immediately before the consumer needs the value, in the environment the consumer reads | `sops-env-exec --require … '<command>'`, or `D-5` for a container's own process |
 | **Path-reading** | The consumer opens a file by path at start (an application config, `EnvironmentFile=`, a tool's config file) and you can change how it starts | Remedy (a): change the start command so a wrapper runs first, or remedy (b): materialize a plaintext runtime env-file for that consumer's lifetime |
-| **Parse-time** | The value is resolved by the Compose CLI while parsing (`${VAR}` in a compose file) | Remedy (a), (b) or (c) per `compose-interpolation.md`; never a plaintext repository file for a secret |
+| **Parse-time** | The value is resolved by the Compose CLI before any container exists: `${VAR}` in a compose file, or a file the CLI reads itself (`env_file:`, `--env-file`) | Remedy (a), (b) or (c) per `compose-interpolation.md`; never a plaintext repository file for a secret, and never a store — the CLI inlines whatever it reads, ciphertext included |
 | **Not a consumer** | The reference is a comment, an example, a build-time `ARG` for a version number, or a value that is not a secret | Leave it; record it so the next inventory run does not re-open the question |
 
 **The decision procedure, in order:**

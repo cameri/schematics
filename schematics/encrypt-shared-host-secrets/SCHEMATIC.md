@@ -631,10 +631,17 @@ real migration.
   docker compose config 2>&1 | grep -c 'required variable' # >= 1, naming the missing variable
   "${WRAPPER_PATH}" --require NAME 'echo ran'             # with NAME absent from the store: non-zero, no "ran"
   ```
+  Also refuse a value that is still ciphertext, which is what an `env_file:`
+  or `--env-file` naming a store produces (the CLI inlines the file's contents
+  into the service environment, so the variable is non-empty and wrong):
+  ```bash
+  skeleton/preflight-compose-secrets.sh --var API_TOKEN -- docker compose config
+  # non-zero, naming the variable and reporting that it resolves to CIPHERTEXT
+  ```
   Expected: the fail-fast form aborts the parse; the wrapper refuses before
-  exec'ing. Measured baseline: an unset variable **without** the fail-fast form
-  exits 0 with `PLAIN: ""` in the resolved config, which is the state this test
-  exists to end.
+  exec'ing; a ciphertext value is refused rather than passed. Measured baseline:
+  an unset variable **without** the fail-fast form exits 0 with `PLAIN: ""` in
+  the resolved config, which is the state this test exists to end.
 - **A-6** (covers R-6): the store key is the variable name the consumer reads.
   For every consumer: `comm -23 <(inventory names for that consumer) <(store key names)`
   prints nothing. A non-empty result names a variable the consumer reads and
@@ -682,7 +689,8 @@ recipient that can decrypt the store, the wrapper with present and absent
 required names, the wrapper's refusal of a multi-word command, `--pristine`
 dropping the inherited environment, the alias naming rule, the materializer's
 mode, its removal on success and on a failing command, `--keep`, and the
-pre-flight guard against a value that resolves empty. `A-1` through `A-11` are
+pre-flight guard against a value that resolves empty or to ciphertext (the
+ciphertext case measured through an `env_file:` naming an encrypted file). `A-1` through `A-11` are
 the implementer's checks, not a record of that run.
 
 ## Failure Modes and Rollback

@@ -9,7 +9,9 @@
 #   --var   a variable that must resolve to a NON-EMPTY value. Repeat it for
 #           each one. The classic mistake this catches is a file that holds
 #           `NAME=` or a store that never reached the parser: the parse succeeds
-#           and the stack starts with an empty value.
+#           and the stack starts with an empty value. It also refuses a value
+#           that resolves to SOPS ciphertext, which is what an `env_file:`
+#           pointing at a store produces.
 #   --dir   the directory to run the Compose command in. Default: $PWD.
 #   --      everything after it is passed to the Compose CLI verbatim.
 #           Default: `config`.
@@ -19,7 +21,8 @@
 # `${VAR}` is already substituted. Exit status:
 #
 #   0  the command succeeded and every named variable has a non-empty value
-#   1  the command failed, or a named variable is missing or empty
+#   1  the command failed, a named variable is missing or empty, or a named
+#      variable resolves to ciphertext (an `env_file:` counting on a store)
 #   2  usage error
 #
 # Nothing is started: `config` parses and interpolates without touching the
@@ -93,6 +96,16 @@ for NAME in $VARS; do
     if grep -qE "^[[:space:]]*$NAME:[[:space:]]*(\"\"|'')?[[:space:]]*$" "$OUT"; then
         echo "preflight-compose-secrets: $NAME resolves to an EMPTY value" >&2
         echo "preflight-compose-secrets: a container would start with it blank; refusing" >&2
+        FAILED=1
+    fi
+    # A store (or an encrypted file) named by `env_file:`/`--env-file` is read by
+    # the CLI like any other plaintext file, and its contents are inlined: the
+    # variable is non-empty, so every other check here passes while the container
+    # runs with ciphertext as the value.
+    if grep -qE "^[[:space:]]*$NAME:[[:space:]]*\"?(ENC\[|sops_)" "$OUT"; then
+        echo "preflight-compose-secrets: $NAME resolves to CIPHERTEXT" >&2
+        echo "preflight-compose-secrets: the CLI read an encrypted file and passed its contents" >&2
+        echo "preflight-compose-secrets: through as the value; give that container its own store instead" >&2
         FAILED=1
     fi
 done

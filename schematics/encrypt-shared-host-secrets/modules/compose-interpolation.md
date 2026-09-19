@@ -43,10 +43,21 @@ reproduced while authoring:
 | either form, via `--env-file <other-file>` that lacks the variable | absent there | the same as the first row: blank, rc 0 |
 | `SHARED_SECRET=fromfile` in `.env`, `SHARED_SECRET=fromenv` exported by the caller | present | rc 0, and the resolved value is **`fromenv`** — the CLI's own environment outranks the file |
 | `SHARED_SECRET=` (empty) in `.env`, variable unset in the environment | empty string | rc 0, `SHARED_SECRET: ""` in the resolved config: set-but-empty and never-set are indistinguishable downstream |
+| `env_file: ./svc.env` naming a file that does not exist | — | rc 1, `env file /…/svc.env not found`: the CLI reads `env_file` itself, at config time |
+| `env_file: ./svc.env` containing `SHARED_SECRET=canary` | present | rc 0, and the resolved config shows `SHARED_SECRET: canary` **inlined** into the service environment |
+| the same, containing `SHARED_SECRET=ENC[AES256_GCM,…]` | — | rc 0, and the container's environment holds the **ciphertext verbatim** — the variable is non-empty, so nothing downstream can tell it apart from a working value |
 
 An unset interpolated variable therefore **succeeds with an empty value**. A
 compose file cannot tell "no secret configured" from "the secret mechanism did
 not run", and the container starts.
+
+`env_file:` entries and a `--env-file` argument are the same class: the CLI
+reads those files and inlines their values into the service environment, so a
+store handed to them arrives as ciphertext and **starts the container with
+`ENC[…]` as the value** — non-empty, plausible-looking, and useless. Two guards
+follow: never point `env_file` at a store (its consumer is the container, so
+remedy (a) or `D-5` applies), and make the pre-flight refuse a value that is
+still ciphertext.
 
 **The three remedies, in the order they should be considered:**
 
@@ -109,6 +120,10 @@ have started blank" into a named failure before anything is created.
   but holds `NAME=`): the parse succeeds and the container starts blank. Detect:
   the pre-flight script, which checks the resolved value is non-empty rather
   than merely defined.
+- **A store or an encrypted file pointed at `env_file`**: the container starts
+  with the ciphertext as the value (measured above) and every non-empty check
+  passes. Detect: the pre-flight script refuses a resolved value that is still
+  `ENC[…]`. Remedy: give that container its own store (`D-5`) instead.
 - **A value interpolated from the wrong file** (a stray `.env` in
   `P-13 COMPOSE_DIR` overriding the intended source): the resolved config shows
   a value nobody set. Detect: `docker compose config | grep -A1 'NAME'` before
