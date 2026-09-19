@@ -1,0 +1,29 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cameri-schematics",
+  "description": "The authoring plugin for agentic schematics. This repository's schematic catalog is a separate file, .agent-schematics/marketplace.json, and is not a plugin marketplace.",
+  "owner": {
+    "name": "Ricardo Arturo Cabral Mejía",
+    "email": "me@ricardocabral.io"
+  },
+  "plugins": [
+    {
+      "name": "schematics",
+      "description": "The authoring plugin — authors, reverse-engineers, and maintains agentic schematics: self-contained build specifications anyone can implement independently, without central coordination. Provides the create-schematic, build-schematic and audit-schematic skills.",
+      "source": "./skills/schematics",
+      "spec": "skills/create-schematic/SKILL.md",
+      "category": "authoring",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "schematic",
+        "specification",
+        "portability",
+        "decentralized",
+        "authoring"
+      ]
+    }
+  ]
+}

@@ -3,9 +3,25 @@
 # request and push to main (.github/workflows/validate.yml); run it locally
 # before opening a PR.
 #
-#   .agent-schematics/marketplace.json  parses, unique names, sources and spec
-#                                       files exist, exactly five featured,
-#                                       every `composes` entry names a plugin
+#   .agent-schematics/marketplace.json  parses, its $schema resolves to this
+#     (the schematic catalog)             repository's own format companion
+#                                       (schemas/catalog-<N>/marketplace.json.
+#                                       schema), and the file conforms to what
+#                                       that companion declares: required
+#                                       fields, types, patterns, and no field
+#                                       it does not define. Every entry is a
+#                                       schematic directory, names are unique,
+#                                       sources and spec files exist, exactly
+#                                       five featured, every `composes` entry
+#                                       names another entry
+#   .claude-plugin/marketplace.json     the plugin marketplace, in the harness's
+#     (the plugin marketplace)           own format: a real directory (never a
+#                                       symlink, which would put the catalog at
+#                                       this path), declaring that format and
+#                                       listing exactly one plugin — the
+#                                       authoring plugin — whose source carries
+#                                       a plugin manifest. No other file in the
+#                                       repository may declare that format
 #   schematics/*/SCHEMATIC.md           declares a spec: revision whose
 #                                       schemas/spec-<N>/SCHEMATIC.md.schema
 #                                       companion exists; every modules/,
@@ -50,27 +66,184 @@ import datetime, glob, hashlib, json, os, re, subprocess, sys
 errors = []
 warnings = []
 
-# ─── Catalog ─────────────────────────────────────────────────────
-d = json.load(open('.agent-schematics/marketplace.json'))
-plugins = d['plugins']
+# ─── Git, and whether this checkout can be verified ──────────────
+# Used by the catalog checks (which scan tracked files) and by the pin checks
+# below (which resolve commits); defined once, here, because both need it early.
+def git(*args):
+    return subprocess.run(['git', *args], capture_output=True)
 
-names = [p['name'] for p in plugins]
+in_repo = git('rev-parse', '--is-inside-work-tree').returncode == 0
+shallow = in_repo and git('rev-parse', '--is-shallow-repository').stdout.strip() == b'true'
+can_verify = in_repo and not shallow
+if not in_repo:
+    warnings.append('not a git checkout: dependency pins were found but not verified')
+elif shallow:
+    warnings.append('shallow clone: dependency pins were found but not verified (fetch the full history)')
+
+# ─── Catalog: the file and its format ────────────────────────────
+# The catalog lists the schematic packages this repository publishes. It is not
+# a plugin marketplace and carries no installable anything: the two are
+# separate files with separate formats, and the checks below keep them
+# separate. Everything about the shape of the file is resolved from its own
+# $schema field — the same way a spec selects its format companion with `spec:`
+# — so the format lives in one document rather than in this script's memory.
+CATALOG = '.agent-schematics/marketplace.json'
+d = json.load(open(CATALOG))
+entries = d.get('schematics', [])
+if not isinstance(entries, list):
+    errors.append(f"{CATALOG}: 'schematics' is {type(entries).__name__}, must be a list")
+    entries = []
+
+OWN_SCHEMA = re.compile(r'https://schemaformat\.ai/schemas/([a-z0-9-]+)/marketplace\.json\.schema')
+companion = None
+declared_schema = d.get('$schema', '')
+resolved = OWN_SCHEMA.fullmatch(declared_schema.strip()) if isinstance(declared_schema, str) else None
+if not resolved:
+    errors.append(f"{CATALOG}: $schema is {declared_schema!r}. A catalog resolves its format from "
+                  f"this field, and the format is this repository's own "
+                  f"(https://schemaformat.ai/schemas/catalog-1/marketplace.json.schema). A catalog "
+                  f"naming another project's marketplace schema has adopted that project's format "
+                  f"instead of describing its own: the plugin marketplace is the separate file "
+                  f".claude-plugin/marketplace.json")
+else:
+    companion = f"schemas/{resolved.group(1)}/marketplace.json.schema"
+    if not os.path.isfile(companion):
+        errors.append(f"{CATALOG}: declares $schema revision {resolved.group(1)!r}, "
+                      f"but {companion} does not exist")
+        companion = None
+
+def schema_errors(value, node, defs, where):
+    """What `value` breaks in one JSON Schema document, as sentences.
+
+    Reads the subset the companions use: $ref into $defs, const, type,
+    pattern, required, properties, additionalProperties, items, minItems. A
+    schema is a contract only where something enforces it, and this is the
+    cheapest way to make the companion the contract rather than a description
+    of one nobody reads.
+    """
+    out = []
+    if not isinstance(node, dict):
+        return out
+    if '$ref' in node:
+        target = defs.get(node['$ref'].rsplit('/', 1)[-1])
+        if target is None:
+            out.append(f"{where}: the schema references {node['$ref']}, which it does not define")
+        else:
+            out.extend(schema_errors(value, target, defs, where))
+    if 'const' in node and value != node['const']:
+        out.append(f"{where}: is {value!r}, must be {node['const']!r}")
+    declared = node.get('type')
+    kinds = {'object': dict, 'array': list, 'string': str, 'boolean': bool,
+             'number': (int, float), 'integer': int}
+    if declared and declared in kinds and not isinstance(value, kinds[declared]):
+        out.append(f"{where}: is {type(value).__name__}, must be {declared}")
+        return out
+    if isinstance(value, str) and 'pattern' in node and not re.fullmatch(node['pattern'], value):
+        out.append(f"{where}: {value!r} does not match {node['pattern']}")
+    if isinstance(value, list):
+        if 'minItems' in node and len(value) < node['minItems']:
+            out.append(f"{where}: has {len(value)} item(s), needs at least {node['minItems']}")
+        if isinstance(node.get('items'), dict):
+            for i, item in enumerate(value):
+                out.extend(schema_errors(item, node['items'], defs, f"{where}[{i}]"))
+    if isinstance(value, dict):
+        for key in node.get('required', []):
+            if key not in value:
+                out.append(f"{where}: has no {key!r}, which the schema requires")
+        properties = node.get('properties', {})
+        for key, item in value.items():
+            if key in properties:
+                out.extend(schema_errors(item, properties[key], defs, f"{where}.{key}"))
+            elif node.get('additionalProperties') is False:
+                out.append(f"{where}: has {key!r}, which the schema does not define")
+    return out
+
+if companion is not None:
+    schema = json.load(open(companion))
+    defs = schema.get('$defs', {})
+    for problem in schema_errors(d, schema, defs, CATALOG):
+        errors.append(f"{problem} ({companion})")
+
+# ─── Catalog: what the entries must satisfy ──────────────────────
+names = [p['name'] for p in entries if isinstance(p, dict) and 'name' in p]
 if len(names) != len(set(names)):
-    errors.append('duplicate plugin names')
+    errors.append(f"{CATALOG}: duplicate entry names")
 
-for p in plugins:
-    src = p['source']
-    src = src[2:] if src.startswith('./') else src
+for p in entries:
+    if not isinstance(p, dict) or 'name' not in p or 'source' not in p:
+        continue                     # the shape is the schema check's business
+    src = p['source'][2:] if p['source'].startswith('./') else p['source']
     spec = p.get('spec', 'SCHEMATIC.md')
     if not os.path.isfile(os.path.join(src, spec)):
-        errors.append(f"{p['name']}: missing {src}/{spec}")
+        errors.append(f"{CATALOG}: {p['name']}: missing {src}/{spec}")
     for c in p.get('composes', []):
         if c not in names:
-            errors.append(f"{p['name']}: composes unknown plugin {c!r}")
+            errors.append(f"{CATALOG}: {p['name']}: composes unknown schematic {c!r}")
 
-featured = [p['name'] for p in plugins if p.get('featured')]
+featured = [p['name'] for p in entries if p.get('featured')]
 if len(featured) != 5:
     errors.append(f"featured count is {len(featured)}, must be exactly 5: {featured}")
+
+# ─── Plugin marketplace ──────────────────────────────────────────
+# The other file, and the reason the two are checked together: a symlink here
+# puts the catalog at the path a plugin client reads, which advertises every
+# schematic as an installable plugin. That is a wiring mistake with a
+# plausible-looking symptom (the client installs something), so it is an error
+# rather than a style note.
+MARKETPLACE = '.claude-plugin/marketplace.json'
+HARNESS_SCHEMA = 'anthropic.com/claude-code/marketplace.schema.json'
+if os.path.islink('.claude-plugin'):
+    errors.append(f".claude-plugin is a symlink. The plugin marketplace must be a real file: "
+                  f"a symlink to the catalog puts a schematic index where a plugin client "
+                  f"looks, and every schematic reads as an installable plugin")
+elif not os.path.isfile(MARKETPLACE):
+    errors.append(f"{MARKETPLACE}: missing. The repository's plugin marketplace lists the plugins "
+                  f"it ships, and the catalog is not one of them")
+else:
+    try:
+        market = json.load(open(MARKETPLACE))
+    except ValueError as e:
+        errors.append(f"{MARKETPLACE}: does not parse ({e})")
+        market = None
+    if market is not None:
+        if HARNESS_SCHEMA not in str(market.get('$schema', '')):
+            errors.append(f"{MARKETPLACE}: $schema is {market.get('$schema')!r}; a plugin "
+                          f"marketplace declares the harness format it implements")
+        listed = market.get('plugins')
+        if not isinstance(listed, list):
+            errors.append(f"{MARKETPLACE}: has no 'plugins' list")
+            listed = []
+        if len(listed) != 1:
+            found = ', '.join(str(p.get('name')) for p in listed if isinstance(p, dict)) or 'nothing'
+            errors.append(f"{MARKETPLACE}: lists {len(listed)} plugin(s) ({found}). This "
+                          f"marketplace ships exactly one plugin: the repository's schematics "
+                          f"are catalog entries, not plugins, and do not belong here")
+        for p in listed:
+            if not isinstance(p, dict) or not p.get('source'):
+                continue
+            src = p['source'][2:] if p['source'].startswith('./') else p['source']
+            manifest = os.path.join(src, '.claude-plugin/plugin.json')
+            if not os.path.isfile(manifest):
+                errors.append(f"{MARKETPLACE}: {p.get('name')}: source {p['source']} carries no "
+                              f"{manifest}, so nothing installs from this entry")
+
+# ─── No other file may declare the harness marketplace format ────
+# The catalog used to, by pointing its $schema at that schema while listing
+# every schematic as a plugin. One file implementing the format is the whole
+# point of the split, and a grep is what makes it a fact rather than a promise.
+# This script names the format in the checks above, so it excludes itself.
+if can_verify:
+    for path in git('ls-files').stdout.decode('utf-8', 'replace').split():
+        if path in (MARKETPLACE, 'scripts/validate-catalog.sh'):
+            continue
+        try:
+            text = open(path, encoding='utf-8').read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if HARNESS_SCHEMA in text:
+            errors.append(f"{path}: declares the harness plugin-marketplace format "
+                          f"({HARNESS_SCHEMA}). Only {MARKETPLACE} implements it: this repository's "
+                          f"catalog of schematics is not a plugin marketplace")
 
 # ─── Specs: referenced package files ─────────────────────────────
 # A package path anywhere in the text (prose, code spans, or code blocks), not
@@ -111,7 +284,7 @@ SEMVER = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
 ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 STATUSES = ('draft', 'published', 'stable', 'superseded')
 FIELDS = ('name', 'version', 'status', 'spec', 'description', 'created', 'updated')
-catalog = {p['name']: p for p in plugins}
+catalog = {p['name']: p for p in entries}
 
 def parse_frontmatter(text):
     """The frontmatter fields of a SCHEMATIC.md, or None without a block."""
@@ -238,17 +411,6 @@ PIN = re.compile(
     r' `sha256:([0-9a-f]{64})`')
 LINK = re.compile(r'https://github\.com/cameri/schematics/blob/')
 HEX = re.compile(r'^[0-9a-f]{7,40}$')
-
-def git(*args):
-    return subprocess.run(['git', *args], capture_output=True)
-
-in_repo = git('rev-parse', '--is-inside-work-tree').returncode == 0
-shallow = in_repo and git('rev-parse', '--is-shallow-repository').stdout.strip() == b'true'
-can_verify = in_repo and not shallow
-if not in_repo:
-    warnings.append('not a git checkout: dependency pins were found but not verified')
-elif shallow:
-    warnings.append('shallow clone: dependency pins were found but not verified (fetch the full history)')
 
 # ─── Pull requests: the two diff-aware rules ─────────────────────
 PLUGIN_DIR = 'skills/schematics/'
@@ -427,7 +589,7 @@ if os.path.exists('llms.txt'):
         outside = set(re.findall(
             r'\[([a-z0-9-]+)\]\(https://schemaformat\.ai/schematics/\1/SCHEMATIC\.md\)',
             "\n".join(lines[:start] + lines[end:])))
-        catalogued = {p['name'] for p in plugins if p.get('source', '').startswith('./schematics/')}
+        catalogued = {p['name'] for p in entries}
         for name in sorted(catalogued - listed):
             where = " (listed outside the Schematics section)" if name in outside else ""
             errors.append(f"llms.txt: {name!r} is in the catalog but not listed in the Schematics section{where}")
@@ -446,6 +608,6 @@ pin_status = (f"{pins_verified} pins verified" if can_verify
               else f"{pins_found} pins found, not verified")
 print(f"frontmatter ok: {len(seen_fields)} specs checked against "
       f"schemas/spec-1/SCHEMATIC.md.schema")
-print(f"catalog ok: {len(plugins)} entries, featured={featured}, "
+print(f"catalog ok: {len(entries)} entries, featured={featured}, "
       f"{len(specs)} specs, {pin_status}")
 PY

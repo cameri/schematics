@@ -38,8 +38,12 @@ establishes:
    through the whole format, including the reverse-engineering workflow
    for distilling a spec from a working implementation.
 
-3. **Register it in the catalog.** Add an entry for your package to
-   `.agent-schematics/marketplace.json`, matching the existing entries.
+3. **Register it in the catalog.** Add an entry for your package to the
+   catalog's `schematics` array in `.agent-schematics/marketplace.json`,
+   matching the existing entries. The catalog lists schematics and is not a
+   plugin marketplace: a schematic is installed by nobody, so an entry there is
+   never a plugin, and the two live in different files with different formats
+   (`schemas/catalog-1/marketplace.json.schema` and the harness's own).
 
 4. **Open a PR that references the issue.** The PR body must link the
    issue (`Closes #N` or a plain reference). PRs without a referenced

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemaformat.ai/schemas/catalog-1/marketplace.json.schema",
+  "title": "Agentic Schematics catalog",
+  "description": "The format of .agent-schematics/marketplace.json: a repository-local index of the schematic packages this repository publishes, one entry per package, so a builder can discover them without reading the tree. Revision 1, selected by the catalog's own $schema value — the same way a SCHEMATIC.md selects its format companion with its spec: frontmatter field. A catalog is NOT a plugin marketplace: it lists build specifications, not installable plugins, and no entry is installed by any harness. The repository's plugin marketplace, if it has one, is the Claude Code format file at .claude-plugin/marketplace.json, which lists plugins and nothing else.",
+  "type": "object",
+  "required": ["$schema", "name", "description", "owner", "schematics"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://schemaformat.ai/schemas/catalog-1/marketplace.json.schema",
+      "description": "The format revision this file claims. It MUST be this document's $id, so a reader resolves the format from the file itself rather than from a convention. A catalog that names another project's marketplace schema instead has adopted that project's format."
+    },
+    "name": {
+      "type": "string",
+      "description": "Catalog identifier. It names the collection, not a plugin marketplace; a plugin marketplace in the same repository carries its own name in .claude-plugin/marketplace.json."
+    },
+    "description": {
+      "type": "string",
+      "description": "One line describing what the catalog collects."
+    },
+    "owner": {
+      "$ref": "#/$defs/owner",
+      "description": "Who owns the catalog. Per-entry author fields override it."
+    },
+    "schematics": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every schematic package in this repository. An entry whose source is not a schematic directory is not a catalog entry — a plugin belongs in .claude-plugin/marketplace.json.",
+      "items": {
+        "$ref": "#/$defs/schematic"
+      }
+    }
+  },
+  "$defs": {
+    "owner": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name."
+        },
+        "email": {
+          "type": "string",
+          "description": "Contact address."
+        },
+        "url": {
+          "type": "string",
+          "description": "Website."
+        }
+      }
+    },
+    "schematic": {
+      "type": "object",
+      "required": ["name", "description", "source", "category"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "description": "The package directory's name under schematics/, and the name in that package's SCHEMATIC.md frontmatter. A tool resolves a package by this field."
+        },
+        "description": {
+          "type": "string",
+          "description": "Copied verbatim from the package's SCHEMATIC.md description: frontmatter. The frontmatter is the source and this is the copy; a validator compares the two."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^\\./schematics/[a-z0-9-]+$",
+          "description": "Path to the package directory, relative to the repository root. Every catalog entry names a directory under schematics/ — that is what makes it a catalog entry rather than a plugin."
+        },
+        "spec": {
+          "type": "string",
+          "default": "SCHEMATIC.md",
+          "description": "The file a reader fetches to read the capability, relative to source. Defaults to SCHEMATIC.md."
+        },
+        "category": {
+          "type": "string",
+          "description": "What kind of capability this is. Current values: infrastructure, media, devops."
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Whether the site may feature this package. Exactly five entries carry it; a validator enforces the count so the rotation stays a choice."
+        },
+        "composes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Names of other catalog entries this package wires together. Each name MUST be another entry in this file."
+        },
+        "author": {
+          "$ref": "#/$defs/owner",
+          "description": "Per-package author, when it differs from the catalog owner."
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Search terms."
+        }
+      }
+    }
+  }
+}
