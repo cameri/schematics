@@ -1,149 +1,128 @@
-# Module: isolation-rules
+# Module: Shared Contracts
+
+The values two or more parts must agree on for the set to work, each mapped to the
+part-owned parameter that decides it. This is the module the composition exists to
+carry: a part can pass its own acceptance rows and still be assembled wrongly,
+because the failure is in a value that crosses a boundary — a path, a name, an
+endpoint, a credential variable — and no single part owns both ends of it.
+
+It is NOT the isolation module: what each container may reach, mount and hold, and
+the one table of forbidden properties, belong to `modules/isolation-rules.md`. This
+module is about agreement, not reachability.
 
 ## Purpose
 
-Owns the set-wide view of what each container may reach, mount and hold, and the one table of things no container in the set
-may ever have. Read it before adding a service to the merged compose file, and when `scripts/verify-set.sh` reports on
-`A-5`, `A-6`, `A-7` or `A-13`. It is NOT responsible for any part's contract: each statement names the requirement that
-already decides it, and this module adds only the per-container view and one detection expression per rule.
+Own the cross-part value table, and nothing else. A deployment that changes a value
+here must change it at both ends; a deployment that changes one end alone has a
+defect this module's "if they disagree" column names, and the check column is how it
+is found before a container starts.
 
 ## Inputs
 
-- The set as deployed: the merged configuration of the parts' fragments in the merge order the spine's Interfaces section
-  gives, and the containers it starts.
-- `P-1` `AGENT_SET_NETWORK`, `P-2` `AGENT_TREE_DIR`, `P-15` `DOCKER_PROXY_URL`, `P-16` `DOCKER_PROXY_ALLOWLIST`, `P-17`
-  `SECRETS_KEY_DIR`, `P-18` `SECRETS_SERVICE_NAME`.
-- The store part's parameter values as this deployment set them: its `P-2` (master key file), `P-3` (dedicated key name),
-  `P-8` (key-file mode), `P-10` (key path inside a container).
+- This package's Parameters table, and the parts' parameter tables **read at the
+  pinned commits** (D-1 … D-6) — the pins are what make a part's parameter name
+  citable rather than remembered.
+- The deployment's own values for `P-1` … `P-21`.
+- The merged configuration of the parts' fragments in the order the spine gives.
 
 ## Outputs
 
-- The five statements of what may be reached, mounted and held: the agent pane's process, the host container, the router
-  container, the Docker-access proxy container, and the store's key material.
-- One forbidden table, each row carrying the requirement that forbids the thing plus a detection expression the implementer
-  can run unchanged.
-- Nothing else: no file, no service, no image. The checks are the reading of `scripts/verify-set.sh`'s rows; do not fork a
-  second copy into a part.
+- One table of cross-part contracts: the value, where it is fixed here, the parts
+  that must agree, the observable symptom when they disagree, and a command that
+  finds the disagreement.
+- The compose merge order and what it guarantees, which is itself a contract
+  between this package's glue and every part's fragment.
+- Nothing else: no file, no service, no image. The checks are the acceptance rows'
+  reading of the set; do not fork a second copy into a part.
 
 ## Dependencies
 
-- `D-1` — the base image's unprivileged account and `AGENT_*` contract (its `R-1`, `R-3`, `R-9`, `R-15`): the "not root" rule
-  below.
-- `D-2` — the host part: its `R-9` (loopback, no socket) and `R-13` (no secret in the image).
-- `D-3` — the harness layer: its `R-8` (no credential in the image) and `R-10` (no listener, no daemon).
-- `D-4` — the router: its `R-2`, `R-4`, `R-6` fix the router container's reachability and its credential handling.
-- `D-5` — the store: its key hierarchy and its `R-3` master-key rule, which the spine's `R-8` adopts for the whole set.
-- `D-6` — the Docker-access part: its `R-1`, `R-2`, `R-5`, `R-6`, `R-7` are the Docker half of the forbidden table.
+- **D-1** `build-an-agent-dev-image` — the account uid/gid and the workspace path
+  the tree and the layout are built around.
+- **D-2** `run-multiplexed-agent-workspaces` — the agent tree layout, the
+  per-agent home, `AGENT_HARNESS`, and the host image the layer builds on.
+- **D-3** `add-an-agent-harness` — the config root (`P-9`), the router endpoint's
+  form (`P-3`), the credential variable the CLI reads, and `AGENT_HARNESS`.
+- **D-4** `run-an-llm-router` — the endpoint, the credential variable its gate
+  reads, and the alias set.
+- **D-5** `encrypt-container-secrets` — the secret names, the mount targets, and
+  the key-file naming.
+- **D-6** `restrict-docker-api-access` — the proxy endpoint, its allowlist, and
+  **which network it is on**.
 
-## What each container may see, mount and hold
+## The contract table
 
-### The agent pane's process
+Every row is a value, not a hope: the parts' own files decide each one, and this
+package's parameters are the only place a deployment sets it.
 
-- **Reaches:** the router at `ROUTER_BASE_URL` (`P-8`) by service name on `AGENT_SET_NETWORK` (`P-1`), with the credential
-  named by `ROUTER_CREDENTIAL_ENV` (`P-9`) in its process environment at run time (spine's `R-7`, part 3's `R-8`); Docker,
-  when enabled, only via `DOCKER_HOST="$DOCKER_PROXY_URL"` (`P-15`).
-- **Mounts:** nothing of its own — it inherits the host container's mounts. Its working directory and `HOME` are its own
-  directories under the tree, and its identity comes from the workspace, never its environment (part 2's `R-3`).
-- **Cannot:** open a listener or run a daemon (part 3's `R-10`); hold a provider credential, or any credential but the router
-  credential (part 3's `R-8`); reach a Docker socket (part 2's `R-9`); run as root — the pane runs as the base's account (part
-  2's `R-3`, part 1's `R-1`).
+| Contract | Fixed here | Parts that must agree | If they disagree | How to check |
+|---|---|---|---|---|
+| **The set network.** One bridge network every service of the set joins, addressed by service name | `P-1 AGENT_SET_NETWORK`, declared in the glue and named in each service's `networks:` | Every part's service definition (none of them declares a `networks:` of its own — the parts are deltas) | A service on another network resolves nothing by name: the harness's `ROUTER_BASE_URL` and the host's `DOCKER_PROXY_URL` fail with name-resolution errors at the first call | `docker compose … config --services` plus `docker inspect <c> --format '{{json .NetworkSettings.Networks}}'` for each container |
+| **The Docker-access network, which is NOT the set network.** The proxy keeps its own internal network; the host container joins that network as its consumer | The glue's `networks:` line for `agent-host`; the proxy's own fragment declares the internal network (`internal: true`) | D-6's own network contract (`P-5 NETWORK_NAME`, "the internal network consumers join") and its rule that nothing else is attached to it | If the proxy is attached to the set network instead, its unauthenticated port 2375 is reachable by every member of the set, and the part's network isolation — the thing that stops `HTTP on 2375` from being an open daemon — is gone. The allowlist still bounds *verbs*, not *who may ask* | `docker inspect socket-proxy --format '{{json .NetworkSettings.Networks}}'` shows one network, the internal one; `docker exec <host> getent hosts socket-proxy` resolves; the router container does not resolve it |
+| **The agent tree path and its owner** | `P-2 AGENT_TREE_DIR` (host path), mounted at the workspace path the base declares | D-1's account uid/gid, D-2's tree layout and per-agent home | A tree owned by another uid makes every pane unwritable: the harness starts and cannot write session state. Wrong path and the panes start in an empty workspace | `stat -c '%u:%g' "$AGENT_TREE_DIR"` against the base image's account; `docker inspect <host> --format '{{range .Mounts}}…'` |
+| **The image chain, and the form of each reference** | `P-4 AGENT_BASE_REF` → `P-5 AGENT_HOST_IMAGE` → `P-6 HARNESS_IMAGE`, each ONE complete reference (`name:tag` locally, `name@sha256:<digest>` published) | D-2's own image parameter, D-3's `P-2` (the base it builds on), and every fragment that names an image | Appending a tag to a digest reference, or naming the host image where the layer's is required, either fails to resolve or runs the harness-free host: the container starts and has no CLI. This is why the glue's `services:` entries carry no `image` at all | `docker image inspect <ref>` resolves; `docker compose … config` shows each service's `image` coming from the part that owns it |
+| **The router endpoint: the ROOT, and the path each arm appends** | `P-8 ROUTER_BASE_URL` is the root, no `/v1`; the harness layer's `P-3` takes the same value and derives the arm's URL (`/v1/messages` appended by Claude Code, `/v1/responses` by Codex CLI, whose base therefore ends in `/v1`) | D-4's `P-13` (the URL it publishes) and D-3's `P-3` + its `modules/router-wiring.md` table | Pass the `/v1` base through and the Claude arm requests `/v1/v1/messages`: a 404 at the first turn, with a configuration that looks right. The layer refuses a `/v1` suffix at build time for exactly this reason | `docker image inspect <harness image> --format '{{json .Config.Env}}'` and the recorded endpoint at `/usr/local/share/agent-harness/endpoint`; the layer's `H-8` compares the file's value against the derived one |
+| **The model aliases** | `P-10 ROUTER_ALIAS` (primary), `P-11 ROUTER_ALIAS_SET` (what the deployment decided the router serves), `P-12 ROUTER_FAST_ALIAS` (secondary) | D-4's `P-10 ALIAS_SET` (the only ids a client may send) and D-3's `P-5`/`P-6` (what its configuration names) | An alias the router does not serve is accepted by every build and fails per request; nothing else in the set notices | `GET <root>/v1/models` with the router credential, then compare the answer with `P-11`; `bring-up.sh`'s step 7 does exactly this and refuses before the layer is built |
+| **The credential variable's name** | `P-9 ROUTER_CREDENTIAL_ENV` — the name the *harness* reads | D-3's `P-4` and its per-arm record (`ANTHROPIC_AUTH_TOKEN` for the Claude arm, the layer's `P-4` for the Codex arm), D-4's own credential variable (inside ITS store — a different variable in a different container), and D-5's key set (the store must carry the entry under the harness's name) | The harness starts with the variable unset and fails its first request 401; no build sees it | `docker exec <host> printenv <name>`; the image's record at `/usr/local/share/agent-harness/credential-env` is the authority for which name this image's CLI reads |
+| **The secret names and their mount targets** | `P-17 SECRETS_KEY_DIR`, `P-18 SECRETS_STORE_DIR`, `P-19 ROUTER_SECRETS_SERVICE`, `P-20 AGENT_HOST_SECRETS_SERVICE` | D-5's name-prefix rule, its mount-name and target-path parameters, and each consumer's `secrets:` list | Compose fails the merge on a secret nobody declares ("secret … not found"), and a wrong target decrypts the wrong file into a process — a secrecy finding, not a startup error | `docker compose … config` lists every `secrets:` key; `docker inspect <c> --format '{{range .Mounts}}…'` shows the targets |
+| **The key-file mode against the runtime uid** | `P-17 SECRETS_KEY_DIR` holds `<service>-keys.txt` per store service | D-5's key-file mode parameter, read against D-1's account uid/gid | A mode the container's uid cannot read stops the decryptor and the container exits before its application starts; a mode anyone can read hands the key to another user | `stat -c '%a %u:%g' "$SECRETS_KEY_DIR/<service>-keys.txt"` against the store part's parameter for the relationship the tree's owner reports |
+| **The Docker proxy endpoint and its allowlist** | `P-15 DOCKER_PROXY_URL`, `P-16 DOCKER_PROXY_ALLOWLIST` | D-6's `P-5`/`P-6` (its network and port) and its endpoint-scoping rule | The host's Docker tooling fails to reach the daemon; a group the deployment did not enable is refused, which is the proxy working as designed rather than a defect | `docker exec <host> docker version` through `P-15`; `docker exec <host> docker run --privileged …` must be refused |
+| **The harness config root** | `P-21 HARNESS_CONFIG_PATH` — the path a deployment reads configuration from inside the container | D-3's `P-9` (the same value, written into the image as `CLAUDE_CONFIG_DIR`/`CODEX_HOME`) | A deployment that reads or mounts a different directory sees an empty configuration while the CLI reads the real one | `docker image inspect <harness image> --format '{{json .Config.Env}}'` against `P-21` |
 
-### The host container
+## The compose merge order, and what it guarantees
 
-- **Reaches:** the proxy's HTTP endpoint on the proxy's own network, the router by service name on `AGENT_SET_NETWORK`, and
-  its own bind mount. Nothing on the host outside that mount, and nothing inbound (part 2's `R-9`).
-- **Mounts:** exactly one read-write host path, `AGENT_TREE_DIR` (`P-2`), at part 2's `P-12`, holding every agent's workspace
-  and home, the supervision state and the SSH material (part 2's `R-7`). Everything else is read-only or one credential file
-  (spine's `R-6`): its dedicated store key at the store part's `P-10`, with the mode that part's `P-8` requires.
-- **Cannot:** run as root (part 1's `R-1`); mount a Docker socket (part 2's `R-9`, `R-13`); publish a port — its `R-9` keeps
-  inbound closed and its `P-20` defaults to loopback; hold the master key (spine's `R-8`).
-
-### The router container
-
-- **Reaches:** outbound to the provider endpoints the operator configured explicitly (its `R-2`); inbound only from the set's
-  containers, by service name on `AGENT_SET_NETWORK`.
-- **Mounts:** its own encrypted store file and its own dedicated key — only that key may be mounted into it (its `R-4`).
-  Nothing of the agent tree, and no second service's key.
-- **Cannot:** keep provider credentials on its filesystem — they are decrypted in memory at boot (its `R-4`); expose a host
-  port by default (its `R-6`), and never inside this set's default (spine's `R-4`); be reached by a client off the set's
-  network.
-
-### The Docker-access proxy container
-
-- **Reaches:** the daemon, through the socket mounted read-only into this container and no other (Docker-access part's `R-1`,
-  `R-6`; the spine's `D-6` row). Consumers reach it only on its internal network, at that part's `P-6`, never published (its
-  `R-5`).
-- **Mounts:** the socket read-only at that part's `P-2`, and its own configuration.
-- **Cannot:** mount the socket writable (its `R-6`); publish its endpoint (its `R-5`); serve an endpoint group not enabled
-  with a documented reason (its `R-2`, `R-3`); enable container-control verbs without a written justification (its `R-7`).
-  `DOCKER_PROXY_ALLOWLIST` (`P-16`) is the whole of what it may serve.
-
-### The store's key material
-
-- **Where it lives:** one host directory, `SECRETS_KEY_DIR` (`P-17`), holding the master key (the store part's `P-2`) and one
-  dedicated key per service, named after the service (its `P-3`). A host path, not a container.
-- **What reaches a container:** only its own dedicated key file, mounted at that part's `P-10` with the mode its `P-8`
-  requires, decrypted in memory at boot and exported into the process environment; no plaintext lands on the container
-  filesystem, and there is no shared secrets volume and no sidecar (its `R-4`).
-- **Cannot reach any container:** the master key (the store part's `R-3`; the spine's `R-8` adopts it for the set). Secret
-  values never enter the deployment's environment file either — that file holds parameter values only (spine's Phase 2, step
-  4).
-
-## Forbidden to every container in the set
-
-Every expression below is a read; `$C` is one container of the set. Run each row against every container it applies to,
-including ones a later phase adds.
-
-| Rule | Why it holds | Detection |
-|------|--------------|-----------|
-| No published port | Part 2's `R-9` (inbound closed by default); the spine's `R-4`; the Docker-access part's `R-5` for the proxy | `docker ps --format '{{.Names}}\t{{.Ports}}'` shows no `->`; `docker inspect "$C" --format '{{json .HostConfig.PortBindings}}'` prints `{}` |
-| No `--privileged` | The spine's `R-4`; part 2's `R-9` (no privileged agent-host process) | `docker inspect "$C" --format '{{.HostConfig.Privileged}}'` prints `false` |
-| No added capability | The spine's `R-4`; part 1's `R-15` (none is required for the base's contract) | `docker inspect "$C" --format '{{json .HostConfig.CapAdd}}'` prints `null` |
-| No device | The spine's `R-4`; part 1's `R-15` | `docker inspect "$C" --format '{{json .HostConfig.Devices}}'` prints `[]` or `null` |
-| No host root: not uid 0, no host namespace, no bind of `/` | The spine's `R-4`; part 1's `R-1` (a fixed, unprivileged account) | `docker exec "$C" id -u` prints `1000`, not `0`; `docker inspect "$C" --format '{{.Config.User}} {{.HostConfig.PidMode}} {{.HostConfig.NetworkMode}} {{.HostConfig.IpcMode}}'` names no `host`; `docker inspect "$C" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| grep -xF /` prints nothing |
-| No Docker socket | Part 2's `R-9`, `R-13`; the spine's `R-4`; the Docker-access part's `R-1`, `R-6` (the socket reaches exactly one container, read-only) and `R-2`, `R-7` (that container is a deny-by-default proxy) | `docker inspect "$C" --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \| grep -F docker.sock` prints nothing; `docker exec "$C" test -S /var/run/docker.sock` exits non-zero |
-| No provider credential in an image | Part 3's `R-8`; part 1's `R-9`; the router part's `R-4` | `docker image inspect "$REF" --format '{{json .Config.Env}}' \| grep -E '(_KEY\|_TOKEN\|_SECRET\|PASSWORD)='` prints nothing, and the store part's `A-3` digest scan run against the image's filesystem prints `0` |
-| No master key in any container | The store part's `R-3`; the spine's `R-8` | The store part's `A-3`: `docker exec "$C" sha256sum "$SECRET_TARGET_PATH"` equals the dedicated key's hash and differs from `$MASTER_KEY_FILE`'s, and the size-filtered `find … -exec sha256sum` prints `0` |
-
-A single tripwire over the whole set:
+The fragments are merged in one order, and the order is itself a contract:
 
 ```sh
-for C in "$HOST_CONTAINER" "$ROUTER_CONTAINER" "$PROXY_CONTAINER"; do
-  docker inspect "$C" --format '{{.Name}} ports={{json .HostConfig.PortBindings}} priv={{.HostConfig.Privileged}} caps={{json .HostConfig.CapAdd}} devices={{json .HostConfig.Devices}} user={{.Config.User}}'
-done
+docker compose \
+  -f <part: run-an-llm-router>/skeleton/compose.yml \
+  -f <part: encrypt-container-secrets>/skeleton/compose-secrets.yml \
+  -f <part: restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+  -f <part: run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
+  -f <part: add-an-agent-harness>/skeleton/compose.service.yaml \
+  -f <this package>/skeleton/compose.yaml \
+  config
 ```
 
-## Inherited, not restated
+Compose's rule, measured with `docker compose config` on two fragments that both set
+`image`, `environment` and `networks`: **the last file wins a single-value field,
+and list-valued fields such as `networks:` are unioned.** Two consequences this
+package depends on:
 
-- **Part 2's loopback default for its SSH listen parameter (`P-20`).** Not written down here: the host's exposure is one
-  decision inside part 2, and a second copy would drift the moment that part moves it.
-- **Part 1's run-contract variable names (`R-3`).** The container statements say "the base's account" and "the process
-  environment"; copying the variable list would be a second declaration of a contract whose only home is the base image.
-- **The store's master-key rule (its `R-3`).** Named and detected here, never re-described: restating its encryption or
-  rotation procedure would duplicate the part that owns it, and the duplicate is the copy that goes stale.
+- The glue comes **last**, so nothing a part declares can be overridden by it, and
+  it declares no single-value field of its own (`R-2`).
+- The host part and the harness layer **both** define `agent-host`. The layer's
+  fragment must come after the host's: its image and its decrypt-at-boot entrypoint
+  are the ones that must win, while the host's keep everything the layer does not
+  set. Reversing the two silently runs the harness-free host — the failure the
+  ordering edge in `modules/deployment-order.md` exists to prevent.
+
+## What this package does not own
+
+Stated so a reader does not look for it here:
+
+- Every service body: `image`, `command`, `entrypoint`, `environment`, `user` and
+  mounts belong to the fragment that defines the service (`D-2` … `D-6`). The glue
+  adds network membership and secret sources, and nothing else (`R-2`, row `A-2`).
+- Each part's internal file formats: the store's dotenv layout, the router's
+  configuration, the harness's `settings.json`/`config.toml`.
+- The parts' own acceptance rows, which `A-3` runs rather than reimplements.
 
 ## Failure Behavior
 
-A violation is visible from outside the container, without entering it, which is what makes this a gate rather than a
-diagnosis. The action is the same in every case: stop that container, never "harden" it in place.
-
-| What you see | What it means | Immediate action |
-|--------------|---------------|------------------|
-| `docker ps` shows a `->` for a container of the set | a port was published; this is not the set the document describes (spine's `R-4`) | `docker stop "$C"`; find where the port entered the merged configuration and correct that file |
-| `docker exec "$C" id -u` prints `0` | the run arguments or the image are wrong (part 1's `R-1`) | `docker stop "$C"`; fix the part or the merged compose and recreate — do not `usermod` inside a running container |
-| A socket path or a socket bind appears | the socket reached a container that must not have one (part 2's `R-9`; Docker-access `R-1`) | Stop the container that has it and remove it; never retry with the mount made read-only — only the proxy holds the socket |
-| The master key's digest is found inside a container (the store part's `A-3` prints `1`) | the master key is exposed | Stop the container, treat the master key as compromised, rotate per the store part's own procedure; do not delete the copy and continue |
-| `Privileged` is `true`, or `CapAdd`/`Devices` is non-empty | the container was created outside the merged configuration | Stop it; its run arguments did not come from the parts' fragments |
-| A credential-shaped value appears in an image's `Config.Env` | a credential was baked into an image (part 3's `R-8`) | Stop every container running that image and rebuild without it; removing the value at run time leaves it in the layers |
-
-After any stop, recreate the set from the merged compose and re-run the checks: a clean verdict is what says the phase's
-gate (`A-5`, `A-6`, `A-7`, `A-13`) passes, not the fact that the offending container is gone.
+| Condition | What the deployment sees | What to do |
+|---|---|---|
+| A contract value differs between the two ends | The symptom in that row's column: a name that does not resolve, a 401, a CLI that writes somewhere nobody reads | Fix the value here, then re-run the acceptance script; every row names the two ends it compares |
+| A fragment is missing from the merge list | Compose fails on a service with no image, or the expected-service check names it | Add the fragment in the position the order gives it |
+| The glue grows a service-defining field | `A-2` fails, naming the field | Move it back to the part that owns the service |
+| Two parts declare the same secret name differently | Compose refuses the merge | The secret names are contracts; change the fragment, not the glue |
+| A part is pinned at a commit whose parameters changed | The pins in `SCHEMATIC.md` no longer describe the parts | Re-read the part at the pinned commit; a pin bump is a change to this table, not a formality |
 
 ## Idempotency Notes
 
-- Every check here is a read: `docker ps`, `docker inspect`, a `docker exec` query or `test`, and the store part's `A-3`. Re-
-  running them gives the same verdict, and a failed check changes no state.
-- Address containers by the names the merged configuration gives them and re-read them after every recreate: ids change on
-  `docker compose up`, so an inspect result captured before a recreate says nothing about the container running now.
-- The forbidden table is a gate, not a repair list. Applying it repeatedly converges — a clean set stays clean — and a
-  violation is always resolved by stopping and re-creating from the merged configuration, which is itself idempotent.
+- The table is read, never written: applying it twice changes nothing.
+- Merging is idempotent — the same fragments in the same order render the same
+  configuration, which is what makes `A-2` a repeatable check rather than a
+  snapshot.
+- Every check column is a read (`inspect`, `config`, `stat`, `GET`). Nothing here
+  starts, stops, or writes to a service.
