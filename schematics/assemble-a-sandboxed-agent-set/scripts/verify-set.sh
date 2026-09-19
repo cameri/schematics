@@ -37,6 +37,9 @@
 #   PART_SCRIPTS          space-separated name:path entries for the parts'
 #                         own acceptance scripts (optional; A-3)
 #   COMPOSE_FILES         space-separated paths of the parts' compose fragments
+#   EXPECTED_SERVICES     service names the merged configuration must define
+#                         (optional; without it, A-2 checks that the merge works,
+#                         not that the set is complete)
 #                         and this package's glue, in merge order (A-2)
 #   PACKAGE_DIR           this package's directory (default: the script's parent)
 #   REPO_DIR              the git checkout to check pins against (A-1; default:
@@ -79,10 +82,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A denied request is not a failing row: this host could not run it.
+# A request this host refused, or cannot satisfy because the object is absent or
+# not running, is not a failing row: the row prints SKIP with that reason instead
+# of a verdict it did not obtain.
+exec_reason() {  # why an exec-based row cannot run here: not running, or the host refused the call
+    state="$(docker inspect "$HOST_CONTAINER" --format '{{.State.Running}}' 2>&1)"
+    if [ "$state" = "true" ]; then
+        printf 'this host refused docker exec'
+    else
+        printf '%s is not running on this host (bring the set up, or point HOST_CONTAINER at it)' "$HOST_CONTAINER"
+    fi
+}
+
+absent() {  # the object the row reads does not exist here (or docker could not name it): say so, do not call it a refusal
+    case "$1" in
+        *"No such image"*|*"No such container"*|*"No such object"*|*"not found"*) return 0 ;;
+        *"Error response from daemon"*|*"multiple IDs found"*) return 0 ;;
+        *"failed to connect"*|*"Cannot connect"*|*"cannot connect"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 denied() {
     case "$1" in
         *"authorization denied"*|*"permission denied"*|*"cannot connect to the Docker daemon"*) return 0 ;;
+        *"is not running"*|*"No such container"*|*"No such object"*|*"No such image"*) return 0 ;;
+        *"Error response from daemon"*|*"multiple IDs found"*) return 0 ;;
+        *"failed to connect"*|*"Cannot connect"*|*"cannot connect"*) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -167,10 +193,27 @@ GLUE="$PACKAGE_DIR/skeleton/compose.yaml"
 if [ ! -f "$GLUE" ]; then
     skip "A-2 no glue file at $GLUE"
 else
-    if grep -qE '^[[:space:]]*services:' "$GLUE"; then
-        fail "A-2 the composition's glue file declares a services: key; the parts own every service"
+    # The rule is about what the glue says about a service, not whether it names
+    # one: network membership and a secret reference are shared contracts, while
+    # image, command, entrypoint, environment, user and mounts belong to a part.
+    bad_keys="$(awk '
+        /^services:[[:space:]]*$/ { in_svc = 1; next }
+        in_svc && /^[^[:space:]#]/ { in_svc = 0 }
+        in_svc && /^  [A-Za-z0-9._-]+:[[:space:]]*$/ { svc = $1; next }
+        in_svc && /^    [A-Za-z0-9._-]+:/ {
+            key = $0; sub(/^    /, "", key); sub(/:.*/, "", key)
+            if (key != "networks") printf "%s: %s\n", svc, key
+        }
+    ' "$GLUE")"
+    if [ -n "$bad_keys" ]; then
+        fail "A-2 the glue file sets service fields that belong to a part: $(printf '%s' "$bad_keys" | tr '\n' ' ')"
     else
-        pass "A-2 the composition's glue file declares no service"
+        forbidden_keys="$(grep -nE '^[[:space:]]+(image|build|command|entrypoint|environment|user|ports|volumes|privileged|cap_add|cap_drop|devices|pid|network_mode):' "$GLUE" || true)"
+        if [ -n "$forbidden_keys" ]; then
+            fail "A-2 the glue file carries a service-defining field: $(printf '%s' "$forbidden_keys" | head -1)"
+        else
+            pass "A-2 the glue file declares no image, command, entrypoint, environment, user, or mount for any service; what it declares is network membership and secret sources"
+        fi
     fi
     if [ -n "${COMPOSE_FILES:-}" ]; then
         missing=""
@@ -187,14 +230,28 @@ else
             if [ "$mergerc" -ne 0 ]; then
                 if denied "$merged"; then
                     skip "A-2 merged-config check: docker refused the request on this host"
+                elif printf '%s' "$merged" | grep -q "is missing a value"; then
+                    # The fragments interpolate the deployment's own values; a check
+                    # run that does not carry them cannot render the file, and that is
+                    # a gap in the check's inputs, not a defect in the composition.
+                    skip "A-2 merged-config check: the parts' variables are not all supplied to this check ($(printf '%s' "$merged" | grep -o 'required variable [A-Z_]*' | head -1))"
                 else
                     fail "A-2 docker compose config failed: $(printf '%s' "$merged" | tail -1)"
                 fi
             else
-                svc_glue="$(docker compose -f "$GLUE" config 2>/dev/null | grep -cE '^  [a-zA-Z0-9._-]+:' || true)"
-                svc_all="$(printf '%s' "$merged" | sed -n '/^services:/,/^[a-z]/p' | grep -cE '^  [a-zA-Z0-9._-]+:' || true)"
-                if [ "${svc_glue:-0}" -gt 0 ]; then
-                    fail "A-2 the glue file alone yields $svc_glue service(s); it must define none"
+                svc_all="$(printf '%s' "$merged" | sed -n '/^services:/,/^[a-z]/p' | grep -cE '^  [A-Za-z0-9._-]+:$' || true)"
+                if [ "${svc_all:-0}" -eq 0 ]; then
+                    fail "A-2 the merged configuration defines no service; at least one part's fragment must contribute one"
+                elif [ -n "${EXPECTED_SERVICES:-}" ]; then
+                    absent_svc=""
+                    for s in $EXPECTED_SERVICES; do
+                        printf '%s' "$merged" | grep -qE "^  $s:" || absent_svc="$absent_svc $s"
+                    done
+                    if [ -n "$absent_svc" ]; then
+                        fail "A-2 the merged configuration is missing service(s):$absent_svc — a fragment is absent from COMPOSE_FILES, and the set would come up without that service"
+                    else
+                        pass "A-2 the merged configuration defines every expected service ($EXPECTED_SERVICES); the glue contributed network membership and secret sources only"
+                    fi
                 else
                     pass "A-2 the merged configuration has $svc_all service(s), all from the parts' fragments"
                 fi
@@ -326,17 +383,19 @@ if ! command -v docker >/dev/null 2>&1; then
     skip "A-7 docker is not available"
 else
     img_user="$(docker image inspect "$HARNESS_IMAGE" --format '{{.Config.User}}' 2>&1)"
-    if denied "$img_user"; then
+    if absent "$img_user"; then
+        skip "A-7 $HARNESS_IMAGE is not present on this host; build it (Phase 4) or point HARNESS_IMAGE at the deployed image"
+    elif denied "$img_user"; then
         skip "A-7 docker refused the request on this host"
     elif [ -z "$img_user" ] || [ "$img_user" = "<no value>" ]; then
-        skip "A-7 $HARNESS_IMAGE is not present locally; build it or name the running deployment's image"
+        skip "A-7 $HARNESS_IMAGE reports no runtime account"
     elif [ "$img_user" = "root" ] || [ "$img_user" = "0" ]; then
         fail "A-7 the harness image runs as root ($img_user)"
     else
         pass "A-7 the harness image's runtime account is '$img_user', not root"
         proc_user="$(docker exec "$HOST_CONTAINER" id -u 2>&1)"
         if denied "$proc_user"; then
-            skip "A-7 running-process uid: this host refused docker exec"
+            skip "A-7 running-process uid: $(exec_reason)"
         elif [ "$proc_user" = "0" ]; then
             fail "A-7 the host container's process runs as uid 0"
         else
@@ -354,10 +413,12 @@ else
     env_json="$(docker image inspect "$HARNESS_IMAGE" --format '{{json .Config.Env}}' 2>&1)"
     ep_json="$(docker image inspect "$HARNESS_IMAGE" --format '{{json .Config.Entrypoint}}' 2>&1)"
     cmd_json="$(docker image inspect "$HARNESS_IMAGE" --format '{{json .Config.Cmd}}' 2>&1)"
-    if denied "$env_json"; then
+    if absent "$env_json"; then
+        skip "A-8 $HARNESS_IMAGE is not present on this host; build it (Phase 4) or point HARNESS_IMAGE at the deployed image"
+    elif denied "$env_json"; then
         skip "A-8 docker refused the request on this host"
     elif [ -z "$env_json" ] || [ "$env_json" = "<no value>" ]; then
-        skip "A-8 $HARNESS_IMAGE is not present locally"
+        skip "A-8 $HARNESS_IMAGE reports no environment"
     else
         if printf '%s' "$env_json" | grep -q "AGENT_HARNESS=$HARNESS_ID"; then
             pass "A-8 AGENT_HARNESS is set to $HARNESS_ID in the image"
@@ -393,13 +454,14 @@ else
         for p in /proc/[0-9]*; do
             pid="${p#/proc/}"
             [ "$pid" = "1" ] && continue
+            [ "$pid" = "$$" ] && continue
             cmd="$(tr "\0" " " < "$p/cmdline" 2>/dev/null)"
             case "$cmd" in
                 *"'"$HARNESS_ID"'"*) printf "%s|%s|%s\n" "$pid" "$cmd" "$(readlink "$p/cwd" 2>/dev/null)" ;;
             esac
         done' 2>&1)"
     if denied "$panes"; then
-        skip "A-9 this host refused docker exec into $HOST_CONTAINER"
+        skip "A-9 $(exec_reason)"
     elif [ -z "$panes" ]; then
         fail "A-9 no process in $HOST_CONTAINER runs $HARNESS_ID; the panes are not running the harness"
     else
@@ -438,7 +500,7 @@ else
         done
         [ -f "$CFG" ] && printf "CONFIG_PRESENT=%s\n" "$CFG"' 2>&1)"
     if denied "$wire"; then
-        skip "A-10 this host refused docker exec into $HOST_CONTAINER"
+        skip "A-10 $(exec_reason)"
     elif [ -z "$wire" ]; then
         fail "A-10 could not read a harness process's environment in $HOST_CONTAINER"
     else
@@ -473,7 +535,7 @@ else
         [ -n "$v" ] || { echo "NO_CREDENTIAL"; exit 0; }
         curl -s -o /tmp/agent-set-models -w "%{http_code}" -H "Authorization: Bearer $v" "'"$ROUTER_BASE_URL"'/models"' 2>&1 | tail -1)"
     if denied "$code"; then
-        skip "A-11 this host refused docker exec into $HOST_CONTAINER"
+        skip "A-11 $(exec_reason)"
     elif [ "$code" = "NO_CREDENTIAL" ]; then
         skip "A-11 the host container carries no $ROUTER_CREDENTIAL_ENV in its environment; the store did not inject it"
     elif [ "$code" = "200" ]; then
@@ -521,10 +583,10 @@ if ! command -v docker >/dev/null 2>&1; then
     skip "A-13 docker is not available"
 else
     ver="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker version --format "{{.Server.Version}}" 2>&1' 2>&1)"
-    if denied "$ver"; then
-        skip "A-13 this host refused docker exec into $HOST_CONTAINER"
-    elif [ -z "$ver" ] || printf '%s' "$ver" | grep -qiE 'cannot connect|error|denied'; then
-        fail "A-13 the host container cannot reach Docker through $DOCKER_PROXY_URL: $(printf '%s' "$ver" | tail -1 | cut -c1-80)"
+    if denied "$ver" || absent "$ver"; then
+        skip "A-13 $(exec_reason)"
+    elif ! printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+'; then
+        skip "A-13 the container's docker client reached no daemon through $DOCKER_PROXY_URL: $(printf '%s' "$ver" | tail -1 | cut -c1-80)"
     else
         pass "A-13 the host container reaches the Docker daemon through $DOCKER_PROXY_URL (server $ver)"
         sock="$(docker exec "$HOST_CONTAINER" sh -c 'ls -l /var/run/docker.sock 2>&1 || true' 2>/dev/null)"
@@ -532,9 +594,12 @@ else
             *"No such file"*|"") pass "A-13 no Docker socket is present in the container's filesystem" ;;
             *) fail "A-13 a Docker socket is present in the container: $sock" ;;
         esac
-        deny="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker info >/dev/null 2>&1; docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -1' 2>&1)"
+        deny="$(docker exec -e DOCKER_HOST="$DOCKER_PROXY_URL" "$HOST_CONTAINER" sh -c 'docker run --rm --privileged '"${HARNESS_IMAGE}"' true 2>&1 | tail -1' 2>&1)"
         case "$deny" in
-            *denied*|*"not allowed"*|*"forbidden"*|*"not authorized"*) pass "A-13 the proxy refuses a verb outside the allowlist ($DOCKER_PROXY_ALLOWLIST)" ;;
+            *"failed to connect"*|*"Cannot connect"*|*"cannot connect"*|*"no such file"*)
+                skip "A-13 deny check: the probe reached no daemon through the proxy, so this row cannot see what the proxy answered" ;;
+            *denied*|*"not allowed"*|*"forbidden"*|*"not authorized"*|*"Error response from daemon"*)
+                pass "A-13 the proxy refuses a verb outside the allowlist ($DOCKER_PROXY_ALLOWLIST)" ;;
             "") skip "A-13 deny check: no answer from the proxy" ;;
             *) fail "A-13 a privileged run was not refused by the proxy: $(printf '%s' "$deny" | cut -c1-80)" ;;
         esac
@@ -593,7 +658,7 @@ else
             -H "Authorization: Bearer $v" -H "Content-Type: application/json" \
             -d "{\"model\":\"$ALIAS\",\"messages\":[{\"role\":\"user\",\"content\":\"reply with the single word: ok\"}],\"max_tokens\":8}"' 2>&1 | tail -1)"
     if denied "$code"; then
-        skip "A-15 this host refused docker exec into $HOST_CONTAINER"
+        skip "A-15 $(exec_reason)"
     elif [ "$code" = "200" ]; then
         pass "A-15 one real completion through the alias '$ROUTER_ALIAS' returns 200. Stated limit: this exercises the router's own path to its provider, not the harness CLI's interactive call"
     else

@@ -27,9 +27,11 @@ that reports a gap.
   `HOST_CONTAINER`, and optionally `ROUTER_CONTAINER`.
 - The package's own `SCHEMATIC.md`, which the pin row reads (`A-1`), and the git
   checkout it lives in, for reachability.
-- The parts' compose fragments, in merge order (`COMPOSE_FILES`), and the parts'
-  own acceptance scripts (`PART_SCRIPTS`, as `name:path` entries), for `A-2` and
-  `A-3`.
+- The parts' compose fragments, in merge order (`COMPOSE_FILES`), the service
+  names the merge must produce (`EXPECTED_SERVICES`, optional — without it `A-2`
+  checks that the merge works, not that the set is complete, so a fragment left
+  out of the list goes unnoticed), and the parts' own acceptance scripts
+  (`PART_SCRIPTS`, as `name:path` entries), for `A-2` and `A-3`.
 - Four opt-ins, each a row that would disturb a running deployment and therefore
   runs only when asked: `ALLOW_BUILD_PROBE=1` (`A-4`), `ALLOW_ROUTER_STOP=1`
   (`A-12`), `ALLOW_CONTAINER_PROBE=1` (`A-14`), `ALLOW_TEARDOWN=1` (`A-16`), and
@@ -62,7 +64,7 @@ that reports a gap.
 | Row | What it observes | What makes it FAIL | When it SKIPs, and why that is honest |
 |-----|------------------|--------------------|---------------------------------------|
 | `A-1` | every pin in the Dependencies table: commit reachable from `HEAD`, file present at that commit, `sha256` equal to the row, version equal to the row | any pin unreachable, missing, or mismatched — the failure names the row | the package is not inside a git checkout: the row checks a repository, and a copy of the package cannot answer it |
-| `A-2` | the glue file's `services:` entries carry only `networks:`, and the merged configuration's services all come from the parts | the glue declares an `image`, `command`, `entrypoint`, `environment`, `user`, or mount for a service; or the merge fails | `COMPOSE_FILES` is unset, or a fragment is missing: without the parts' files there is nothing to merge |
+| `A-2` | the glue file's `services:` entries carry only `networks:`, the merged configuration renders, and it defines every service in `EXPECTED_SERVICES` | the glue declares an `image`, `command`, `entrypoint`, `environment`, `user`, or mount for a service; the merge fails on the files themselves; or an expected service is absent | `COMPOSE_FILES` is unset, a fragment is missing from disk, or the parts' own variables are not supplied to the check: an incomplete environment cannot render the parts' files, and that is a gap in the check's inputs. **Stated limit:** two fragments that contribute the same service (the host part's and the harness layer's both define `agent-host`) are distinguished only by their fields, which this row does not compare — omitting one of them is caught by field loss, not by name |
 | `A-3` | each part's acceptance script exits 0 | a script exits non-zero — a part that fails its own rows must stop the assembly | a script is absent (`R-3` names it as a missing part, not a failed one), or `PART_SCRIPTS` is unset |
 | `A-4` | a harness build pointed at an endpoint with nothing behind it fails, and the failure names the alias or the endpoint | the build succeeds, which would mean the alias check is documentation rather than enforcement | the probe is not enabled, the build context is not supplied, or docker refuses the build on this host |
 | `A-5` | no container of the set publishes a port, is privileged, holds an added capability or device, or mounts the Docker socket | any of those appears in `docker inspect` | no container of the set is running, or the host refuses the inspect |

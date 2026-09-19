@@ -280,14 +280,17 @@ to a part and is named by pin, never restated.
   harness process sees, and it arrives in that process's environment at run
   time.
 
-**Compose merge order** (each part ships a fragment; the composition ships the
-glue; the deployment merges them in this order):
+**Compose merge order** (each part ships a fragment; the deployment merges *its
+own filled-in copy* of each — several fragments are starting points a deployment
+edits, such as the Docker-access part's, whose `environment:` is empty until the
+consumer enables the groups it needs — and the composition ships the glue, last):
 
 ```sh
 docker compose \
   -f <part: run-an-llm-router>/skeleton/compose.yml \
   -f <part: encrypt-container-secrets>/skeleton/compose-secrets.yml \
-  -f <part: restrict-docker-api-access>/skeleton/compose.yml \
+  -f <part: restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+  -f <part: run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
   -f <part: add-an-agent-harness>/skeleton/compose.service.yaml \
   -f skeleton/compose.yaml \
   config
@@ -314,9 +317,10 @@ package re-implementing a part (`R-2`, checked by `A-2`).
 | Host | The host container is up and its herdr session is alive; a `docker exec`/pane check runs the harness only after the harness layer is attached |
 | Chain (the composition's own gate) | `scripts/verify-set.sh` exits 0, or its skipped rows state their reasons |
 
-**Files this package ships**: `skeleton/compose.yaml` — the glue, declaring no
-service (networks, volumes, and the secret declarations the parts reference by
-name) — with `skeleton/compose.yaml.schema` beside it; `skeleton/bring-up.sh`,
+**Files this package ships**: `skeleton/compose.yaml` — the glue, which defines
+no service of its own: the shared network, the secret sources the parts reference
+by name, and one `networks:` line per service — with `skeleton/compose.yaml.schema`
+beside it; `skeleton/bring-up.sh`,
 which walks the dependency order of Phases 2–5 as a sequence of guarded steps,
 with `skeleton/bring-up.sh.schema` beside it; and `scripts/verify-set.sh`, the
 end-to-end acceptance script.

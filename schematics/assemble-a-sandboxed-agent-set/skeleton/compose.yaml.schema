@@ -44,8 +44,12 @@
 # |----------|------|
 # | the router's `skeleton/compose.yml` | its service, its port, its own network, and the secret names it references |
 # | the store's `skeleton/compose-secrets.yml` | the wiring example for a service's encrypted file and key: two secrets plus the key-path variable. It defines no service of its own — the store is a mechanism |
-# | the Docker-access part's `skeleton/compose.yml` | its proxy service, the socket mount (into the proxy only), and its network |
-# | the harness layer's `skeleton/compose.service.yaml` | the `agent-host` service: image, entrypoint wrapper that decrypts at boot, environment, and the two secrets it references |
+# Each line names a part's shipped fragment; what the deployment merges is its own
+# filled-in copy of each (the Docker-access fragment, for instance, ships with an
+# empty `environment:`, which a deployment must complete before the file parses).
+# | the Docker-access part's `skeleton/compose-socket-proxy.yml` | its proxy service, the socket mount (into the proxy only), and its network |
+# | the host part's `skeleton/compose.service.yaml` | the `agent-host` service: image, entrypoint that starts the multiplexed panes, user, tty, mounts |
+# | the harness layer's `skeleton/compose.service.yaml` | the same `agent-host` service with the layer's image and its decrypt-at-boot entrypoint wrapper: last of the two, so its fields win and the host's keep the rest |
 #
 # ## Parameter placeholders
 #
@@ -77,7 +81,8 @@
 # docker compose \
 #   -f <run-an-llm-router>/skeleton/compose.yml \
 #   -f <encrypt-container-secrets>/skeleton/compose-secrets.yml \
-#   -f <restrict-docker-api-access>/skeleton/compose.yml \
+#   -f <restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+#   -f <run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
 #   -f <add-an-agent-harness>/skeleton/compose.service.yaml \
 #   -f compose.yaml \
 #   config
