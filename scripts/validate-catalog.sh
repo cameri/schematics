@@ -451,9 +451,18 @@ for spec in specs:
 
 for spec in specs:
     text = open(spec, encoding='utf-8').read()
-    pkg = os.path.dirname(spec)
+    # Resolved, like every other path this script follows: a reference is a claim
+    # about the files the package itself carries, and a symlink named inside the
+    # package answers that claim with a file the package does not carry. The
+    # reference pattern cannot emit a '..' segment (no segment may end in '.'),
+    # so the symlink is the shape that leaves.
+    pkg = os.path.realpath(os.path.dirname(spec))
     for ref in sorted(set(REF.findall(text))):
-        if not os.path.exists(os.path.join(pkg, ref)):
+        target = os.path.realpath(os.path.join(pkg, ref))
+        if os.path.commonpath([pkg, target]) != pkg:
+            errors.append(f"{spec}: references {ref}, which resolves to {target}, outside the "
+                          f"package. A spec names the files its own package carries")
+        elif not os.path.exists(target):
             errors.append(f"{spec}: references {ref}, which does not exist in the package")
 
 # ─── Specs: required sections ────────────────────────────────────
