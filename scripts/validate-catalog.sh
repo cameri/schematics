@@ -11,10 +11,11 @@
 #                                       fields, types, patterns, and no field
 #                                       it does not define. Every entry is a
 #                                       schematic directory, names are unique,
-#                                       sources and spec files exist inside the
-#                                       package they belong to (a spec path that
-#                                       resolves out of its package is an error,
-#                                       whether it leaves through a '..' segment
+#                                       every source RESOLVES to a directory
+#                                       under schematics/ (a symlinked package
+#                                       directory is an error), every spec
+#                                       resolves inside the package it belongs to
+#                                       (whether it leaves through a '..' segment
 #                                       or a symlink), exactly five featured,
 #                                       every `composes` entry names another
 #                                       entry
@@ -181,13 +182,23 @@ for p in entries:
         continue                     # the shape is the schema check's business
     src = p['source'][2:] if p['source'].startswith('./') else p['source']
     spec = p.get('spec', 'SCHEMATIC.md')
+    # The schema constrains the source STRING to ./schematics/<name>, which says
+    # nothing about what that path is: a tracked symlink named schematics/<name>
+    # resolves wherever it points. The entry claims a package in this
+    # repository's schematics/ directory, so the resolved source must stay there
+    # — and the spec check below is relative to the resolved source, so it
+    # cannot see this on its own.
+    root = os.path.realpath('schematics')
+    base = os.path.realpath(src)
+    if os.path.commonpath([root, base]) != root:
+        errors.append(f"{CATALOG}: {p['name']}: source {p['source']} resolves to {base}, outside "
+                      f"this repository's schematics/ directory. An entry names a package there")
     # The row is "the entry names a file inside its package", not "that file
     # exists": 'exists' is answered by any path on this machine, including one
     # that walks out with a '..' segment or starts at '/'. Both sides are
     # resolved (symlinks included) and the resolved target must stay under the
     # resolved package directory. The schema rejects those shapes too; this is
     # the check that holds whatever a reader of the catalog does with the value.
-    base = os.path.realpath(src)
     target = os.path.realpath(os.path.join(src, spec))
     if os.path.commonpath([base, target]) != base:
         errors.append(f"{CATALOG}: {p['name']}: spec {spec!r} resolves to {target}, outside its "
@@ -266,6 +277,13 @@ else:
                               f"must be {PLUGIN_SOURCE!r}. Stating the source rather than accepting "
                               f"any path that happens to resolve stops an entry from pointing the "
                               f"plugin client at another directory — or outside the repository")
+            plugin_dir = os.path.realpath(PLUGIN_SOURCE[2:])
+            skills_root = os.path.realpath('skills')
+            if os.path.commonpath([skills_root, plugin_dir]) != skills_root:
+                errors.append(f"{MARKETPLACE}: plugin source {PLUGIN_SOURCE} resolves to "
+                              f"{plugin_dir}, outside this repository's skills/ directory; a plugin "
+                              f"installs from a directory in this repository, not from wherever a "
+                              f"symlink points")
             manifest_path = os.path.join(PLUGIN_SOURCE[2:], '.claude-plugin/plugin.json')
             if not os.path.isfile(manifest_path):
                 errors.append(f"{MARKETPLACE}: {PLUGIN_SOURCE} carries no {manifest_path}, so "

@@ -49,13 +49,16 @@ It checks, and reports on its own:
 - `.agent-schematics/marketplace.json` is a catalog: its `$schema` resolves to
   this repository's own `schemas/catalog-<N>/marketplace.json.schema` companion,
   which must exist, and the file conforms to it. Entry names are unique, every
-  `source` is a directory under `schematics/`, every `spec` resolves to a file
+  `source` resolves to a directory under this repository's `schematics/` (a
+  symlinked package directory is an error), every `spec` resolves to a file
   inside its own package, exactly five entries are featured, and every
   `composes` entry names another entry
 - `.claude-plugin/marketplace.json` is the plugin marketplace and not the
   catalog: a real directory (never a symlink), declaring the harness's format
   exactly, under the marketplace id every documented install names, listing
-  exactly one plugin at its canonical source whose manifest agrees on the name.
+  exactly one plugin at its canonical source — which must resolve to a
+  directory under this repository's `skills/` — whose manifest agrees on the
+  name.
   No other file in the repository may declare that format
 - each spec declares a revision whose `schemas/spec-<N>/SCHEMATIC.md.schema`
   companion exists, and every `modules/`, `scripts/`, `skeleton/`, `templates/`,
