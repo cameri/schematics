@@ -63,6 +63,27 @@
       ]
     },
     {
+      "name": "encrypt-shared-host-secrets",
+      "description": "Encrypt one shared host secret store with SOPS + age and serve it to many unlike consumers — classify which can decrypt, wrap those that can, bound the plaintext for the one that cannot (the compose parser resolves interpolation before any container exists), ship per-consumer projections so a key unlocks only what its consumer reads, and rotate across every consumer without a rebuild.",
+      "source": "./schematics/encrypt-shared-host-secrets",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "sops",
+        "age",
+        "secrets",
+        "docker",
+        "compose",
+        "encryption",
+        "infrastructure",
+        "shared-secrets",
+        "rotation"
+      ]
+    },
+    {
       "name": "restrict-docker-api-access",
       "description": "Exposes a deny-by-default Docker API to containers over an internal network - an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon.",
       "source": "./schematics/restrict-docker-api-access",

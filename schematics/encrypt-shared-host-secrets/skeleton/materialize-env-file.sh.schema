@@ -1,0 +1,58 @@
+# Shell Script, `.sh` Schema
+
+This file is a POSIX `sh` script (dash- and busybox-safe), like its siblings in
+`skeleton/`.
+
+## Purpose
+
+Decrypt a store into a plaintext env-file at a path a consumer reads at
+startup, run that consumer, and remove the file on every exit path. It exists
+for the consumer class that cannot be wrapped: it reads a path, not an
+environment (`R-4`, remedy (b)).
+
+## Variables and Arguments
+
+| Argument | Default | Meaning |
+|----------|---------|---------|
+| `--from` | `$STORE_FILE` | Store to decrypt (`P-2`) |
+| `--mode` | `${RUNTIME_FILE_MODE:-0600}` | Permissions of the plaintext file (`P-14`) |
+| `--keep` | off | Leave the file in place (the consumer is not this process's child) |
+| `<target-path>` | required | Where the plaintext file goes; under `${RUNTIME_DIR}` (`P-5`), never inside a repository |
+| `--` `<command>` | optional with `--keep` | ONE argument, run through `sh -c` after the file is in place |
+
+## Constraints
+
+- The file is decrypted to `<target>.tmp.$$` in the target's directory under
+  `umask 077`, checked non-empty, `chmod`-ed, then **renamed** into place: a
+  consumer never opens a half-written or empty file.
+- The target's directory is created with mode 0700.
+- `trap … EXIT INT TERM HUP` removes the temporary file and, unless `--keep`
+  was given, the target — so a consumer that fails, or a wrapper that is
+  signalled, does not leave plaintext behind (`R-9`).
+- A decryption that yields an empty file is refused rather than placed: an empty
+  env-file starts a consumer blank, which is the failure this package exists to
+  prevent.
+- A target containing `..` is refused.
+- Requires `sops` on this host: it writes this host's filesystem.
+
+## Control Flow
+
+1. Parse options and the target; the command must be a single argument after
+   `--`.
+2. `mkdir -p` the target's directory, `chmod 700`.
+3. Decrypt into the temporary name; refuse if empty; `chmod`; `mv`.
+4. With `--keep`, drop the trap and print the path (the inventory must record
+   that this file outlives the run).
+5. Otherwise run the command; the trap removes the target when the script ends,
+   whatever the exit status.
+
+## Testing the Script
+
+```
+STORE_FILE=/path/to/shared.env.encrypted ./materialize-env-file.sh \
+  /run/sops-env/probe.env -- 'ls -l /run/sops-env/probe.env; grep -c "^API_TOKEN=" /run/sops-env/probe.env'
+test ! -e /run/sops-env/probe.env && echo removed
+```
+
+Expected: `-rw-------`, `1`, then `removed`. Replacing the command with `exit 7`
+must print `rc=7` and still leave no file behind.
