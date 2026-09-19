@@ -350,9 +350,15 @@ A router that serves a narrower surface is still conformant — the table is the
 reference implementation's, and R-1 and R-11 are what every router must meet —
 but a deployment that wires a coding-agent CLI to it needs the two protocol rows
 above, and they are exactly the rows an OpenAI-only build can silently lack.
+A-14 is written as that floor rather than as this table: it fails on the routes a
+deployment's clients need and reports the rest, and the two protocol rows are the
+ones an OpenAI-only build can silently lack.
 
 - Authentication is `Authorization: Bearer <router credential>` on every
-  `/v1` request; a missing or wrong credential is `401` *(observed)*.
+  `/v1` request; a missing or wrong credential is `401` *(observed; the reference
+  answers `401` and `scripts/router-verify.sh` accepts `401` or `403`, because a
+  router that rejects an unauthenticated request with `403` has registered the
+  route just as plainly)*.
 - **What a `401` proves, and how this table was measured (2026-09-19):** against
   the reference deployment, every `/v1` row above answers `401` with no
   credential, the two `/health` rows answer `200`, and a path the router does
@@ -637,19 +643,24 @@ scripts/router-verify.sh
 - **A-13** (covers any `schematic` dependency): the `D-3` link resolves at its
   pinned commit and the file's SHA-256 matches the recorded value. expected:
   `curl <raw-url-at-commit> | sha256sum` equals the recorded digest.
-- **A-14** (covers R-1): every route in the HTTP surface table is registered.
-  An unauthenticated request to each `/v1` row answers `401`, the two `/health`
-  rows answer `200`, and a path the router does not serve answers `404` —
-  measured against the reference deployment on 2026-09-19: ten `/v1` routes
-  `401` (one `GET`, nine `POST`), two `/health` routes `200`,
-  `/v1/bogus-route-xyz` `404`, so the answers are distinguishable and a `401` is
-  evidence of registration. `scripts/router-verify.sh` runs this row
-  mechanically. expected: the routes the deployment's clients need — at least
-  `/v1/models` and `/v1/chat/completions`, plus the protocol route of every
-  client wired in A-10 (`/v1/messages` for a Claude-family client,
-  `/v1/responses` for a Codex-family one) — answer `401`, and an unknown path
-  answers `404`. A router built for one protocol only FAILS this row for the
-  other, which is the failure this row exists to catch.
+- **A-14** (covers R-1, R-11): the route table is registered, checked as the
+  conformance FLOOR rather than as the reference's whole surface — a router that
+  serves a narrower surface is still conformant, so only the routes a
+  deployment's clients actually need may fail. An unauthenticated request to
+  each `/v1` row answers `401`, the two `/health` rows answer `200`, and a path
+  the router does not serve answers `404` — measured against the reference
+  deployment on 2026-09-19: ten `/v1` routes `401` (one `GET`, nine `POST`), two
+  `/health` routes `200`, `/v1/bogus-route-xyz` `404`, so the answers are
+  distinguishable and a `401` is evidence of registration.
+  `scripts/router-verify.sh` runs this row mechanically. expected:
+  `/v1/models`, `/v1/chat/completions`, and the protocol route of every client
+  family the run declares in its `CLIENT_ARMS` input (default `claude,codex`;
+  `/v1/messages` for a Claude-family client, `/v1/responses` for a Codex-family
+  one) answer `401`, and an unknown path answers `404`. So a router built for
+  one protocol FAILS for the family it does not serve — the failure this row
+  exists to catch — while a router that serves that family and omits the rest of
+  the table is reported, not failed. The `404` control is probed with `GET` as
+  well as `POST`, so method-specific `404` handling cannot carry it.
 
 ## Failure Modes and Rollback
 
