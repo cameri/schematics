@@ -7,13 +7,23 @@
 # attaches a network per service, so the shared network contract needs one line
 # per service here.
 #
-# Merge order (an earlier file wins a scalar conflict, so each part keeps its
-# own image, entrypoint, user and mounts):
+# Merge order: the LAST file wins a single-value field (image, entrypoint, user,
+# command, working_dir) and list-valued fields such as `networks`, `volumes` and
+# `ports` are UNIONED, not replaced. Measured with `docker compose config` on two
+# fragments that both set `image`, `environment` and `networks`: the later value
+# is the one that survives. Two things follow, and both are load-bearing:
+#
+#   * This file comes last, so nothing here can be overridden by a part — and it
+#     therefore declares no single-value field of its own (R-2, row A-2).
+#   * The harness layer's fragment must come AFTER the host part's: both define
+#     `agent-host`, and the layer's image and decrypt-at-boot entrypoint are the
+#     ones that must win. Reversed, the set runs the harness-free host.
 #
 #   docker compose \
 #     -f <run-an-llm-router>/skeleton/compose.yml \
 #     -f <encrypt-container-secrets>/skeleton/compose-secrets.yml \
-#     -f <restrict-docker-api-access>/skeleton/compose.yml \
+#     -f <restrict-docker-api-access>/skeleton/compose-socket-proxy.yml \
+#     -f <run-multiplexed-agent-workspaces>/skeleton/compose.service.yaml \
 #     -f <add-an-agent-harness>/skeleton/compose.service.yaml \
 #     -f compose.yaml \
 #     config
