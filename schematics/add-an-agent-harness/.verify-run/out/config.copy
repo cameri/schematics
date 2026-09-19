@@ -1,0 +1,9 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://llm-router:4000",
+    "ANTHROPIC_MODEL": "check-model",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "check-fast-model",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000"
+  }
+}

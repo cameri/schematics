@@ -64,6 +64,14 @@ directory, three jobs:
   bind mount takes precedence at run time. A deployment that mounts the home
   from the host must hand it to the base's uid, or the CLI cannot write
   session state — and a login could not write its file either.
+- **The root is per image, and every agent a deployment runs from that image
+  shares it.** The layer pins `CLAUDE_CONFIG_DIR`/`CODEX_HOME` at build time, and
+  the deployment cannot vary it per pane: the multiplexer runs each agent with its
+  own home, but `herdr` does not pass a workspace's `--env` values into a plugin
+  pane, which is that package's own measured constraint. So a pane's session state
+  and configuration live where every other pane's do — one path, the one Q-1's
+  optional volume mounts. Per-agent isolation of session state is outside this
+  layer's reach; SCHEMATIC.md records the alternative and why it is not taken.
 
 ## How the credential reaches the process
 

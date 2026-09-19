@@ -12,7 +12,7 @@ each CLI wants them written.
 
 | Fact | Parameter | Value |
 |---|---|---|
-| Endpoint | `P-3 ROUTER_BASE_URL` | The router's OpenAI-compatible base URL, ending in `/v1` — built from that package's service name and port |
+| Endpoint | `P-3 ROUTER_BASE_URL` | The router's **root**, with no path suffix — built from that package's service name and port. Each CLI appends its own protocol path to it, so the value written into a configuration is derived per arm, below |
 | Credential | `P-4 ROUTER_CREDENTIAL_ENV` | The **name** of the environment variable the deployment injects the credential into. The value never appears in a file (R-8) |
 | Model | `P-5 HARNESS_MODEL_ALIAS` | An alias from the router's `P-10 ALIAS_SET`. A client may only send aliases that set contains |
 | Metadata | `P-7`, `P-8` | The context window and the maximum output tokens of the model `P-5` resolves to. The router's registry does not report them, which is why the client declares them |
@@ -29,7 +29,7 @@ Configuration lives in `settings.json` under the directory named by
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "@ROUTER_BASE_URL@",
+    "ANTHROPIC_BASE_URL": "@HARNESS_ENDPOINT@",
     "ANTHROPIC_MODEL": "@HARNESS_MODEL_ALIAS@",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "@HARNESS_FAST_ALIAS@",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "@HARNESS_CONTEXT_WINDOW@",
@@ -40,7 +40,7 @@ Configuration lives in `settings.json` under the directory named by
 
 | Setting | Effect |
 |---|---|
-| `ANTHROPIC_BASE_URL` | Routes requests through a proxy or gateway instead of the first-party endpoint |
+| `ANTHROPIC_BASE_URL` | Routes requests through a proxy or gateway instead of the first-party endpoint. The build writes the router **root** here: Claude Code appends `/v1/messages` itself, so a value ending in `/v1` would request `/v1/v1/messages` and never reach the router |
 | `ANTHROPIC_MODEL` | The model the session uses — an alias from the router's set |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | What the CLI's small/fast role resolves to — background work, session titles. Set it to a second alias (`P-6`); left unset, the CLI keeps its built-in name, which the router may not serve. The older `ANTHROPIC_SMALL_FAST_MODEL` name is deprecated; use the current one |
 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | The context window the CLI assumes for the active model. It exists precisely for a model reached through `ANTHROPIC_BASE_URL` whose window does not match the built-in size for its name — which is every alias |
@@ -64,7 +64,7 @@ model_context_window = @HARNESS_CONTEXT_WINDOW@
 
 [model_providers.router]
 name = "router"
-base_url = "@ROUTER_BASE_URL@"
+base_url = "@HARNESS_ENDPOINT@"
 env_key = "@ROUTER_CREDENTIAL_ENV@"
 wire_api = "responses"
 ```
@@ -75,7 +75,7 @@ wire_api = "responses"
 | `model_provider` | Which provider block to use. Named for the router; the built-in `openai` provider is reserved and cannot be overridden, and pointing at it is not the same as pointing at the router |
 | `model_context_window` | The context window available to the active model — a top-level key, next to `model`, not inside the provider block |
 | `model_providers.router.name` | A display name |
-| `model_providers.router.base_url` | The router's API base URL |
+| `model_providers.router.base_url` | The router's API base URL **with `/v1`**, because Codex CLI appends `/responses` |
 | `model_providers.router.env_key` | The **name** of the environment variable holding the credential. This is why the file can name a credential without carrying one: the value stays in the environment (R-8) |
 | `model_providers.router.wire_api` | The protocol used to reach the provider. `responses` is the only supported value |
 
@@ -85,6 +85,29 @@ compatible endpoint for this harness, and the failure appears at the first reque
 rather than at startup (D-2's failure behaviour). Do not paper over it with a
 protocol-translating proxy in this layer — that is a second service, which R-2
 forbids, and it hides which component is actually answering.
+
+## One parameter, two paths: the per-arm endpoint
+
+`P-3` is the router's root. The two CLIs append different paths to it, so the
+layer derives the value each configuration gets — one parameter cannot be both:
+
+| Arm | Appends | Written into the configuration | Example, for `P-3 = http://llm-router:4000` |
+|---|---|---|---|
+| `claude` | `/v1/messages` | the root alone (`ANTHROPIC_BASE_URL`) | `http://llm-router:4000` |
+| `codex` | `/responses` | the root plus `/v1` (`base_url`) | `http://llm-router:4000/v1` |
+
+Claude Code's own documentation sets `ANTHROPIC_BASE_URL` to the gateway root and
+verifies with a request to `/v1/messages`; Codex CLI's provider block takes the
+OpenAI-style base ending in `/v1`. Writing `P-3` verbatim into both files is the
+defect this table exists to prevent: the Claude arm would request
+`/v1/v1/messages`, which is a 404 at the first turn — not a startup error, and not
+something the acceptance rows could see without comparing the file's value to the
+derived one (they do: H-8).
+
+The derivation is the build's, and it is recorded: the image writes the URL it
+used to `/usr/local/share/agent-harness/endpoint`, and the body half of the
+acceptance script compares the configuration's value against it. A build given a
+`P-3` that already ends in `/v1` is refused rather than doubled.
 
 ## The metadata the router does not report
 
@@ -148,7 +171,7 @@ present in its environment:
 cat "${CLAUDE_CONFIG_DIR:-${CODEX_HOME}}/..."     # settings.json, or config.toml
 
 # the endpoint answers, and names the alias it served
-curl -sS -H "Authorization: Bearer ${ROUTER_API_KEY}" "${ROUTER_BASE_URL}/models"
+curl -sS -H "Authorization: Bearer ${ROUTER_API_KEY}" "${ROUTER_BASE_URL}/v1/models"
 ```
 
 The first commands are rows H-8, H-9 and H-11. The last one is a deployment

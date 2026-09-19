@@ -4,6 +4,6 @@ model_context_window = @HARNESS_CONTEXT_WINDOW@
 
 [model_providers.router]
 name = "router"
-base_url = "@ROUTER_BASE_URL@"
+base_url = "@HARNESS_ENDPOINT@"
 env_key = "@ROUTER_CREDENTIAL_ENV@"
 wire_api = "responses"

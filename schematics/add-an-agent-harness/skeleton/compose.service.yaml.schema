@@ -9,11 +9,23 @@
 # | Setting | Value | Why |
 # |---|---|---|
 # | `image` | the harness layer's image | The only change the layer needs at run time: the image already carries the CLI, its configuration and `AGENT_HARNESS`. |
-# | `entrypoint` | `sops exec-env … agent-host-boot` | The credential path. The image's own entrypoint is untouched; this starts the boot program explicitly, wrapped so the dotenv entries are decrypted in memory and injected into the harness's environment. |
+# | `entrypoint` | `sops exec-env … agent-host-boot` | The credential path. The image's own entrypoint is untouched; this starts the boot program explicitly, wrapped so the dotenv entries are decrypted in memory and injected into the harness's environment. `sops` is in the image because the layer bundles it (`skeleton/Containerfile`): this wrapper is the reason it must be. |
 # | `SOPS_AGE_KEY_FILE` | the mounted key path | Where sops reads the service's dedicated private key. Never the master key. |
 # | `secrets` | the encrypted dotenv file and this service's key file | File-backed secrets, mounted read-only. The target of the encrypted store must keep the `.env` suffix: its format is inferred from the extension. |
 # | `ports` | absent | The harness is a foreground process in an outbound-only container. Nothing here opens a listener (R-10). |
-# | `volumes` | commented | The harness home (`P-9`), optionally. Mounted, session state survives a recreate; unmounted, a recreate starts clean. The mount must be owned by the base image's account or the CLI cannot write session state (Open question Q-1). |
+# | `volumes` | commented | The harness home (`P-9`), optionally. Mounted, session state survives a recreate; unmounted, a recreate starts clean. The mount must be owned by the base image's account or the CLI cannot write session state (Open question Q-1). **The destination must equal the layer's `P-9`** — the path the image sets `CLAUDE_CONFIG_DIR`/`CODEX_HOME` to, and the path the build wrote the configuration into. Mounting a different directory gives the CLI a directory it never reads, and nothing at run time says so. |
+#
+# ## The volume destination is the layer's P-9, not a fixed path
+#
+# The example volume parameterises both ends, and the destination has to be the
+# same value the layer was built with: `<base account home>/.claude` for the
+# Claude arm, `<base account home>/.codex` for the Codex arm, or whatever a
+# deployment passed as `HARNESS_HOME`. The image records the root it used in the
+# file it wrote, so the two can be compared rather than assumed:
+#
+# ```
+# docker image inspect <image> --format '{{json .Config.Env}}'   # CLAUDE_CONFIG_DIR / CODEX_HOME
+# ```
 #
 # ## Nothing about the harness appears in `environment:`
 #

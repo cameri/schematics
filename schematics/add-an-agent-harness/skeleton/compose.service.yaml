@@ -26,7 +26,11 @@
 
 services:
   agent-host:
-    image: "${AGENT_HOST_IMAGE:?set AGENT_HOST_IMAGE to the harness layer's image}:${AGENT_HOST_TAG:-latest}"
+    # One complete reference to the HARNESS LAYER's image: `name:tag`, or
+    # `name@sha256:<digest>` for a published one. It is used verbatim — a tag
+    # appended here would break a digest reference and would name the host image
+    # rather than the harness layer's.
+    image: "${HARNESS_IMAGE:?set HARNESS_IMAGE to the harness layer's complete image reference}"
 
     # Decrypt in memory, then exec the boot program. No `--` separator before
     # the command: `sops exec-env` treats everything after the file as the
@@ -57,8 +61,15 @@ services:
     # The mount must be owned by the base image's account, or the CLI cannot
     # write session state.
     #
+    # The destination is the layer's own P-9 HARNESS_HOME — the config root the
+    # image sets CLAUDE_CONFIG_DIR/CODEX_HOME to — not a path of this file's
+    # choosing: mounting anywhere else gives the CLI a directory it never reads.
+    # The default is the base account's home plus `.<cli>`, so it is
+    # `<account home>/.claude` for the Claude arm and `<account home>/.codex`
+    # for the Codex arm.
+    #
     # volumes:
-    #   - "${HARNESS_HOME_STATE:?set HARNESS_HOME_STATE to the host directory}:/home/user/.claude"
+    #   - "${HARNESS_HOME_STATE:?set HARNESS_HOME_STATE to the host directory}:${HARNESS_HOME:?set HARNESS_HOME to the layer's P-9 config root}"
 
 secrets:
   agent-host-env-encrypted:

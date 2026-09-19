@@ -1,50 +1,86 @@
 # add-an-agent-harness — the harness layer.
 #
-# Built on an agent-host image, this layer adds exactly one coding-agent CLI and
-# that CLI's configuration, pointing it at the router by model alias. It adds
-# nothing else: no entrypoint, no command, no service, no credential, no
-# workdir. The harness becomes the container's process through the inherited
-# entrypoint, which is why this file never names one.
+# Built on an agent-host image, this layer adds exactly one coding-agent CLI, that
+# CLI's configuration, and the one binary the boot path needs to decrypt the
+# credential — pointing it all at the router by model alias. It adds nothing else:
+# no entrypoint, no command, no service, no credential, no workdir. The harness
+# becomes the container's process through the inherited entrypoint, which is why
+# this file never names one.
 #
 # Build from this directory (the skeleton is the build context):
 #
 #   docker build \
 #     --build-arg AGENT_HARNESS_ID=claude \
 #     --build-arg AGENT_BASE_REF=<agent-host image> \
-#     --build-arg ROUTER_BASE_URL=http://llm-router:4000/v1 \
+#     --build-arg ROUTER_BASE_URL=http://llm-router:4000 \
 #     --build-arg ROUTER_CREDENTIAL_ENV=ROUTER_API_KEY \
 #     --build-arg HARNESS_MODEL_ALIAS=<alias> \
 #     --build-arg HARNESS_FAST_ALIAS=<smaller alias> \
 #     --build-arg HARNESS_CONTEXT_WINDOW=200000 \
 #     --build-arg HARNESS_MAX_OUTPUT_TOKENS=32000 \
-#     --build-arg HARNESS_HOME=/home/user/.claude \
+#     --build-arg HARNESS_HOME=/home/agent/.claude \
 #     -f Containerfile -t <name>:<tag> .
 #
-# This file needs no BuildKit: no cache mounts, no heredocs, no --link, and no
-# build-platform variables, so the legacy builder builds it exactly as the
-# default one does. That is a property of this file, not of the build path — the
-# image it builds on is the base's, and whatever the base's own Containerfile
-# requires to produce that image still applies.
+# `ROUTER_BASE_URL` is the router's ROOT — no `/v1`. Each CLI appends its own
+# path (`/v1/messages` for Claude Code, `/v1/responses` for Codex CLI), so this
+# file derives the endpoint per arm; a value that already ends in `/v1` is
+# refused rather than doubled.
+#
+# Required per arm: `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`,
+# `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` always (`HARNESS_HOME` has a
+# default); `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` for `claude`;
+# `ROUTER_CREDENTIAL_ENV` for `codex`, whose provider block names it as `env_key`.
+# An omitted or empty required argument stops the build with one line naming it
+# and exit 78 — the same refusal the unknown harness id produces, and the same
+# one the base uses.
+#
+# This file needs no BuildKit: a multi-stage copy, no cache mounts, no heredocs,
+# no --link, and no build-platform variables, so the legacy builder builds it
+# exactly as the default one does. That is a property of this file, not of the
+# build path — the image it builds on is the base's, and whatever the base's own
+# Containerfile requires to produce that image still applies.
 
 # One complete base reference: `name:tag` for an image built locally,
-# `name@sha256:<manifest list digest>` for a published one.
+# `name@sha256:<manifest list digest>` for a published one. Declared before the
+# first FROM, because a FROM line can only read an argument from the global
+# scope — measured: declared after the builder stage, the legacy builder fails
+# with `base name (${AGENT_BASE_REF}) should not be blank`.
 ARG AGENT_BASE_REF
+
+# The boot path decrypts the credential with sops, so the binary has to be in the
+# image. It is static, taken from the upstream project's own pinned image, and
+# copied in one step: nothing else of that image is kept. Pinned by version; the
+# upgrade is an edit here plus a rebuild.
+FROM ghcr.io/getsops/sops:v3.11.0-alpine AS sops
+
 FROM ${AGENT_BASE_REF}
 
 ARG AGENT_HARNESS_ID
-ARG ROUTER_BASE_URL
-ARG ROUTER_CREDENTIAL_ENV
+# The router's root: the CLI appends its own protocol path. No `/v1` here.
+ARG ROUTER_BASE_URL=http://llm-router:4000
+ARG ROUTER_CREDENTIAL_ENV=ROUTER_API_KEY
 ARG HARNESS_MODEL_ALIAS
 ARG HARNESS_FAST_ALIAS
 ARG HARNESS_CONTEXT_WINDOW
 ARG HARNESS_MAX_OUTPUT_TOKENS
-ARG HARNESS_HOME
+# Default: the base account's home plus `.<cli>`. The base declares the account
+# (`AGENT_USER`) and gives it a home under /home, so the default is expressible
+# here; a build over a base whose account lives elsewhere passes HARNESS_HOME.
+ARG HARNESS_HOME=/home/${AGENT_USER}/.${AGENT_HARNESS_ID}
 # Optional: empty resolves the current version from the registry at build time.
 ARG HARNESS_PACKAGE_VERSION=
+# Optional: when non-empty, the build checks that this URL answers before it
+# produces an image. No credential is sent — a credential must never be a build
+# argument, because it would land in the image's history — so this proves the
+# endpoint is REACHABLE, not that it serves the alias. Alias membership is the
+# deployment's check, before the panes start.
+ARG HARNESS_VERIFY_ENDPOINT=
 
 # Root, for this layer only. The image returns to the base's account below.
 USER root
 
+# The decryptor the inherited boot path execs, and the configuration templates.
+COPY --from=sops /usr/local/bin/sops /usr/local/bin/sops
 COPY claude-settings.json codex-config.toml /usr/local/share/agent-harness/templates/
 
 # The install: one CLI, chosen by the closed parameter, at a version resolved
@@ -52,43 +88,78 @@ COPY claude-settings.json codex-config.toml /usr/local/share/agent-harness/templ
 # and no credential is written.
 RUN set -eu; \
     case "${AGENT_HARNESS_ID}" in \
-      claude) PKG='@anthropic-ai/claude-code'; CLI='claude'; TPL='claude-settings.json'; CONF='settings.json'; CRED='ANTHROPIC_AUTH_TOKEN' ;; \
-      codex)  PKG='@openai/codex';              CLI='codex';  TPL='codex-config.toml';    CONF='config.toml';    CRED="${ROUTER_CREDENTIAL_ENV}" ;; \
+      claude) PKG='@anthropic-ai/claude-code'; CLI='claude'; TPL='claude-settings.json'; CONF='settings.json'; CRED='ANTHROPIC_AUTH_TOKEN'; NEED_FAST=1; NEED_MAX=1 ;; \
+      codex)  PKG='@openai/codex';              CLI='codex';  TPL='codex-config.toml';    CONF='config.toml';    CRED="${ROUTER_CREDENTIAL_ENV:-}"; NEED_FAST=0; NEED_MAX=0 ;; \
       *) printf '%s\n' "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex" >&2; exit 78 ;; \
     esac; \
-    for pair in "ROUTER_BASE_URL=${ROUTER_BASE_URL}" "HARNESS_MODEL_ALIAS=${HARNESS_MODEL_ALIAS}" "HARNESS_FAST_ALIAS=${HARNESS_FAST_ALIAS}" "HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW}" "HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS}" "HARNESS_HOME=${HARNESS_HOME}"; do \
+    for pair in "ROUTER_BASE_URL=${ROUTER_BASE_URL:-}" "HARNESS_MODEL_ALIAS=${HARNESS_MODEL_ALIAS:-}" "HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW:-}" "HARNESS_HOME=${HARNESS_HOME:-}"; do \
       name="${pair%%=*}"; value="${pair#*=}"; \
       if [ -z "${value}" ]; then \
         printf '%s\n' "add-an-agent-harness: ${name} is required and was not set" >&2; exit 78; \
       fi; \
     done; \
+    if [ "${NEED_FAST}" = 1 ] && [ -z "${HARNESS_FAST_ALIAS:-}" ]; then \
+      printf '%s\n' "add-an-agent-harness: HARNESS_FAST_ALIAS is required for the ${AGENT_HARNESS_ID} harness (its small/fast role) and was not set" >&2; exit 78; \
+    fi; \
+    if [ "${NEED_MAX}" = 1 ] && [ -z "${HARNESS_MAX_OUTPUT_TOKENS:-}" ]; then \
+      printf '%s\n' "add-an-agent-harness: HARNESS_MAX_OUTPUT_TOKENS is required for the ${AGENT_HARNESS_ID} harness and was not set" >&2; exit 78; \
+    fi; \
+    if [ -z "${CRED}" ]; then \
+      printf '%s\n' "add-an-agent-harness: ROUTER_CREDENTIAL_ENV is required for the ${AGENT_HARNESS_ID} harness (its provider block names the variable the credential arrives in) and was not set" >&2; exit 78; \
+    fi; \
+    ROOT="${ROUTER_BASE_URL%/}"; \
+    case "${ROOT}" in \
+      */v1) printf '%s\n' "add-an-agent-harness: ROUTER_BASE_URL must be the router root without the /v1 suffix; this build was given ${ROUTER_BASE_URL} — each CLI appends its own protocol path, so keep '/v1' off this parameter" >&2; exit 78 ;; \
+    esac; \
+    case "${AGENT_HARNESS_ID}" in \
+      claude) ENDPOINT="${ROOT}" ;; \
+      codex)  ENDPOINT="${ROOT}/v1" ;; \
+    esac; \
+    if [ -n "${HARNESS_VERIFY_ENDPOINT:-}" ]; then \
+      if command -v curl >/dev/null 2>&1; then \
+        CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${ENDPOINT}/models" 2>/dev/null || true)"; \
+      elif command -v wget >/dev/null 2>&1; then \
+        wget -q -O /dev/null -T 10 "${ENDPOINT}/models" >/dev/null 2>&1 && CODE="200" || CODE=""; \
+      else \
+        printf '%s\n' "add-an-agent-harness: HARNESS_VERIFY_ENDPOINT is set but the base image carries neither curl nor wget; rebuild without it, or on a base that has one" >&2; exit 78; \
+      fi; \
+      case "${CODE:-}" in \
+        [1-5][0-9][0-9]) printf '%s\n' "add-an-agent-harness: the router answered ${CODE} at ${ENDPOINT}/models" ;; \
+        *) printf '%s\n' "add-an-agent-harness: HARNESS_VERIFY_ENDPOINT=${HARNESS_VERIFY_ENDPOINT} and nothing answered at ${ENDPOINT}/models; the endpoint this arm is wired to is not reachable from the build" >&2; exit 78 ;; \
+      esac; \
+    fi; \
+    if [ -n "${HOME:-}" ] && [ "${HOME}" != "$(dirname "${HARNESS_HOME}")" ]; then \
+      printf '%s\n' "add-an-agent-harness: note: the base account's home is ${HOME} while HARNESS_HOME is ${HARNESS_HOME}; set HARNESS_HOME explicitly if that is not what this deployment wants" >&2; \
+    fi; \
     if ! command -v npm >/dev/null 2>&1; then \
       apt-get update; \
       apt-get install -y --no-install-recommends nodejs npm; \
       rm -rf /var/lib/apt/lists/*; \
     fi; \
     V="${HARNESS_PACKAGE_VERSION:-$(npm view "${PKG}" version)}"; \
-    printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness"; \
+    printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness, endpoint ${ENDPOINT}"; \
     npm config set "allow-scripts=${PKG}" --location=user >/dev/null 2>&1 || true; \
     npm install --global --no-audit --no-fund "${PKG}@${V}"; \
     npm cache clean --force >/dev/null 2>&1 || true; \
     mkdir -p /usr/local/share/agent-harness "${HARNESS_HOME}"; \
-    printf '%s\n' "${V}"    > /usr/local/share/agent-harness/version; \
-    printf '%s\n' "${PKG}"  > /usr/local/share/agent-harness/package; \
-    printf '%s\n' "${CLI}"  > /usr/local/share/agent-harness/command; \
-    printf '%s\n' "${CRED}" > /usr/local/share/agent-harness/credential-env; \
-    sed -e "s|@ROUTER_BASE_URL@|${ROUTER_BASE_URL}|g" \
+    printf '%s\n' "${V}"       > /usr/local/share/agent-harness/version; \
+    printf '%s\n' "${PKG}"     > /usr/local/share/agent-harness/package; \
+    printf '%s\n' "${CLI}"     > /usr/local/share/agent-harness/command; \
+    printf '%s\n' "${CRED}"    > /usr/local/share/agent-harness/credential-env; \
+    printf '%s\n' "${ENDPOINT}" > /usr/local/share/agent-harness/endpoint; \
+    sed -e "s|@HARNESS_ENDPOINT@|${ENDPOINT}|g" \
         -e "s|@ROUTER_CREDENTIAL_ENV@|${CRED}|g" \
         -e "s|@HARNESS_MODEL_ALIAS@|${HARNESS_MODEL_ALIAS}|g" \
-        -e "s|@HARNESS_FAST_ALIAS@|${HARNESS_FAST_ALIAS}|g" \
+        -e "s|@HARNESS_FAST_ALIAS@|${HARNESS_FAST_ALIAS:-}|g" \
         -e "s|@HARNESS_CONTEXT_WINDOW@|${HARNESS_CONTEXT_WINDOW}|g" \
-        -e "s|@HARNESS_MAX_OUTPUT_TOKENS@|${HARNESS_MAX_OUTPUT_TOKENS}|g" \
+        -e "s|@HARNESS_MAX_OUTPUT_TOKENS@|${HARNESS_MAX_OUTPUT_TOKENS:-}|g" \
         "/usr/local/share/agent-harness/templates/${TPL}" > "${HARNESS_HOME}/${CONF}"; \
     if grep -qE '@(ROUTER|HARNESS)_[A-Z_]+@' "${HARNESS_HOME}/${CONF}"; then \
       printf '%s\n' "add-an-agent-harness: ${CONF} still contains an unsubstituted parameter" >&2; exit 78; \
     fi; \
     chown -R "${AGENT_USER}" "${HARNESS_HOME}" /usr/local/share/agent-harness; \
     chmod 0644 "${HARNESS_HOME}/${CONF}"; \
+    sops --version >/dev/null; \
     "${CLI}" --version
 
 # The one variable the inherited entrypoint reads. It is the CLI's own name, so
@@ -97,7 +168,8 @@ ENV AGENT_HARNESS=${AGENT_HARNESS_ID}
 
 # The CLI's config root: each CLI reads its own variable, and the one that does
 # not apply to this image is inert. A single parameter, so a deployment that
-# bind-mounts the harness home mounts one path.
+# bind-mounts the harness home mounts one path. This root is per image and shared
+# by every agent a deployment runs from it (see SCHEMATIC.md).
 ENV CLAUDE_CONFIG_DIR=${HARNESS_HOME} \
     CODEX_HOME=${HARNESS_HOME}
 

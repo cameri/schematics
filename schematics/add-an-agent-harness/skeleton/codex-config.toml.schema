@@ -13,7 +13,7 @@
 # | `model_provider` | — | Which provider block to use. The built-in `openai` provider is reserved and cannot be overridden, so pointing at the router is not the same as pointing at `openai` with a different URL. |
 # | `model_context_window` | `P-7` | The context window available to the active model. A **top-level** key, next to `model` — not a field inside the provider block, which is where a reader would expect it. |
 # | `model_providers.router.name` | — | A display name for the provider block. |
-# | `model_providers.router.base_url` | `P-3` | The router's API base URL. |
+# | `model_providers.router.base_url` | `P-3` | The router's API base URL **with `/v1`**: Codex CLI appends `/responses`, so this arm's value is the router root plus `/v1`. The template's placeholder is `@HARNESS_ENDPOINT@`, which the build resolves per arm — the Claude arm's file carries the root alone. |
 # | `model_providers.router.env_key` | `P-4` | The **name** of the environment variable the credential arrives in. This is why the file names a credential without carrying one. |
 # | `model_providers.router.wire_api` | — | The protocol used to reach the provider. `responses` is the only supported value. |
 #

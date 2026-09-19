@@ -3,13 +3,16 @@
 # Companion document for `claude-settings.json`, the Claude harness's
 # configuration template. The build substitutes the `@…@` placeholders and
 # writes the result to `<P-9 HARNESS_HOME>/settings.json`, which is the file this
-# CLI reads (see `modules/router-wiring.md`).
+# CLI reads (see `modules/router-wiring.md`). `@HARNESS_ENDPOINT@` is the router
+# **root** for this arm — not `P-3` verbatim minus a suffix the CLI would then
+# re-append; the derivation is the build's, and the image records its result at
+# `/usr/local/share/agent-harness/endpoint`.
 #
 # ## Every key, and why it is here
 #
 # | Key | Parameter | Effect |
 # |---|---|---|
-# | `ANTHROPIC_BASE_URL` | `P-3` | Routes requests to the router instead of the first-party endpoint. |
+# | `ANTHROPIC_BASE_URL` | `P-3` | Routes requests to the router instead of the first-party endpoint. The build writes the router **root** here, with no `/v1`: Claude Code appends `/v1/messages` itself, so a value ending in `/v1` would request `/v1/v1/messages`. The template's placeholder is `@HARNESS_ENDPOINT@`, which the build resolves per arm. |
 # | `ANTHROPIC_MODEL` | `P-5` | The model the session uses — an alias from the router's set. |
 # | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `P-6` | What the CLI's small/fast role resolves to: background work and session titles. The older `ANTHROPIC_SMALL_FAST_MODEL` name is deprecated. |
 # | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | `P-7` | The context window the CLI assumes for the active model. It exists for exactly this case: a model reached through `ANTHROPIC_BASE_URL` whose window does not match the CLI's built-in size for its name, which is every alias. |

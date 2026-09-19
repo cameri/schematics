@@ -34,7 +34,10 @@
 #
 # Inputs (environment; none of these is written anywhere):
 #   IMAGE                this layer's image. Optional: when unset, the script
-#                        builds it (see BASE_IMAGE / BASE_PACKAGE_DIR).
+#                        builds it (see BASE_IMAGE / BASE_PACKAGE_DIR). When it
+#                        IS set, BASE_IMAGE must be set too: the rows that
+#                        compare the inherited contract, and the enum probe, need
+#                        an image to compare against.
 #   BASE_IMAGE           a locally present image to build the layer over and to
 #                        compare the inherited contract against. No default: an
 #                        agent-host image is the deployment's own, and naming one
@@ -49,7 +52,9 @@
 #                        skeleton/entrypoint.sh is what the stand-in base above
 #                        is built from.
 #   HARNESS              P-1: the CLI to build and check (default: claude)
-#   ROUTER_BASE_URL      P-3 (default: http://llm-router:4000/v1)
+#   ROUTER_BASE_URL      P-3 (default: http://llm-router:4000) — the router
+#                        ROOT. The script derives this arm's endpoint from it
+#                        (the root for claude, the root plus /v1 for codex).
 #   ROUTER_CREDENTIAL_ENV P-4 (default: ROUTER_API_KEY)
 #   HARNESS_MODEL_ALIAS  P-5 (default: check-model)
 #   HARNESS_FAST_ALIAS   P-6 (default: check-fast-model)
@@ -82,6 +87,12 @@
 #   CONTAINER_RUNTIME    docker CLI name (default: docker)
 #   KEEP                 1 = keep the built image and the output directory
 #
+# The driver derives one more value for the body: the endpoint this arm's CLI is
+# expected to call (the router root for claude, the root plus /v1 for codex), and
+# passes it as CHECK_ENDPOINT. The body compares the configuration's own value
+# against it — a comparison, not a substring search, because a doubled /v1 path
+# passes a substring search and fails the request.
+#
 # Exit status: 0 when every executed check passed; 1 when any failed; 2 on a
 # usage or precondition error.
 set -u
@@ -90,7 +101,7 @@ IMAGE="${IMAGE:-}"
 BASE_IMAGE="${BASE_IMAGE:-}"
 BASE_PACKAGE_DIR="${BASE_PACKAGE_DIR:-}"
 HARNESS="${HARNESS:-claude}"
-ROUTER_BASE_URL="${ROUTER_BASE_URL:-http://llm-router:4000/v1}"
+ROUTER_BASE_URL="${ROUTER_BASE_URL:-http://llm-router:4000}"
 ROUTER_CREDENTIAL_ENV="${ROUTER_CREDENTIAL_ENV:-ROUTER_API_KEY}"
 HARNESS_MODEL_ALIAS="${HARNESS_MODEL_ALIAS:-check-model}"
 HARNESS_FAST_ALIAS="${HARNESS_FAST_ALIAS:-check-fast-model}"
@@ -206,11 +217,10 @@ body() {
             else
                 bs "H-8 JSON parse check skipped: no python3 in the image"
             fi
-            if grep -q "\"$ROUTER_BASE_URL\"" "$CONF" && grep -q "$HARNESS_MODEL_ALIAS" "$CONF"; then
-                bp "H-8 the configuration names the router URL and the primary alias"
-            else
-                bf "H-8 the configuration does not name the router URL and the primary alias"
-            fi
+            URL="$(sed -n 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONF" | head -1)"
+            MODEL="$(sed -n 's/.*"ANTHROPIC_MODEL"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONF" | head -1)"
+            emit config_url "$URL"
+            emit config_model "$MODEL"
             if grep -q "$HARNESS_CONTEXT_WINDOW" "$CONF"; then
                 bp "H-11 the declared context window is in the file"
             else
@@ -228,19 +238,69 @@ body() {
             else
                 bf "H-11 model_context_window is not a top-level key"
             fi
-            if grep -q 'base_url' "$CONF" && grep -q 'env_key' "$CONF"; then
-                bp "H-8 the provider block names a base URL and a credential variable"
-            else
-                bf "H-8 the provider block is missing base_url or env_key"
-            fi
+            URL="$(sed -n 's/^base_url[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CONF" | head -1)"
+            MODEL="$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CONF" | head -1)"
+            ENVKEY="$(sed -n 's/^env_key[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$CONF" | head -1)"
+            emit config_url "$URL"
+            emit config_model "$MODEL"
+            emit config_env_key "$ENVKEY"
             if [ "$(grep -c '^\[' "$CONF")" -eq 1 ]; then
                 bp "H-9 exactly one provider block exists"
             else
                 bf "H-9 the configuration declares $(grep -c '^\[' "$CONF") provider blocks"
             fi
         fi
+        # H-8: the values the file carries, compared — the per-arm endpoint, the
+        # primary alias, and (for the arm whose configuration names one) the
+        # credential variable against the name the image recorded.
+        if [ -n "${CHECK_ENDPOINT:-}" ]; then
+            if [ "$URL" = "$CHECK_ENDPOINT" ]; then
+                bp "H-8 the configuration's endpoint is the derived one for this arm: $URL"
+            else
+                bf "H-8 the configuration's endpoint is '${URL:-<none>}' but this arm's endpoint is $CHECK_ENDPOINT"
+            fi
+        else
+            bs "H-8 endpoint comparison skipped: the driver supplied no CHECK_ENDPOINT"
+        fi
+        if [ "$MODEL" = "$HARNESS_MODEL_ALIAS" ]; then
+            bp "H-8 the configuration's model is the primary alias: $MODEL"
+        else
+            bf "H-8 the configuration's model is '${MODEL:-<none>}' but P-5 is $HARNESS_MODEL_ALIAS"
+        fi
+        REC_ENDPOINT="$(cat "$REC/endpoint" 2>/dev/null)"
+        if [ -z "$REC_ENDPOINT" ]; then
+            bs "H-7 no endpoint record in the image at $REC/endpoint"
+        elif [ -z "${CHECK_ENDPOINT:-}" ]; then
+            bs "H-7 endpoint record is '$REC_ENDPOINT' but the driver supplied no CHECK_ENDPOINT to compare it with"
+        elif [ "$REC_ENDPOINT" = "$CHECK_ENDPOINT" ]; then
+            bp "H-7 the image records the endpoint it wired: $REC_ENDPOINT"
+        else
+            bf "H-7 the image records endpoint '$REC_ENDPOINT', this arm's is '$CHECK_ENDPOINT'"
+        fi
+        if [ "$CHECK_HARNESS" != "claude" ]; then
+            REC_CRED="$(cat "$REC/credential-env" 2>/dev/null)"
+            if [ -n "$ENVKEY" ] && [ "$ENVKEY" = "$REC_CRED" ]; then
+                bp "H-8 the provider block's env_key is the variable the image recorded: $ENVKEY"
+            else
+                bf "H-8 the provider block's env_key is '${ENVKEY:-<absent>}' but the image recorded '${REC_CRED:-<none>}'"
+            fi
+        fi
+
+        # H-15: no listener. The row the spec claimed and no half of the script
+        # measured. State 0A is LISTEN in /proc/net/tcp.
+        if command -v awk >/dev/null 2>&1; then
+            LISTENERS="$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk 'NR>1 && $4=="0A" {n++} END {print n+0}')"
+            if [ "${LISTENERS:-0}" -eq 0 ]; then
+                bp "H-15 the process holds no listening socket (/proc/net/tcp, /proc/net/tcp6)"
+            else
+                bf "H-15 ${LISTENERS} listening socket(s) are open inside the container"
+            fi
+        else
+            bs "H-15 listener check skipped: no awk in the image"
+        fi
+
         # H-9: only the router's endpoint, and no credential value.
-        OTHER="$(grep -oE 'https?://[^"]+' "$CONF" | grep -v "^$ROUTER_BASE_URL" || true)"
+        OTHER="$(grep -oE 'https?://[^"]+' "$CONF" | grep -vxF "${CHECK_ENDPOINT:-$ROUTER_BASE_URL}" || true)"
         if [ -z "$OTHER" ]; then
             bp "H-9 no endpoint other than the router's appears"
         else
@@ -289,6 +349,7 @@ fi
 
 command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || usage_error "no $CONTAINER_RUNTIME on PATH"
 [ -d "$SKELETON" ] || usage_error "no skeleton directory at $SKELETON"
+[ -n "$IMAGE" ] && [ -z "$BASE_IMAGE" ] && usage_error "BASE_IMAGE is required when IMAGE is supplied: the inherited-contract rows and the enum probe compare against the base image, and H-6 builds over it"
 CHECK_CONF="settings.json"
 [ "$HARNESS" = "claude" ] || CHECK_CONF="config.toml"
 CHECK_CMD="$HARNESS"
@@ -321,13 +382,27 @@ LAYER_TAG=""
 BASE_STANDIN=""
 trap cleanup EXIT INT TERM
 
+# Truncated, not appended: a log left by an earlier run (another arm, another
+# base) otherwise answers H-7's comparison with the wrong build's version.
 BUILD_LOG="$RUN_DIR/build.log"
 STANDIN_LOG="$RUN_DIR/standin.log"
+: > "$BUILD_LOG"
+: > "$STANDIN_LOG"
 BASE_STANDIN="harness-layer-verify-base:$$"
 STANDIN_OK=0
 LAYER_TAG="harness-layer-verify:$$"
 
+# The endpoint this arm's CLI must be wired to: the layer's own rule, restated
+# here so the body can compare against it instead of trusting a substring.
+CHECK_ENDPOINT="${ROUTER_BASE_URL%/}"
+case "$CHECK_ENDPOINT" in
+    */v1) CHECK_ENDPOINT="${CHECK_ENDPOINT%/v1}" ;;
+esac
+[ "$HARNESS" = "codex" ] && CHECK_ENDPOINT="$CHECK_ENDPOINT/v1"
+export CHECK_ENDPOINT
+
 printf 'verify-harness-layer: harness=%s base=%s\n' "$HARNESS" "$BASE_IMAGE"
+printf 'verify-harness-layer: endpoint for the %s arm: %s\n' "$HARNESS" "$CHECK_ENDPOINT"
 
 # --- H-13: the shipped Containerfile, read as text. These rows need no image,
 # --- so they run first and always, including on a host with no usable builder.
@@ -438,7 +513,9 @@ else
 fi
 
 # --- H-6: an unknown harness id stops the build --------------------------
-if build -t "harness-layer-verify-enum:$$" -f "$SKELETON/Containerfile" \
+if [ -z "${BASE_REF:-}" ]; then
+    skip "H-6 no base reference resolved here (\$BASE_IMAGE ${BASE_PRESENT:-unset}), so the enum refusal cannot be measured through a build"
+elif build -t "harness-layer-verify-enum:$$" -f "$SKELETON/Containerfile" \
     --build-arg "AGENT_BASE_REF=$BASE_REF" \
     --build-arg "AGENT_HARNESS_ID=definitely-not-a-harness" \
     "$SKELETON" >"$RUN_DIR/enum.log" 2>&1; then
@@ -450,6 +527,33 @@ else
         skip "H-6 the runtime refused the builder, so the enum refusal could not be measured through a build"
     else
         fail "H-6 the build failed without naming the value it rejected"
+    fi
+fi
+
+# --- H-16: the opt-in endpoint check refuses an unreachable router --------
+if [ -z "${BASE_REF:-}" ]; then
+    skip "H-16 no base reference resolved here, so the endpoint check cannot be measured through a build"
+elif build -t "harness-layer-verify-endpoint:$$" -f "$SKELETON/Containerfile" \
+    --build-arg "AGENT_BASE_REF=$BASE_REF" \
+    --build-arg "AGENT_HARNESS_ID=$HARNESS" \
+    --build-arg "ROUTER_BASE_URL=http://127.0.0.1:1" \
+    --build-arg "HARNESS_VERIFY_ENDPOINT=1" \
+    --build-arg "HARNESS_MODEL_ALIAS=$HARNESS_MODEL_ALIAS" \
+    --build-arg "HARNESS_FAST_ALIAS=$HARNESS_FAST_ALIAS" \
+    --build-arg "HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW" \
+    --build-arg "HARNESS_MAX_OUTPUT_TOKENS=$HARNESS_MAX_OUTPUT_TOKENS" \
+    "$SKELETON" >"$RUN_DIR/endpoint.log" 2>&1; then
+    fail "H-16 the build succeeded with HARNESS_VERIFY_ENDPOINT=1 pointing at an endpoint that answers nothing"
+else
+    # Both halves: our own line, and the guard's exit code. The phrase alone is
+    # also in the echoed RUN command, so a build that failed for another reason
+    # would otherwise satisfy this row.
+    if grep -q "not reachable from the build" "$RUN_DIR/endpoint.log" && grep -q "non-zero code: 78" "$RUN_DIR/endpoint.log"; then
+        pass "H-16 a build whose endpoint check cannot reach the router fails with the guard's code 78, and its own line names the endpoint: $(grep 'not reachable from the build' "$RUN_DIR/endpoint.log" | tail -1 | cut -c1-140)"
+    elif build_refused "$RUN_DIR/endpoint.log"; then
+        skip "H-16 the runtime refused the builder, so the endpoint check could not be measured through a build"
+    else
+        fail "H-16 the build failed without naming the endpoint check: $(tail -1 "$RUN_DIR/endpoint.log" | cut -c1-120)"
     fi
 fi
 
@@ -471,6 +575,25 @@ else
     fail "H-12 platform differs from the base: layer=${HW:-?} base=${BW:-?}"
 fi
 
+# --- H-14: the one variable the inherited entrypoint reads, and the config root
+ENVJSON="$(rt image inspect "$LAYER_TAG" --format '{{json .Config.Env}}' 2>/dev/null)"
+if [ -z "$ENVJSON" ]; then
+    skip "H-14 could not read $LAYER_TAG's Config.Env"
+else
+    if printf '%s' "$ENVJSON" | grep -q "\"AGENT_HARNESS=$HARNESS\""; then
+        pass "H-14 the image's Config.Env sets AGENT_HARNESS=$HARNESS, which is what the inherited entrypoint execs"
+    else
+        fail "H-14 the image's Config.Env does not set AGENT_HARNESS to $HARNESS: $ENVJSON"
+    fi
+    ROOTVAR="CLAUDE_CONFIG_DIR"
+    [ "$HARNESS" = "codex" ] && ROOTVAR="CODEX_HOME"
+    if printf '%s' "$ENVJSON" | grep -q "\"$ROOTVAR=$HARNESS_HOME\""; then
+        pass "H-14 the image's $ROOTVAR is P-9: $HARNESS_HOME"
+    else
+        fail "H-14 the image's $ROOTVAR is not P-9 ($HARNESS_HOME): $ENVJSON"
+    fi
+fi
+
 # --- containers ----------------------------------------------------------
 run_container() {
     # $1 name, $2 harness value for AGENT_HARNESS ('' = unset), rest: the
@@ -486,6 +609,8 @@ run_container() {
         -e "ROUTER_BASE_URL=$ROUTER_BASE_URL" -e "HARNESS_MODEL_ALIAS=$HARNESS_MODEL_ALIAS" \
         -e "HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW" \
         -e "AGENT_HARNESS=$h" \
+        -e "CHECK_ENDPOINT=${CHECK_ENDPOINT:-}" \
+        -e "BODY_EXIT=${RUN_BODY_EXIT:-}" \
         "$LAYER_TAG" "$@"
     if ! rt "$@" >"$RUN_DIR/create-$c.log" 2>&1; then
         note "docker create for $c failed: $(tail -1 "$RUN_DIR/create-$c.log")"
@@ -529,12 +654,22 @@ if run_container hl-cli "$CHECK_CMD" --version; then
     else
         fail "H-5 expected exit 0 from the version command, got ${RC:-?}"
     fi
+    # H-15: what the container publishes. R-10's other half, read from the
+    # container rather than from the Containerfile as text.
+    PB="$(rt inspect hl-cli --format '{{json .HostConfig.PortBindings}}' 2>/dev/null)"
+    NP="$(rt inspect hl-cli --format '{{json .NetworkSettings.Ports}}' 2>/dev/null)"
+    case "$PB$NP" in
+        "" ) skip "H-15 could not inspect hl-cli's port bindings" ;;
+        *[0-9]* ) fail "H-15 the container publishes a port: bindings=$PB ports=$NP" ;;
+        *) pass "H-15 the container publishes no port (bindings=$PB ports=$NP)" ;;
+    esac
 else
     skip "H-3/H-4/H-5 could not create a container from $LAYER_TAG"
 fi
 
 # H-5 (rest) / H-7..H-11: the body stands in for the harness, through the same
 # entrypoint, and records what it finds.
+RUN_BODY_EXIT=7
 if run_container hl-body "/verify-pkg/scripts/verify-harness-layer.sh" --inside /verify-out; then
     rt start hl-body >/dev/null 2>&1
     RC="$(rt wait hl-body 2>/dev/null)"
@@ -552,11 +687,12 @@ if run_container hl-body "/verify-pkg/scripts/verify-harness-layer.sh" --inside 
     else
         fail "H-0 the body printed no BODY-RESULT line"
     fi
-    # H-5: the harness's own non-zero status arrives intact.
-    if [ "$RC" = "0" ]; then
-        pass "H-5 the container reports the harness's exit status (the body exited 0)"
+    # H-5: the harness's own non-zero status arrives intact — measured, by
+    # asking the body for a specific status instead of asserting 0.
+    if [ "$RC" = "$RUN_BODY_EXIT" ]; then
+        pass "H-5 the container reports the harness's own exit status: the body exited ${RUN_BODY_EXIT}, the container reports ${RC}"
     else
-        fail "H-5 expected the container to report 0, got ${RC:-?}"
+        fail "H-5 the body was asked to exit ${RUN_BODY_EXIT}; the container reported ${RC:-?}"
     fi
     E="$OUT_LOCAL/body.evidence"
     if [ -r "$E" ]; then
