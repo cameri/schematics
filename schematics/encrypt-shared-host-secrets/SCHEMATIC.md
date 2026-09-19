@@ -66,9 +66,15 @@ with a blank token and says nothing.
 - **The account the consumers run as**, and therefore the mode the materialized
   file needs: `id -u` for host consumers, the container image's
   `Config.User` for container consumers.
-- **Whether `sops` exists on the host**: `command -v sops`. If not, every
-  operation in this package runs inside `P-10 SOPS_IMAGE`; the scripts in
-  `scripts/` do this automatically and the host then needs only Docker.
+- **Whether `sops` exists on the host**: `command -v sops`. If it does not, the
+  store-editing and read operations here cannot run: this package's scripts
+  refuse with that explanation rather than degrading. Two ways out: run them
+  where the binary exists (its alpine image ships it — `docker create …
+  --entrypoint sops "${SOPS_IMAGE}" --version` proves it works), or use
+  `encrypt-container-secrets`' `sops-set-env.sh` for value-setting,
+  which implements a container fallback through a bind mount. The wrapper
+  (`skeleton/host-wrapper.sh`) has no fallback by construction: it must inject
+  values into a host process's environment, which a container cannot do for it.
 - **The key hierarchy already in use**, if any: `ls "${KEY_DIR}"`. A host that
   already runs per-service encrypted stores has the master key and the
   per-consumer keys this spec reuses; one that does not creates them in
@@ -253,7 +259,7 @@ Binding notes where a principle applies non-obviously:
 | Id  | Kind | What | Why needed | Discovery | Failure behavior |
 |-----|------|------|------------|-----------|------------------|
 | D-1 | system | age encryption (keygen, recipients) | Generate the master and per-consumer keys, encrypt to them | Provided by `sops` (age built in) or the `age` package | Hard fail before Phase 3: without a recipient nothing encrypts |
-| D-2 | system | SOPS binary (host, or `P-10 SOPS_IMAGE` through Docker) | Encrypt, decrypt, extract projections, and inject the environment | `command -v sops`, else `docker create … --entrypoint sops "${SOPS_IMAGE}" --version` | Hard fail before Phase 3. The store-editing scripts fall back to running sops inside the image, which then makes Docker a hard dependency; the wrapper cannot — it must put values into *this* host's process environment — so Phase 5 stops loudly on a host with no sops binary |
+| D-2 | system | SOPS binary on the host (`P-10 SOPS_IMAGE` supplies one when the host has none) | Encrypt, decrypt, extract projections, and inject the environment | `command -v sops`, else `docker create … --entrypoint sops "${SOPS_IMAGE}" --version` | Hard fail before Phase 3: `scripts/sops-shared.sh` and `skeleton/host-wrapper.sh` refuse with an explanation rather than degrading, because a container cannot inject values into a host process's environment. Remedies: a host that has the binary, or the sibling package's `sops-set-env.sh`, which implements a container fallback for value-setting |
 | D-3 | system | POSIX shell where the wrapper runs | The wrapper execs the consumer through a shell, and sops spawns the child with `/bin/sh -c` | `sh -c 'echo ok'` exits 0 | Hard fail before Phase 5: no wrapper means every wrappable consumer keeps its plaintext path |
 | D-4 | system | `python3` or `jq` | JSON-encode a value before `sops set --value-stdin` | `command -v python3 \|\| command -v jq` | Degrade: the operator passes `--value-file` with a pre-encoded value, or installs one of them |
 | D-5 | schematic | [encrypt-container-secrets v0.2.2](https://github.com/cameri/schematics/blob/4ab37413e2d47c895074ea290867ec0f234f624f/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:7b40f292571587b0c6a57460ab5611b2bb4104b1ea0cc6e6848dddea78a45d6a` | The container half of the taxonomy: a value that must reach a container process is injected by that package's boot wrapper, with its per-service key and its no-plaintext-on-disk guarantee. Declared instead of restated so the two specs cannot drift | Its own acceptance green; `docker compose config` of the consuming service shows its secrets wiring | A container consumer cannot be served by this package's host wrapper: Phase 5 stops for that consumer and it keeps its plaintext path until the dependency is deployed. Starting it with the store mounted instead is refused by `R-3` |

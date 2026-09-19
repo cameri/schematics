@@ -72,7 +72,10 @@ by reading it.
 
 ## Dependencies
 
-- `D-1` (age) and `D-2` (sops) for every operation here.
+- `D-1` (age) and `D-2` (sops) for every operation here: a host `sops` binary
+  is required, and `scripts/sops-shared.sh` refuses without one rather than
+  degrading (the sibling package's `sops-set-env.sh` covers value-setting from a
+  host that has only Docker).
 - `D-4` (`python3` or `jq`) for `--value-stdin` encoding.
 - `P-1`…`P-3`, `P-7`…`P-9`, `P-11`, `P-14`.
 - `scripts/sops-shared.sh` is the only writer; a hand-edited store breaks the
