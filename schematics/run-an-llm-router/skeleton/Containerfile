@@ -30,3 +30,21 @@ COPY entrypoint.sh /opt/llm-router/entrypoint.sh
 RUN chmod +x /opt/llm-router/entrypoint.sh
 
 EXPOSE 4000
+
+# SECURITY — the container does not run as root.
+#
+# Measured: the pinned base image's own config states `"User": "root"` and
+# nothing above it changes that, so a router built without this line runs uid 0
+# by inheritance. Nothing here needs it: the router binds P-2 (4000, above the
+# privileged range), the `sops` binary and the bootstrap script are read-only
+# artifacts, and `sops exec-env` only reads the two files mounted into
+# /run/secrets. The base image already ships the account to use — `nonroot`,
+# uid/gid 65532, created by the image builder (apko) that produced it, with a
+# home directory it owns at /home/nonroot.
+#
+# The number matters beyond this file. A file the operator owns at mode 0600 is
+# NOT readable by uid 65532, so P-6 (this router's age key) and P-4 (the alias
+# map, mounted read-only) must be readable by this account — and D-3's P-8
+# derives the key file's mode from exactly this number, granting 0600 only when
+# the host owner and the container account are the same uid.
+USER 65532:65532

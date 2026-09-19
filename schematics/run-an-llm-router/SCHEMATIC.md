@@ -1,7 +1,7 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-an-llm-router
-version: 0.2.0
+version: 0.2.1
 status: draft
 spec: 1
 description: A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.
@@ -74,6 +74,12 @@ behind an alias set they control.
   it; do **not** create a second secret hierarchy.
 - Whether clients run on this host or elsewhere (`P-12`, `D-5`). Discovery:
   `docker network ls`, and whether a client container can resolve `P-1`.
+- The modes and ownership of the files this deployment mounts for the router
+  to read: `P-4` (the alias map) and `P-6` (its age key). Discovery:
+  `stat -c '%a %U %n' <path>`. Both MUST be readable by the account the
+  container runs as (uid/gid 65532, R-12). A file the operator owns at mode
+  0600 is not: the key file then fails decryption with an error that reads like
+  a wrong key, and an unreadable alias map exits the proxy.
 - The host's outbound HTTPS path to each provider. Discovery: the first
   successful completion in Phase 6 — an egress-restricted host fails there,
   with the provider's error, not at boot.
@@ -114,7 +120,8 @@ behind an alias set they control.
 **In scope:**
 
 - The router service: pinned official image, config mount, listen port, health
-  endpoint, restart policy, and its place in the container network.
+  endpoint, restart policy, the account its process runs as, and its place in
+  the container network.
 - The alias → provider map: the entry format, adding, removing, and swapping
   the binding behind an alias, and the no-silent-fallback rule.
 - Credential handling: the encrypted store, the router's dedicated key,
@@ -185,6 +192,11 @@ behind an alias set they control.
 - **Alias id style.** The reference's ids name the provider family; a new
   deployment should prefer ids that do not (Q-5).
 - **Who holds PID 1 and how shutdown signals reach the router** (Q-2).
+- **The account the container runs as.** The reference runs as root: the pinned
+  base image's config states `"User": "root"`, and neither the reference's own
+  layer nor its deployment changes it. This
+  schematic requires a non-root account and names it (R-12). Nothing on the
+  wire changes: no client can see the router's uid.
 
 ## Requirements
 
@@ -223,6 +235,11 @@ behind an alias set they control.
   this router, and the client MUST NOT keep a metered or shared provider as a
   fallback for those roles. When the router is down, the client MUST fail
   visibly rather than silently switch providers.
+- **R-12**: The router process MUST NOT run as root. The image MUST state the
+  account the process runs as, every file mounted for it to read MUST be
+  readable by that account, and the boot MUST need no privilege: the listen
+  port is above 1024 (`P-2`). An implementation that keeps any part of the boot
+  at uid 0 MUST name that part and the reason it cannot drop the privilege.
 
 **Evidence** (source of each non-obvious requirement, from the implementation
 this schematic was reverse-engineered from):
@@ -240,6 +257,7 @@ this schematic was reverse-engineered from):
 | R-9 | `drop_params: true` in the reference config, with the recorded reason: a client sends a parameter some providers do not support, and an earlier gateway rejected it with a 400 *(observed: the same request returns 200 through the router)* |
 | R-10 | The pinned `FROM` in the Containerfile plus the auto-updater opt-out label on the service; the notes say the pin is bumped deliberately |
 | R-11 | Design requirement of this schematic, stated because the deployment it was derived from exists precisely to remove a metered shared provider from the inference path — its clients still carried per-role providers, some of them metered, which is the failure this requirement prevents |
+| R-12 | Measured 2026-09-19 on the pinned base image: its config states `"User": "root"` and no layer above it changes that, so an image built without this requirement runs uid 0 — `docker top` on such a build shows the decrypt wrapper and the proxy as root. The base ships the account to use instead (`nonroot`, uid/gid 65532, with a home directory it owns), and nothing in the boot needs root: the proxy binds `P-2` (4000, above the privileged range) and `sops exec-env` only reads two read-only mounts. Built with `USER 65532:65532`, `docker top` shows both processes as 65532 and the surface answers identically *(observed)* |
 
 ## Design Principles Binding the Implementation
 
@@ -401,6 +419,14 @@ ones an OpenAI-only build can silently lack.
 by the config): the provider keys named in `P-8`, plus the router credential
 from `P-7`'s store entry, exported as the router software's master key.
 
+**Process identity:** the whole chain runs as one non-root account, uid/gid
+65532 (`nonroot`) — the decrypt wrapper, the proxy, and anything `docker exec`
+starts inside the container, since exec takes the image's account unless told
+otherwise. No privilege is used at runtime: the proxy binds `P-2`, above the
+privileged range, and the wrapper only reads mounts (R-12). A `docker exec`
+therefore reads the router child's `/proc/<pid>/environ` (same account), which
+is what A-6 relies on.
+
 **Compose contract:** service `P-1` on network `P-11`, no published ports;
 secret `router-env-encrypted` mounted as `router-secrets.env` (the `.env`
 extension is what makes the decryption tool detect the store format) and
@@ -488,7 +514,10 @@ Steps:
 
 Skip condition: an image with the same pin already exists
 (`docker image ls`); rebuilding is cheap, so this is safe either way.
-Verify: the build exits 0, and the decryption binary runs inside the image.
+Verify: the build exits 0, the decryption binary runs inside the image, and the
+image states the account it runs as (R-12):
+`docker image inspect <the image built in step 3> --format '{{.Config.User}}'`
+prints it — never empty, never `root`.
 
 ### Phase 5: The service
 
@@ -503,7 +532,10 @@ Steps:
 Skip condition: it is already up with the same inputs — `compose up -d`
 converges.
 Verify: the resolved compose file shows the expected secret paths and no
-published ports (`docker compose config`), and the container reaches healthy.
+published ports (`docker compose config`); the container reaches healthy; and
+the running processes are that non-root account rather than uid 0
+(`docker top <P-1>`, A-15). A service that reaches healthy has thereby read both
+mounts as that account, which is the readability half of R-12.
 
 ### Phase 6: Serve and verify the surface
 
@@ -578,7 +610,7 @@ Verify: the specific checks named above pass.
 
 One test per requirement minimum. All of them are runnable by the implementer
 after the phases. `scripts/router-verify.sh` implements A-1, A-2, A-3, A-4's
-negative, A-6, A-14, and the R-9 check mechanically:
+negative, A-6, A-14, A-15, and the R-9 check mechanically:
 
 ```
 ROUTER_BASE_URL=<P-13> ROUTER_API_KEY_FILE=<file with the P-7 credential> \
@@ -661,16 +693,37 @@ scripts/router-verify.sh
   exists to catch — while a router that serves that family and omits the rest of
   the table is reported, not failed. The `404` control is probed with `GET` as
   well as `POST`, so method-specific `404` handling cannot carry it.
+- **A-15** (covers R-12): the container's configured account is stated and is not
+  root, and every process running inside it is that account. expected:
+  `docker inspect --format '{{.Config.User}}' <P-1>` prints a non-root account
+  and `docker top <P-1>` shows its uid in every row — never `root` or `0`.
+  Two checks because either alone is silenceable: the configured account is what
+  the deployment asked for, the running uids are what it got. The second check
+  **compares** them — every identity `docker top` reports is resolved to a uid
+  and must equal the configured account — so a non-root account that is not the
+  stated one fails as well; a deployment whose account and behaviour disagree is
+  exactly the case a check for "not root" alone lets through. Names resolve
+  against the running host's passwd, the database `ps` read them from, so a name
+  and its number compare equal; an account this host cannot resolve is reported
+  as a failure rather than assumed to match. Groups are outside the check:
+  `docker top` prints no gid, so only the uid is compared. A root container
+  passes A-1 and A-2 unharmed, so nothing else in this section catches it, and
+  the health state carries the readability half — a container that reached
+  healthy read `P-4` and the mounted store as an account, which is only possible
+  if that account can read them. `scripts/router-verify.sh` runs the row
+  mechanically when `ROUTER_CONTAINER` is set, as for A-6.
 
 ## Failure Modes and Rollback
 
 | Phase | What can fail | Detection | Recovery |
 |-------|---------------|-----------|----------|
 | 1 | A provider key is invalid, or the API base is not the one the account is provisioned on | The direct call in Phase 1's verification fails | Fix the credential or the base before building anything; the router cannot fix either |
-| 2 | The store is created with the wrong recipients, or the router's key is unreadable inside the container | The container exits at boot with a decrypt error | Re-add the recipient with `D-3`'s tooling; check the key file's mode and owner against the container's user |
+| 2 | The store is created with the wrong recipients, or the router's key is unreadable inside the container | The container exits at boot with a decrypt error — and when the cause is the file's mode, the error reads as a **wrong key**, because the decrypt tool skips a key file it cannot open rather than reporting it | Re-add the recipient with `D-3`'s tooling; check the key file's mode and owner against the container's user (uid 65532, R-12) — the mounted key must be readable by that account, and `D-3`'s `P-8` is what decides that mode |
 | 3 | An alias is bound to a provider the store has no key for | That alias 401s at request time while others work (A-5's shape) | Add the missing key name and value, recreate |
 | 3 | An `api_base` is wrong or unpinned to a different API version | That family's aliases fail with the provider's error | Correct the base; the alias id does not change |
 | 4 | The build fails (bad pin, or the base image changed) | `docker build` exits non-zero | Fix the pin; never remove it to "make it build" |
+| 4 | The image states no account, or the deployment overrides it, so the router runs as root | A-15: `docker top <P-1>` shows uid 0 | Add `USER <uid>:<gid>` to the Containerfile — or `user:` to the service, when `P-3` names an image this package did not build — then rebuild and recreate. Never fix it by removing the check |
+| 5 | `P-4` or `P-6` is not readable by the container's account (mode 0600, owner the operator) | The boot fails loudly rather than silently: an unreadable `P-6` leaves the decrypt tool with no usable key (`no master key was able to decrypt the file`), and an unreadable `P-4` exits the proxy with `PermissionError: [Errno 13]` | Make the file readable by uid 65532 — `chmod 0644`, per `D-3`'s `P-8` for the key. Never run the container as root to make a mode work: that trades a one-line permission fix for exactly the exposure R-12 exists to prevent |
 | 5 | `P-4` does not exist on the host: compose creates a **directory** at the mount point and the router boots with an empty model surface | A-1 fails while the container reports healthy | Create the file and recreate; this is the quietest failure in the schematic |
 | 5 | A secret name collides with another service's in a merged compose project and the wrong key file mounts | The container exits with a decrypt error that names the file, not the collision | Keep the `P-1`-prefixed secret names from the skeleton; never rename them to generic ones |
 | 6 | A provider family fails wholesale (expired or mis-copied credential) | A-4 fails for that family only | Rotate that key (Phase 9); expect other families to be unaffected |
@@ -750,6 +803,18 @@ Decisions:
   sha is in the link) with the SHA-256 of the file at that commit. Verify a
   pin with `curl -s https://raw.githubusercontent.com/cameri/schematics/81721d8ff548ad0f4b1477e696b7899d30f999fa/schematics/encrypt-container-secrets/SCHEMATIC.md | sha256sum`: take the sha and the path from the pin's own link (here `encrypt-container-secrets v0.2.1`)
   and compare the result with the digest in the table.
+
+- 2026-09-19 — **The container runs as the base image's own non-root account,
+  and the package states it (R-12).** Measured: the pinned base image's config
+  says `"User": "root"`, so a build that does not state an account runs a
+  network-facing proxy — holding every provider key in its process environment
+  — as uid 0 by inheritance rather than by decision. The account is
+  the base's `nonroot` (uid/gid 65532, with a home directory it owns), not a
+  number invented here, and nothing in the boot needs root. The price is a mode
+  rule the operator now has to satisfy: files mounted for the router must be
+  readable by that uid, which is the same number `D-3`'s `P-8` already keys the
+  key file's mode on — so the two packages resolve to one stated answer instead
+  of leaving "the container's user" undefined in both.
 
 Open questions:
 

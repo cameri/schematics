@@ -84,6 +84,32 @@ Why each part:
 - The store path is the mounted ciphertext; the wrapped script is
   `skeleton/entrypoint.sh`, baked into the image.
 
+## The Account the Container Runs As
+
+This file sets no `user:`, deliberately. The image states the account (`USER` in
+`Containerfile`, R-12) and a `user:` here would override it silently, so the
+skeleton keeps one authority rather than two that can disagree. The container's
+account is therefore visible in one place, and A-15 reads it from both ends —
+`docker inspect --format '{{.Config.User}}'` for what was asked for,
+`docker top` for what is running.
+
+When the service does not run from this package's image, `user:` is where the
+deployment states it. `P-3` may name another OpenAI-compatible router's official
+image, whose own `USER` this package cannot know:
+
+```yaml
+services:
+  llm-router:
+    user: "65532:65532"   # when the image states no account of its own
+```
+
+Two consequences of a non-root container land on this file, and both are
+ordinary file modes on the host rather than anything compose can fix: the
+mounted config (`P-4`) and the router's age key (`P-6`) must be readable by that
+uid. A file the operator owns at mode 0600 is not — see SCHEMATIC.md's Failure
+Modes for what that looks like at boot (a decrypt error that reads like a wrong
+key, or a `PermissionError` on the config).
+
 ## The Healthcheck
 
 The upstream image has no `curl`; `python` is guaranteed (it is a python
@@ -95,6 +121,8 @@ load its config, or orchestration sees a false unhealthy window.
 
 ```
 docker compose config        # exits 0, prints the fully resolved file
+docker inspect --format '{{.Config.User}}' <P-1>   # non-root account (R-12)
+docker top <P-1>                                   # and running as it (A-15)
 ```
 
 The resolved output is the source of truth: it shows the interpolated secret

@@ -7,8 +7,9 @@ it listens on, and how orchestration knows it is ready.
 
 Owns everything between "an alias map and a key store exist on the host" and
 "a healthy process answers OpenAI-shaped requests from the router network":
-the image and its pin, the boot wrapper's place in the lifecycle, the config
-mount, the listen port, the health endpoint, and the restart policy. It is
+the image and its pin, the account the process runs as, the boot wrapper's place
+in the lifecycle, the config mount, the listen port, the health endpoint, and the
+restart policy. It is
 **not** responsible for what the aliases are (`model-aliases.md`), how
 credentials reach the process (`provider-credentials.md`), who consumes the
 endpoint (`client-wiring.md`), or exposing the router beyond its private
@@ -37,6 +38,11 @@ provider outage at request time (an error per request, not a crash).
 - A stable container name (`P-1`), so runbooks, verification, and probes can
   address it without discovering an id.
 - No host ports, unless Phase 8 deliberately adds an exposure.
+- A process that runs as a stated non-root account (R-12): the image declares
+  uid/gid 65532 and this module's compose file declares no `user:`, so the
+  account has exactly one source. The two mounts it reads are therefore readable
+  by that account or the router does not start — which is the failure mode, not
+  a surprise.
 
 ## Dependencies
 
@@ -50,6 +56,8 @@ provider outage at request time (an error per request, not a crash).
 |---|---|
 | `P-4` path does not exist on the host | Compose creates a **directory** at the mount point and the router boots with an empty model surface: it answers, but `/v1/models` is empty. Nothing crashes. This is the quietest failure in the whole schematic — it is caught by A-1, not by the healthcheck |
 | Config is invalid YAML or a malformed `model_list` | The router exits non-zero; `restart: unless-stopped` re-runs it into the same error. The cause is in `docker compose logs <P-1>`, not in the health state |
+| `P-4` exists but is not readable by the container's account (mode 0600 owned by the operator) | The proxy exits 1 with `PermissionError: [Errno 13] Permission denied: /opt/llm-router/config.yaml` — loud, and distinct from the missing-file case above, which serves an empty surface instead |
+| The image states no account and no `user:` overrides it | The container runs as root and every other check still passes; only A-15 sees it |
 | Upstream image tag removed or the build fails | `docker compose build` fails and nothing starts. Never resolve this by removing the pin (R-10) |
 | Host port collision | Cannot happen by default: the service publishes nothing. A deliberate exposure adds one, and then the collision is a normal bind error at start |
 | Health probe fails after `start_period` | The container is reported unhealthy but keeps running and keeps serving requests that succeed. Treat unhealthy as "re-check now", not "the router is down" — A-2 is the discriminator |

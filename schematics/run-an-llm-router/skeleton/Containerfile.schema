@@ -17,6 +17,7 @@ docker build -f Containerfile -t <your-tag> .
 | `COPY --from=<stage> <src> <dst>` | Copies a path out of an earlier build stage into this one, without going through a registry or a package manager |
 | `RUN <cmd>` | Runs a build-time command. Used here only to prove the copied binary works |
 | `WORKDIR <path>` | Working directory for later instructions and for the container's default process |
+| `USER <uid>:<gid>` | The account the container's process runs as from this point on. Set **last**, so every build step above it still runs as the builder |
 | `EXPOSE <port>` | Documents the port the container listens on. It does **not** publish it; publishing is a compose/`-p` decision |
 | `ENTRYPOINT` / `CMD` | Not set here: `compose.yml` supplies the entrypoint, so the image stays usable standalone and the wrapper lives where the secret mounts are declared |
 
@@ -37,6 +38,15 @@ docker build -f Containerfile -t <your-tag> .
 - **No `config.yaml` copy.** The model surface is mounted at runtime instead
   (see `compose.yml.schema`), so adding or removing an alias is a restart, not
   a rebuild (R-5). Only the bootstrap script is baked in.
+- **`USER` is the one place the account is stated** (R-12), and it is here
+  because the base image's own config says `root`: measured, so a build without
+  this line runs root by inheritance rather than by decision. The account is the
+  base's own `nonroot` (uid/gid 65532, home `/home/nonroot`) — not a number
+  invented for this package, and not an account to create: it is already in the
+  image's `/etc/passwd`. Nothing below needs root, since the router binds 4000
+  and the decrypt tool only reads mounts. `compose.yml` deliberately sets no
+  `user:`; that key would silently override this one, and one authority beats
+  two that can disagree.
 
 ## Bumping the Upstream Pin
 
@@ -53,4 +63,9 @@ surface for every client simultaneously.
 ```
 docker build -f Containerfile -t <tag> .        # exits 0
 docker run --rm --entrypoint sops <tag> --version   # prints the sops version
+docker image inspect <tag> --format '{{.Config.User}}'   # prints 65532:65532
 ```
+
+The last one is the image's half of A-15. `docker top <P-1>` on the running
+service is the other half, and the pair is what catches a `user:` that quietly
+reverted the container to root.
