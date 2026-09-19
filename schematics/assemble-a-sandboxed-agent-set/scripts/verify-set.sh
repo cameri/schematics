@@ -470,10 +470,19 @@ else
         else
             fail "A-8 AGENT_HARNESS=$HARNESS_ID is not in the image's environment: $env_json"
         fi
-        if [ "$ep_json" = "null" ] && [ "$cmd_json" = "null" ]; then
-            pass "A-8 the layer declares no ENTRYPOINT and no CMD (the base's run contract is inherited)"
+        # Inheritance, not absence: `docker image inspect` reports the base's
+        # entrypoint on every image built FROM it, so comparing against `null`
+        # fails every correct layer. What matters is that this image's run
+        # contract is the BASE's, unchanged — the layer part's own rule (it
+        # declares no ENTRYPOINT/CMD of its own, checked from its Containerfile).
+        base_ep="$(docker image inspect "$AGENT_HOST_IMAGE" --format '{{json .Config.Entrypoint}}' 2>/dev/null)"
+        base_cmd="$(docker image inspect "$AGENT_HOST_IMAGE" --format '{{json .Config.Cmd}}' 2>/dev/null)"
+        if [ -z "$base_ep" ]; then
+            skip "A-8 entrypoint check: $AGENT_HOST_IMAGE is not present on this host, so there is nothing to compare the harness image's run contract against"
+        elif [ "$ep_json" = "$base_ep" ] && [ "$cmd_json" = "$base_cmd" ]; then
+            pass "A-8 the harness image's entrypoint and cmd are the base image's, unchanged ($ep_json)"
         else
-            fail "A-8 the layer declares entrypoint=$ep_json cmd=$cmd_json; it must declare neither"
+            fail "A-8 the harness image's run contract differs from the base's: entrypoint=$ep_json (base $base_ep) cmd=$cmd_json (base $base_cmd)"
         fi
         history="$(docker history --no-trunc --format '{{.CreatedBy}}' "$HARNESS_IMAGE" 2>&1)"
         if denied "$history"; then

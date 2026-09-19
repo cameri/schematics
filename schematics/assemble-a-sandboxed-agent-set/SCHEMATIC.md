@@ -525,8 +525,9 @@ reported as a pass.
 - **A-7** (covers R-4): the user reported by the running host container is the
   base's account and is not `root` (`docker inspect … '{{.Config.User}}'` and
   the process's own `id -u`). expected: non-root everywhere.
-- **A-8** (covers R-7): the harness image reports `AGENT_HARNESS` set, no
-  `ENTRYPOINT`, no `CMD`, its history carries no credential-shaped value, and a
+- **A-8** (covers R-7): the harness image reports `AGENT_HARNESS` set, its
+  entrypoint and `CMD` are the base image's unchanged, its history carries no
+  credential-shaped value, and a
   scan run inside a container made from the image finds no credential-shaped
   file or value in the harness configuration directory or the account's homes.
   expected: one CLI, no credential in the artifact. Stated limit: the filesystem
