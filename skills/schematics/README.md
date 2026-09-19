@@ -20,6 +20,15 @@ older revisions stay traceable.
 | Skill | Description |
 |---|---|
 | `schematics:create-schematic` | Author a new schematic (interview-driven), reverse-engineer one from an existing implementation, or update an existing schematic as a living spec |
+| `schematics:build-schematic` | Build a schematic package from any public GitHub repo: resolve it through that repo's `.agent-schematics/marketplace.json` catalog or conventional paths, download the spec plus its modules, scripts, and skeleton, validate the spec, and report what was found |
+| `schematics:audit-schematic` | Audit a package against the format and against its own claims — documented commands actually run, failures propagate, documented interfaces are the implemented ones, acceptance rows can fail — with findings by severity and quoted evidence |
+
+`audit-schematic` dispatches to the `schematics:schematic-auditor` agent that
+ships with this plugin, a read-only auditor that runs the package's commands
+against a throwaway copy. Where the audit target contains an artifact that is not
+a schematic — a `SKILL.md`, an extension module, a subagent definition — it
+defers to `agent-resources`' own auditors rather than duplicating their
+standards.
 
 ## Schematic package layout
 

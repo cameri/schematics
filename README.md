@@ -143,7 +143,7 @@ build specification for the capability it provides:
 
 | Plugin | Kind | What it provides |
 |--------|------|------------------|
-| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic` and `build-schematic` skills: author, reverse-engineer, maintain, and build schematics from any repo |
+| [`schematics`](skills/schematics/README.md) | authoring | The `create-schematic`, `build-schematic` and `audit-schematic` skills: author, reverse-engineer, maintain, build schematics from any repo, and audit a package against the claims inside it |
 | [`authorize-docker-requests`](schematics/authorize-docker-requests/SCHEMATIC.md) | infrastructure | The capability itself — plus the schematic (`authorize-docker-requests/SCHEMATIC.md`) that documents how to rebuild it anywhere |
 | [`encrypt-container-secrets`](schematics/encrypt-container-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: SOPS + age encrypted secrets injected into a container's process environment at boot, with per-service keys and rotation without rebuilds |
 | [`encrypt-shared-host-secrets`](schematics/encrypt-shared-host-secrets/SCHEMATIC.md) | infrastructure | A spec-only schematic: one shared secret store on one host served to many unlike consumers — each consumer classified by whether it can run a decrypting command first, the wrappable ones given the value in memory, the one that cannot (the Compose CLI resolves interpolation before any container exists) served by a narrowed plaintext file and a fail-fast guard instead of a silent blank, per-consumer projections so a key unlocks only what its consumer reads, and rotation across every consumer without a rebuild. Composes `encrypt-container-secrets` |
