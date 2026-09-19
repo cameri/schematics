@@ -314,18 +314,24 @@ Steps:
      --build-arg ROUTER_BASE_URL=<P-3> \
      --build-arg ROUTER_CREDENTIAL_ENV=<P-4> \
      --build-arg HARNESS_MODEL_ALIAS=<P-5> \
+     --build-arg HARNESS_FAST_ALIAS=<P-6> \
      --build-arg HARNESS_CONTEXT_WINDOW=<P-7> \
      --build-arg HARNESS_MAX_OUTPUT_TOKENS=<P-8> \
      --build-arg HARNESS_HOME=<P-9> \
      -t <name>:<version> .
    ```
 
-   `HARNESS_FAST_ALIAS` (`P-6`) joins that list for the Claude arm, and
-   `ROUTER_CREDENTIAL_ENV` (`P-4`) is required for the Codex arm — the build
-   refuses an arm's own missing argument with one line naming it (R-4's refusal
-   code, `78`). `HARNESS_HOME` and `ROUTER_BASE_URL` have defaults, listed in the
-   parameter table; the rest have none, and the example above is the full set a
-   Claude build needs.
+   The command above is the full set a Claude build needs, and it works as
+   written for either arm: `HARNESS_FAST_ALIAS` (`P-6`) and
+   `HARNESS_MAX_OUTPUT_TOKENS` (`P-8`) are the Claude arm's own roles, and the
+   Codex arm ignores them while requiring `ROUTER_CREDENTIAL_ENV` (`P-4`) to name
+   the variable its provider block reads. The build refuses an arm's own missing
+   argument with one line naming it (R-4's refusal code, `78`), and an empty one
+   the same way. `ROUTER_BASE_URL`, `ROUTER_CREDENTIAL_ENV` and `HARNESS_HOME`
+   carry the defaults the parameter table lists; `HARNESS_MODEL_ALIAS`,
+   `HARNESS_FAST_ALIAS`, `HARNESS_CONTEXT_WINDOW` and `HARNESS_MAX_OUTPUT_TOKENS`
+   have none, so an omitted one stops the build rather than producing a
+   configuration with an empty model id.
 3. The build's last lines name the CLI version it resolved.
 
 Verify: the build exits 0, and `docker image inspect` shows the base's account as
