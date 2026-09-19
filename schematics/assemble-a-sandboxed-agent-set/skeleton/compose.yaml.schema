@@ -1,0 +1,89 @@
+# compose.yaml.schema
+#
+# Companion document for `compose.yaml`, the composition's glue file. Read it
+# before editing the file, and read it before merging the file with the parts'
+# fragments for the first time.
+#
+# ## What this file is
+#
+# It is a Compose override file used as glue, not a service definition. Compose
+# lets one deployment be described by several files:
+#
+#   docker compose -f <first> -f <second> … config
+#
+# and merges them in the order given. The merge rule, measured on this file
+# type with `docker compose config` rather than quoted from memory:
+#
+#   * a single-value field (`image`, `command`, `entrypoint`, `user`, …) takes
+#     the value from the LAST file that sets it;
+#   * a map field (`environment`) merges per key, again with the last file
+#     winning a key it sets;
+#   * a list field (`networks`, and the parts' mount lists) is the UNION of the
+#     files' entries, so nothing a part declared is dropped.
+#
+# Two consequences this composition relies on:
+#
+#   1. The glue is merged LAST. It declares no single-value field, so a later
+#      position cannot be used to override a part — and an earlier position
+#      could not protect it from a part either.
+#   2. Attaching every service to the shared network is ADDITIVE. A service that
+#      a part already attached to its own network keeps that one and gains this
+#      one.
+#
+# ## What each top-level key means
+#
+# | Key | Meaning |
+# |-----|---------|
+# | `networks.agent-set.name` | The concrete Docker network name, from `AGENT_SET_NETWORK`. One network for the whole set: it is the only path between the parts that is not a bind mount. |
+# | `secrets.<name>.file` | The secret SOURCE: a host file Compose mounts into whichever service references that name. The four names here are contracts with the parts' fragments — a service that references a name nobody declares fails the merge with `secret … not found`, and a name declared here that no service references is dead weight. |
+# | `services.<name>.networks` | Network membership only. The service itself is defined by the fragment named in the comment above it. |
+#
+# ## The parts' fragments this file is merged with
+#
+# | Fragment | Owns |
+# |----------|------|
+# | the router's `skeleton/compose.yml` | its service, its port, its own network, and the secret names it references |
+# | the store's `skeleton/compose-secrets.yml` | the wiring example for a service's encrypted file and key: two secrets plus the key-path variable. It defines no service of its own — the store is a mechanism |
+# | the Docker-access part's `skeleton/compose.yml` | its proxy service, the socket mount (into the proxy only), and its network |
+# | the harness layer's `skeleton/compose.service.yaml` | the `agent-host` service: image, entrypoint wrapper that decrypts at boot, environment, and the two secrets it references |
+#
+# ## Parameter placeholders
+#
+# Every value is a parameter (SCHEMATIC.md § Parameters). The `:?` form is
+# deliberate: `${NAME:?message}` makes Compose fail the merge when the variable
+# is unset or empty, which is the first of this composition's ordering rules in
+# mechanical form — a missing parameter stops the deployment instead of
+# producing a container with an empty string in it.
+#
+# | Placeholder | Parameter |
+# |-------------|-----------|
+# | `AGENT_SET_NETWORK` | `P-1` |
+# | `SECRETS_KEY_DIR` | `P-17` |
+# | `SECRETS_STORE_DIR` | `P-18` |
+# | `ROUTER_SECRETS_SERVICE` | `P-19` |
+# | `AGENT_HOST_SECRETS_SERVICE` | `P-20` |
+#
+# ## What this file must never contain
+#
+# `image`, `build`, `command`, `entrypoint`, `environment`, `user`, `ports`,
+# `volumes`, `cap_add`, `privileged`, or `devices` under any service. Each of
+# those belongs to a part, and a second copy here would silently win the merge
+# and drift from the part the pin names. The acceptance row `A-2` fails when one
+# appears.
+#
+# ## Verifying a merge
+#
+# ```
+# docker compose \
+#   -f <run-an-llm-router>/skeleton/compose.yml \
+#   -f <encrypt-container-secrets>/skeleton/compose-secrets.yml \
+#   -f <restrict-docker-api-access>/skeleton/compose.yml \
+#   -f <add-an-agent-harness>/skeleton/compose.service.yaml \
+#   -f compose.yaml \
+#   config
+# ```
+#
+# The output is the deployment Compose will actually create. Check three things
+# in it: every service of the set is present (`agent-host`, `llm-router`,
+# `socket-proxy`), every one of them lists the shared network, and no service's
+# `image`, `entrypoint`, or `user` came from this file.

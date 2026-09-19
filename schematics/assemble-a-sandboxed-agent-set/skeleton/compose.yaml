@@ -1,0 +1,54 @@
+# The composition's glue. It defines no service.
+#
+# Every service in this deployment comes from a part's own compose fragment,
+# merged BEFORE this file. What this file adds is exactly the part no fragment
+# can own: the network every service joins, the secret sources the parts
+# reference by name, and the network membership of each service — Compose
+# attaches a network per service, so the shared network contract needs one line
+# per service here.
+#
+# Merge order (an earlier file wins a scalar conflict, so each part keeps its
+# own image, entrypoint, user and mounts):
+#
+#   docker compose \
+#     -f <run-an-llm-router>/skeleton/compose.yml \
+#     -f <encrypt-container-secrets>/skeleton/compose-secrets.yml \
+#     -f <restrict-docker-api-access>/skeleton/compose.yml \
+#     -f <add-an-agent-harness>/skeleton/compose.service.yaml \
+#     -f compose.yaml \
+#     config
+#
+# Every value below comes from a parameter (SCHEMATIC.md § Parameters). The
+# `:?` forms fail the merge loudly when one is missing rather than starting a
+# container with an empty string.
+
+networks:
+  agent-set:
+    name: ${AGENT_SET_NETWORK:?set AGENT_SET_NETWORK}
+    driver: bridge
+
+# The secret SOURCES. The parts' fragments reference these names in their own
+# services' `secrets:` lists (with the targets that make the store's decryption
+# work), so the names are contracts, not choices: an `agent-host` service that
+# references a name nobody declares fails the merge with "secret … not found".
+secrets:
+  agent-host-env-encrypted:
+    file: ${SECRETS_STORE_DIR:?set SECRETS_STORE_DIR}/${AGENT_HOST_SECRETS_SERVICE:?set AGENT_HOST_SECRETS_SERVICE}/.env.encrypted
+  agent-host-age-keys:
+    file: ${SECRETS_KEY_DIR:?set SECRETS_KEY_DIR}/${AGENT_HOST_SECRETS_SERVICE:?set AGENT_HOST_SECRETS_SERVICE}-keys.txt
+  router-env-encrypted:
+    file: ${SECRETS_STORE_DIR:?set SECRETS_STORE_DIR}/${ROUTER_SECRETS_SERVICE:?set ROUTER_SECRETS_SERVICE}/.env.encrypted
+  router-age-keys:
+    file: ${SECRETS_KEY_DIR:?set SECRETS_KEY_DIR}/${ROUTER_SECRETS_SERVICE:?set ROUTER_SECRETS_SERVICE}-keys.txt
+
+# Network membership, and nothing else. Each service below is defined by the
+# fragment named in the comment; if a service is missing from every fragment,
+# the merge fails with "neither an image nor a build context" — which is the
+# correct outcome: this file must not invent one.
+services:
+  agent-host:                 # defined by the harness layer's compose.service.yaml
+    networks: [agent-set]
+  llm-router:                 # defined by the router's compose.yml
+    networks: [agent-set]
+  socket-proxy:               # defined by the Docker-access part's compose.yml
+    networks: [agent-set]

@@ -1,0 +1,100 @@
+# bring-up.sh.schema
+#
+# Companion document for `bring-up.sh`, the composition's ordering bootstrap.
+# Read it before running the script against a deployment you care about.
+#
+# ## What this file is
+#
+# An ordinary POSIX shell script — `sh`, no agent tooling, no vendor construct —
+# whose only subject is ORDER. It walks the dependency edges of SCHEMATIC.md
+# § Implementation Phases 2–5 as nine guarded steps and REFUSES a step whose
+# input does not exist yet. It is the composition's answer to the question the
+# parts each answer for themselves and none answers for the set: what has to
+# exist before what.
+#
+# It creates nothing that a part owns. It builds no image of its own, defines no
+# service, writes no configuration, and never creates or decrypts a secret: it
+# checks that the store's files are where the parts' parameters say they are,
+# and lets the store's boot wrapper do the decrypting in the container.
+#
+# ## Invocation
+#
+# ```sh
+# ./bring-up.sh              # walk every step
+# ./bring-up.sh --dry-run    # print the plan, create nothing, build nothing
+# ```
+#
+# There is no other flag. Every input is an environment variable, so a deployment
+# can keep them in a file it sources, or in the same environment file it already
+# passes to Compose.
+#
+# ## Inputs
+#
+# | Variable | Parameter | Must be |
+# |----------|-----------|---------|
+# | `AGENT_SET_NETWORK` | `P-1` | the shared network name |
+# | `AGENT_TREE_DIR` | `P-2` | an existing host directory holding the agent tree |
+# | `AGENT_IDS` | `P-3` | space-separated agent ids (used by the acceptance script, not this one) |
+# | `AGENT_BASE_REF` | `P-4` | a local tag or a `name@sha256:<manifest list digest>` reference |
+# | `AGENT_HOST_IMAGE` | `P-5` | the host image reference to build or find |
+# | `HARNESS_IMAGE` | `P-6` | the harness layer reference to build or find |
+# | `HARNESS_ID` | `P-7` | the single CLI the layer installs |
+# | `ROUTER_BASE_URL` | `P-8` | the router endpoint, e.g. `http://<router-service>:<port>/v1` |
+# | `ROUTER_CREDENTIAL_ENV` | `P-9` | the variable name the harness reads (default `ROUTER_API_KEY`) |
+# | `ROUTER_ALIAS` | `P-10` | a model id the router serves |
+# | `ROUTER_ALIAS_SET` | `P-11` | the served ids (used by the acceptance script) |
+# | `ROUTER_FAST_ALIAS` | `P-12` | the secondary role's alias, if that arm has one |
+# | `HARNESS_CONTEXT_WINDOW` | `P-13` | tokens for the chosen alias |
+# | `HARNESS_MAX_OUTPUT_TOKENS` | `P-14` | tokens for the chosen alias |
+# | `SECRETS_KEY_DIR` | `P-17` | host directory holding each service's dedicated key |
+# | `SECRETS_STORE_DIR` | `P-18` | host directory holding each service's `.env.encrypted` |
+# | `ROUTER_SECRETS_SERVICE` | `P-19` | the store service for the router's provider keys |
+# | `AGENT_HOST_SECRETS_SERVICE` | `P-20` | the store service for the harness's router credential |
+# | `PARTS_ROOT` | — | a directory holding each part's package checkout, laid out as `<PARTS_ROOT>/<part-name>/` |
+# | `COMPOSE_FILES` | — | the compose files in merge order, glue last |
+#
+# Optional inputs: `ROUTER_HEALTH_URL` (default: `ROUTER_BASE_URL` with a
+# trailing `/v1` replaced by `/health/liveliness`), `ROUTER_CREDENTIAL_FILE` or
+# `ROUTER_CREDENTIAL` for reading `/models`, `BASE_ACCOUNT_UID`/`BASE_ACCOUNT_GID`
+# for the tree-ownership check, `BUILD_BASE=1`, `BUILDKIT=1`, `NO_CACHE=1`.
+#
+# Neither credential variable is ever printed, and no value read from them
+# appears in any command line this script echoes: the only thing printed about
+# them is whether one was supplied.
+#
+# ## The nine steps, and why each one refuses
+#
+# | Step | Does | Refuses when | Idempotent because |
+# |------|------|--------------|--------------------|
+# | 1 network | creates `AGENT_SET_NETWORK` | the network cannot be created | it inspects first and creates only when absent |
+# | 2 agent tree | checks the directory exists and (when the account ids are supplied) that it is owned by them | the directory is missing, or owned by another uid:gid | it only reads |
+# | 3 store layout | checks each service's `.env.encrypted` and `<service>-keys.txt` exist | any of them is missing — the store part's phases create them, not this script | it only reads |
+# | 4 base image | accepts a published reference as-is, finds or builds a local one | a local base is absent and `BUILD_BASE` is not set | an existing image is accepted |
+# | 5 host image | builds it `FROM` the base reference | the part's Containerfile is missing, or the build fails | an existing image is accepted unless `NO_CACHE=1` |
+# | 6 router readiness | calls the router's health endpoint | the router does not answer — it must be up before step 7, because the harness build validates against it | a healthy router is accepted |
+# | 7 alias check | reads `GET <router>/models` with the credential and requires `ROUTER_ALIAS` to be in it | the alias is absent, or no credential was supplied to check with | it only reads |
+# | 8 harness layer | builds the layer with every alias and window argument | the build fails — an alias the router does not serve fails HERE, which is the edge this step exists for | an existing image is accepted unless `NO_CACHE=1` |
+# | 9 start the set | merges `COMPOSE_FILES` and runs `docker compose up -d` | a compose file is missing, or compose fails | compose converges an already-running set |
+#
+# A refusal never blocks a later step silently: step 8 prints `skip` and says the
+# build would validate against a router that is not known good, rather than
+# producing an image that cannot work.
+#
+# ## What it deliberately does not do
+#
+# - Create keys or encrypt stores. That is the store part's phases; this script
+#   only checks the layout they leave behind.
+# - Deploy the router, the proxy, or the store's plumbing. Each belongs to its
+#   own package, which has its own bootstrap.
+# - Prove anything. Nine green steps mean the inputs existed in the right order,
+#   not that the chain works: `scripts/verify-set.sh` is the check, and it is the
+#   next command this script prints.
+# - Delete anything. Removal is the SCHEMATIC's Removal section, run by hand.
+#
+# ## Exit codes
+#
+# | Code | Meaning |
+# |------|---------|
+# | 0 | every step was satisfied or created; the set is up (or the dry run finished) |
+# | 1 | at least one step refused; the summary names how many, and each refusal names the input to fix |
+# | 2 | the invocation is wrong — a required variable is unset |

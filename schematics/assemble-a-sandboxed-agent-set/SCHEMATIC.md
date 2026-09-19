@@ -114,8 +114,11 @@ end-to-end acceptance test. Everything it deploys belongs to a part.
   router serving the chosen alias before the harness layer build, and the
   store's key material before any container that decrypts at boot.
 - **R-2**: This package MUST own no image, no service, and no file beyond the
-  shared contracts and the end-to-end test (binding principle 8). Its compose
-  file MUST declare no `services:` key.
+  shared contracts and the end-to-end test (binding principle 8). For every
+  service a part defines it MUST declare no `image`, no `build`, no `command`,
+  no `entrypoint`, no `environment`, no `user`, and no mount; what its compose
+  file may add is the network a service joins and the secret names a service
+  references, because those are the shared contracts rather than the service.
 - **R-3**: Every part MUST pass its own acceptance rows in isolation before the
   chain is assembled, and a part that fails them MUST stop the assembly rather
   than be worked around inside the chain.
@@ -237,8 +240,11 @@ that parameter's contract lives.
 | P-14 | `HARNESS_MAX_OUTPUT_TOKENS` | int (tokens) | *(none — required for arms that have the key)* | As `HARNESS_CONTEXT_WINDOW` | Written into the harness configuration (part 3's `P-8`) |
 | P-15 | `DOCKER_PROXY_URL` | string (URL) | `http://socket-proxy:2375` | The Docker-access part's endpoint on its own network: proxy service name and port (its `P-5`, `P-6`) | What a consumer sets as `DOCKER_HOST`; the only Docker path an agent has (`D-6`) |
 | P-16 | `DOCKER_PROXY_ALLOWLIST` | string | *(none — required)* | What the agents genuinely need: read image and container state, for example — nothing that changes the host | The proxy's allowed endpoint groups (the Docker-access part's `P-4`). An allowlist wider than the need is the whole risk of this row |
-| P-17 | `SECRETS_KEY_DIR` | path (host) | `~/sops/age` | Where the operator keeps age keys; the store part's `P-1` | Where the key material for `D-5` lives. The master key never leaves this directory into a container |
-| P-18 | `SECRETS_SERVICE_NAME` | string | `agent-set` | Chosen once; it prefixes the deployment's secret names and names its dedicated key | The service whose encrypted store and dedicated key the deployment uses (the store part's `P-3`) |
+| P-17 | `SECRETS_KEY_DIR` | path (host) | `~/sops/age` | Where the operator keeps age keys; the store part's `P-1` | Where the key material for `D-5` lives. The master key never leaves this directory into a container; each service's dedicated key is `<SECRETS_KEY_DIR>/<service>-keys.txt` |
+| P-18 | `SECRETS_STORE_DIR` | path (host) | *(none — required)* | Where the operator keeps each service's encrypted dotenv file: one directory per service, `<service>/.env.encrypted` (the store part's `P-4`, `P-11`) | Where the two encrypted stores the set needs are read from when the compose file declares them as secrets |
+| P-19 | `ROUTER_SECRETS_SERVICE` | string | `llm-router` | The name of the store service holding the router's provider keys; it is also the router's own service-name parameter (the router part's `P-3`) | Which encrypted file and dedicated key the router boots with (the store part's `P-3`) |
+| P-20 | `AGENT_HOST_SECRETS_SERVICE` | string | `agent-host` | The name of the store service holding the one credential an agent needs: `P-9 ROUTER_CREDENTIAL_ENV`'s value | Which encrypted file and dedicated key the host container decrypts at boot (the store part's `P-3`) |
+| P-21 | `HARNESS_CONFIG_PATH` | path (in-container) | *(none — required)* | The layer part's harness-home parameter (`P-9`) plus the file name that arm writes | The CLI's configuration file inside the image, which `A-10` reads to prove the wiring names only aliases and carries no provider credential |
 
 ## Modules
 
@@ -287,10 +293,16 @@ docker compose \
   config
 ```
 
-An earlier file wins on a scalar conflict, so the parts' service definitions
-keep their own entrypoints, users, and mounts, and this package's file adds only
-what no part can: the network every service joins, the volume declarations the
-host needs, and the secret declarations the parts reference by name.
+Compose merges in the order given, and the **later** file wins a single-value
+field while list-valued fields such as `networks:` are unioned (measured with
+`docker compose config` on two fragments that both set `image`, `environment`
+and `networks`). Two consequences the composition depends on: the glue comes
+last so nothing about a part can be overridden by accident, and a service a part
+already attached to its own network keeps that network and gains this one — the
+shared network is additive, never a replacement. Every entry this package's file
+makes under `services:` carries `networks:` and nothing else; an `image`,
+`command`, `entrypoint`, `environment`, `user`, or mount there would be this
+package re-implementing a part (`R-2`, checked by `A-2`).
 
 **Readiness gates** (a phase does not advance until its gate passes):
 
@@ -301,6 +313,13 @@ host needs, and the secret declarations the parts reference by name.
 | Docker-access proxy | Its own audit script matches the allowlist; no consumer mounts a socket |
 | Host | The host container is up and its herdr session is alive; a `docker exec`/pane check runs the harness only after the harness layer is attached |
 | Chain (the composition's own gate) | `scripts/verify-set.sh` exits 0, or its skipped rows state their reasons |
+
+**Files this package ships**: `skeleton/compose.yaml` — the glue, declaring no
+service (networks, volumes, and the secret declarations the parts reference by
+name) — with `skeleton/compose.yaml.schema` beside it; `skeleton/bring-up.sh`,
+which walks the dependency order of Phases 2–5 as a sequence of guarded steps,
+with `skeleton/bring-up.sh.schema` beside it; and `scripts/verify-set.sh`, the
+end-to-end acceptance script.
 
 **Acceptance script interface**: `scripts/verify-set.sh` takes its inputs from
 the environment (image references, network name, agent id, alias, and the paths
@@ -341,9 +360,12 @@ Steps:
 2. Create `AGENT_TREE_DIR` and confirm its owner matches the base image's
    account ids (part 1's `P-4`/`P-5`); the host part's own phase says how to
    re-derive them if they do not.
-3. Create the store layout the deployment will use (`SECRETS_KEY_DIR`, the
-   service's encrypted file) — the store part's phases own the encryption; this
-   phase only ensures the directory and the file exist where its parameters say.
+3. Create the store layout the deployment will use: the key directory
+   (`SECRETS_KEY_DIR`) with one dedicated key per service
+   (`ROUTER_SECRETS_SERVICE`, `AGENT_HOST_SECRETS_SERVICE`), and each service's
+   directory under `SECRETS_STORE_DIR` holding its `.env.encrypted`. The store
+   part's phases own key creation and encryption; this phase only ensures the
+   layout exists where that part's parameters say it does.
 4. Write the deployment's environment file for the composition's parameters.
    It holds parameter values, never secrets.
 
@@ -461,10 +483,10 @@ reported as a pass.
   (`git merge-base --is-ancestor <commit> HEAD`), the file exists at that
   commit, and `sha256sum` of that file at that commit equals the hash in the
   row. expected: every pin resolves and matches; a mismatch names the row.
-- **A-2** (covers R-2): `docker compose -f skeleton/compose.yaml config`
-  succeeds and the file contains no `services:` key. expected: the composition
-  defines no service; the merged configuration's services all come from the
-  parts' fragments.
+- **A-2** (covers R-2): the glue file's every `services:` entry carries only
+  `networks:`, and merging it with the parts' fragments produces a configuration
+  whose services are exactly the parts' own. expected: the composition defines
+  no service, and every service in the merged configuration belongs to a part.
 - **A-3** (covers R-3): each part's own acceptance script is present and, where
   this host can run it, exits 0; where it cannot, the script prints `SKIP` and
   the reason. expected: no part is assembled before it is verified, and the
@@ -506,14 +528,23 @@ reported as a pass.
   refused by policy, and the socket path is absent from the container's
   filesystem. expected: Docker works through the proxy, and the socket is not
   reachable from where the agent runs.
-- **A-14** (covers R-8): a container started with the store and key present
-  reaches its application; one started without the key exits non-zero with the
-  store's own decryption failure. expected: the credential path fails loudly.
-  **If the store cannot be prepared on this host:** `SKIP` with that reason.
+- **A-14** (covers R-8): a container started without its key material exits
+  non-zero, and its own output names the credential path — not some unrelated
+  startup failure. expected: the credential path fails loudly and identifiably.
+  The positive half (a container *with* the store reaches its application) is
+  Phase 3's verification, because it needs the store prepared to be meaningful.
+  **If the probe cannot be created on this host, or the failure does not name
+  the credential path:** `SKIP` with that reason — an unrelated failure is not
+  evidence about the store. The probe runs the harness image with a key path
+  that does not exist; it needs no store of its own.
 - **A-15** (covers R-9, R-11): one real completion through the alias returns
-  200 from the harness's own model call. expected: a real answer, not a
-  simulated one. **If no real provider credential exists:** `SKIP` with that
-  reason — this row is never asserted, and the chain is still proven by A-11.
+  200, made from inside the agent pane with the router credential. expected: a
+  real answer, not a simulated one. Stated limit: the request is issued the way
+  any client of the router issues one, so this proves the router's path to its
+  provider and the alias, not the harness CLI's interactive call — that is
+  checked by `A-9` and `A-10`. **If no real provider credential exists:** `SKIP`
+  with that reason — this row is never asserted, and the alias path is still
+  proven by `A-11`.
 - **A-16** (covers R-13): after `docker compose down` and removal of the glue
   file and the network, every part's own acceptance script still runs against
   its images, and the agent tree directory is untouched. expected: removal
