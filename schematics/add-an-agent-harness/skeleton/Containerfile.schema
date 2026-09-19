@@ -11,17 +11,18 @@
 # | `USER root` … `USER ${AGENT_USER}` | The install needs root; the produced image does not. `${AGENT_USER}` is the **base's** own environment variable, so the layer returns to an account it did not name, create or modify (R-1). |
 # | the `case` arm | The closed harness parameter (`P-1`). An unknown value stops the build with one stderr line naming it and exit `78` before anything is installed, so no image can exist without a harness (R-4). |
 # | `ARG … =<default>` | The defaults the parameter table advertises are implemented here, not just documented: `ROUTER_BASE_URL` (the router root), `ROUTER_CREDENTIAL_ENV`, and `HARNESS_HOME` as the base account's home plus `.<cli>`. `HARNESS_HOME`'s default is composed from the base's own `AGENT_USER`, because `HOME` is not in the base image's `Config.Env` — measured: `ARG X=${HOME}/…` expands to `/.…`, while `ARG X=/home/${AGENT_USER}/…` resolves. |
-# | the parameter guard loop | `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`, `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` are required for every arm; `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` are required for the harness that has those roles; `ROUTER_CREDENTIAL_ENV` is required for the one whose configuration names the variable. Every read uses the shell's empty-default form, so an **omitted** argument produces this file's own message and exit `78` — never a shell's `parameter not set` under `set -eu`. An empty one refuses the same way. A build that produced an image with an empty alias, or with `env_key = ""`, would look successful and fail at the first request. |
+# | the parameter guard loop | `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`, `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` are required for every arm; `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` are required for the arms whose CLI has those roles (`claude`, `omp`); `ROUTER_CREDENTIAL_ENV` is required for the arms whose configuration names the variable (`codex`, `omp`). Every read uses the shell's empty-default form, so an **omitted** argument produces this file's own message and exit `78` — never a shell's `parameter not set` under `set -eu`. An empty one refuses the same way. A build that produced an image with an empty alias, or with `env_key = ""`, would look successful and fail at the first request. |
 # | the `/v1` refusal | `ROUTER_BASE_URL` is the router's root. Each CLI appends its own protocol path, so a value ending in `/v1` would produce `/v1/v1/messages` on one arm: the build refuses it, naming the parameter, rather than doubling the path. |
-# | the per-arm endpoint | `claude` takes the root (Claude Code appends `/v1/messages`); `codex` takes `${root}/v1` (Codex CLI appends `/responses`). The derived value is what the template substitutes and what the image records, so a deployment can read back the URL its CLI actually uses. |
-# | `npm view … version` | The version is resolved from the registry at build time, never copied from documentation and never a floating tag (R-5). `HARNESS_PACKAGE_VERSION` (`P-10`) overrides it to reproduce an older image. |
+# | the per-arm endpoint | `claude` takes the root (Claude Code appends `/v1/messages`); `codex` and `omp` take `${root}/v1` (Codex CLI appends `/responses`, omp's OpenAI-compatible client appends `/chat/completions`). The derived value is what the templates substitute and what the image records, so a deployment can read back the URL its CLI actually uses. |
+# | the channel dispatch | The arm declares `registry` or `release`, and one shared step installs from it. `registry` is a package: `npm view <package> version` resolves the version, npm installs it. `release` is a release artifact: the vendor's latest-release query gives the tag, the artifact for this platform and architecture is fetched, compared against the checksum file the same release publishes, and installed as a binary. Both channels then write the same record files and run the same `--version`, so an arm cannot quietly lose one of those properties. |
+# | `npm view … version`, the release host's tag | The version is resolved from the channel the arm's CLI is published through, at build time, never copied from documentation and never a floating tag (R-5). `HARNESS_PACKAGE_VERSION` (`P-10`) overrides it to reproduce an older image — a package version on one channel, the published release tag on the other. A release arm refuses to install an artifact whose checksum is missing or does not match: the checksum file is fetched from the same release, and its absence is a refusal rather than a skip. |
 # | the five `printf` records | `/usr/local/share/agent-harness/{version,package,command,credential-env,endpoint}`: what was installed, what the deployment must call the credential variable, and the endpoint the CLI will call. Readable without starting the CLI, so the acceptance table can assert what was actually built inside the image (R-5, H-7, H-8). |
-# | `sed` over the template | The CLI's configuration is written at build time, in the CLI's own file shape, with the layer's parameters substituted. The templates ship beside this file and are the shape the `.schema` companions describe. |
+# | `sed` over the template(s) | The CLI's configuration is written at build time, in the CLI's own file shape, with the layer's parameters substituted. An arm names one or more `template:destination` pairs — the omp arm writes two files, its settings file and its model catalogue, because the CLI reads both. The templates ship beside this file and are the shape the `.schema` companions describe. |
 # | the placeholder check | A template that still contains `@…@` fails the build. Substitution that silently no-ops produces a configuration naming `@HARNESS_MODEL_ALIAS@` as a model — a file that parses and cannot work. |
 # | `sops --version` beside `"${CLI}" --version` | The build proves the decryptor is present and executable before it declares success — the check whose absence let a run-time brick reach a deployment (F6). |
 # | `"${CLI}" --version` | The build proves the CLI is installed and runnable before it declares success. A build that cannot run its own harness is a build that should not produce an image. |
 # | `ENV AGENT_HARNESS=${AGENT_HARNESS_ID}` | The one variable the inherited entrypoint reads (R-3). It is the CLI's own name, resolved from `PATH`, so nothing here needs to know where the package manager put it. |
-# | `ENV CLAUDE_CONFIG_DIR=… CODEX_HOME=…` | The CLI's config root (`P-9`). Each CLI reads its own variable and the other is inert; one parameter means a deployment that bind-mounts the harness home mounts one path. |
+# | `ENV CLAUDE_CONFIG_DIR=… CODEX_HOME=… PI_CODING_AGENT_DIR=…` | The CLI's config root (`P-9`). Each CLI reads its own variable and the others are inert; one parameter means a deployment that bind-mounts the harness home mounts one path. |
 #
 # ## What this file must never contain
 #
@@ -30,9 +31,15 @@
 #   workspace preparation and its refusals (R-1, R-3).
 # - A credential, a token, or a login file: the image must contain none (R-8).
 # - A pipe-to-shell installer, an unpinned tag, or a second CLI (R-2, R-5).
+#   Fetching a versioned release artifact to a file and checking it against the
+#   release's own checksum is not a pipe-to-shell installer: nothing the release
+#   ships is executed as a script, and the bytes installed are the bytes the
+#   checksum covers.
 # - `RUN --mount=…`, a heredoc, `COPY --link`, or a dependency on `TARGETARCH`:
 #   the layer must build with the legacy builder as well as BuildKit, so a
-#   deployment with only the former is not blocked by this package.
+#   deployment with only the former is not blocked by this package. The release
+#   arm reads `uname -m` inside the build for that reason, rather than
+#   `TARGETARCH`, which only BuildKit supplies.
 #
 # ## Validation
 #

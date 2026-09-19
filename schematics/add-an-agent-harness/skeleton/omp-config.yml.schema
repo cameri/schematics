@@ -1,0 +1,43 @@
+# omp-config.yml.schema
+#
+# Companion document for `omp-config.yml`, the omp harness's settings file. The
+# build substitutes the `@…@` placeholders and writes the result to
+# `<P-9 HARNESS_HOME>/config.yml`, which is one of the two files this CLI reads
+# (see `modules/router-wiring.md`; the other is `omp-models.yml`, which becomes
+# `models.yml` beside it).
+#
+# ## Every key, and why it is here
+#
+# | Key | Parameter | Effect |
+# |---|---|---|
+# | `modelRoles.default` | `P-5` | The model the session uses for its primary role. The value is `provider/id`: the provider block this layer writes is named `router`, so the value is `router/` followed by the alias. A trailing `:variant` suffix is part of the alias when the router serves one, and rides through unchanged. |
+# | `modelRoles.smol` | `P-6` | The CLI's small/fast role — background work, titles, summaries. Required for the same reason `P-6` is required at build: an unset role leaves the CLI on a built-in name the router does not serve, and the request never reaches the router. |
+#
+# ## What is deliberately absent
+#
+# `retry.fallbackChains` — the CLI's fallback map, in which a role can name
+# `provider/id` selectors and wildcards. The arm writes no such key, which is the
+# empty map. A chain is exactly the second provider R-7 forbids: it would move a
+# request off the router the moment the router failed, and bill a different
+# provider while reporting a different model.
+#
+# Every other key the CLI accepts — theme, terminal, editor, memory, tool
+# settings — is a preference of the person using it, not of this layer. Writing
+# one here would be this package's opinion in a deployment's configuration.
+#
+# ## What must not be in this file
+#
+# A credential value, and a model id that is not an alias on the router. The
+# roles name ids the router serves; the credential is named (not held) in
+# `omp-models.yml`.
+#
+# ## Validation
+#
+# ```
+# docker run --rm --entrypoint sh <image> -c 'cat "${PI_CODING_AGENT_DIR}/config.yml"'
+# ```
+#
+# The file must parse as YAML (`@…@` left in place still parses, which is why the
+# build's own placeholder check, not this file's format, is what catches a missed
+# substitution), carry no credential value, and name no provider other than
+# `router`.

@@ -1,0 +1,52 @@
+# omp-models.yml.schema
+#
+# Companion document for `omp-models.yml`, the omp harness's model catalogue. The
+# build substitutes the `@…@` placeholders and writes the result to
+# `<P-9 HARNESS_HOME>/models.yml`, which is the other file this CLI reads (see
+# `modules/router-wiring.md`; `config.yml`, written from `omp-config.yml`, carries
+# the roles that name these models).
+#
+# ## Every key, and why it is here
+#
+# | Key | Parameter | Effect |
+# |---|---|---|
+# | `providers.router.baseUrl` | `P-3` | The router's API base URL **with `/v1`**: omp's OpenAI-compatible client appends `/chat/completions`, so this arm's value is the router root plus `/v1`. The template's placeholder is `@HARNESS_ENDPOINT@`, which the build resolves per arm — the Claude arm's file carries the root alone. |
+# | `providers.router.api` | — | The wire protocol the client speaks. `openai-completions` is this package's choice for the arm: every router that serves anything serves `/v1/chat/completions`, so an omp deployment does not depend on the router being configured for a second client family. |
+# | `providers.router.apiKey` | `P-4` | The **name** of the environment variable the credential arrives in. The CLI reads that variable when it is set and treats the text as a literal credential when it is not, so this field carries the name and never a value. |
+# | `providers.router.authHeader` | — | Sends `Authorization: Bearer <resolved credential>`. The router reads a bearer credential, and a custom provider does not add that header on its own. |
+# | `providers.router.models[].id` | `P-5`, `P-6` | The model ids the provider may be asked for — the two aliases, and nothing else. The CLI may reach only ids the router serves (R-7). |
+# | `providers.router.models[].name` | `P-5`, `P-6` | A display name for the model picker. It is the alias, so what the picker shows is what the router was asked for. |
+# | `providers.router.models[].contextWindow` | `P-7` | The context window of the model `P-5` resolves to. This file is the only place in this CLI's configuration where the number can be declared. |
+# | `providers.router.models[].maxTokens` | `P-8` | The maximum output tokens of the model `P-5` resolves to, in the same entry and for the same reason. |
+#
+# ## The metadata the fast alias does not carry
+#
+# The entry for `P-6`'s alias has an `id` and a `name` and nothing else. `P-7` and
+# `P-8` describe the model `P-5` resolves to, and the layer was given no second
+# pair of numbers; copying the primary's would be a declaration about a different
+# model that reads as if it were known. A deployment that knows the fast model's
+# numbers adds them to its own copy of this file.
+#
+# ## The discovery block this file does not carry
+#
+# The CLI can fetch a provider's model list at run time (`discovery:`). This layer
+# sets none: the model set a deployment may use is exactly the alias set it
+# declared when it built the layer, and a discovery block would let the harness
+# reach for ids the router does not serve.
+#
+# ## What must not be in this file
+#
+# A credential value — `apiKey` names the variable, and the value stays in the
+# process environment (R-8). Nor a second provider block, nor a `baseUrl` for any
+# role the router serves: the provider block is the only endpoint the harness has
+# (R-7).
+#
+# ## Validation
+#
+# ```
+# docker run --rm --entrypoint sh <image> -c 'cat "${PI_CODING_AGENT_DIR}/models.yml"'
+# ```
+#
+# The file must parse as YAML, name exactly one provider, carry the credential
+# variable's name rather than a value, and declare an entry for each alias the
+# roles in `config.yml` name.

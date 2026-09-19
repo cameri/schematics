@@ -14,8 +14,8 @@ is a different design decision, not a checklist item.
 
 | Needs | Why |
 |---|---|
-| An install path that resolves a version | The layer pins what it installs (R-5). A package registry that answers `npm view <package> version`, or an equivalent with a version query, is the shape this package already implements |
-| A configuration file in a documented shape, with a config root the deployment can redirect | The layer writes the CLI's own file, and a deployment must be able to keep session state on a mount (`P-9`) |
+| An install path that resolves a version | The layer pins what it installs (R-5). A package registry that answers `npm view <package> version`, or an equivalent with a version query, is the shape this package already implements. A release host that publishes a version query and per-artifact checksums is the other one, and the arm declares which it uses |
+| A configuration file in a documented shape, with a config root the deployment can redirect | The layer writes the CLI's own file — or files, where the CLI reads more than one — and a deployment must be able to keep session state on a mount (`P-9`) |
 | A way to set the endpoint, the credential *by name*, and the model id | That is the router's wire contract (R-6). A CLI that can only take a literal credential cannot satisfy R-8 |
 | A CLI name resolvable from `PATH` | `AGENT_HARNESS` holds a name, and the base's entrypoint resolves it with `command -v` (R-3) |
 | A non-interactive invocation that exits on its own | The acceptance rows need one command that returns: a version flag is enough, a headless mode is better (H-4) |
@@ -65,6 +65,29 @@ is a different design decision, not a checklist item.
    new arm prints fewer rows than the floor in force, or the floor stops meaning
    anything.
 
+## The worked example: omp
+
+omp was added along this procedure, and the list below is what that addition
+actually touched. It is here because a procedure that has never been run is a
+claim; this one has, and the names are the receipt.
+
+| Step | What the omp addition did |
+|---|---|
+| 1. Spec: the parameter | `P-1` gained `omp`. The refusal message in `modules/harness-cli.md` gained the value, because it names the accepted set. R-2 was not widened: the arm adds one CLI and one file pair, no second process |
+| 2. Skeleton: the install arm | `skeleton/Containerfile` gained an `omp` arm and a **channel** the shared step dispatches on — `registry` for the two npm-distributed CLIs, `release` for omp, which is published as a release artifact. The channel is shared, not per-arm, so every arm keeps the version resolution, the record files, the placeholder check and the build-time `--version` | 
+| 3. Skeleton: the configuration | **Two** templates, because the CLI reads two files: `skeleton/omp-config.yml` (the settings file, carrying the model roles) and `skeleton/omp-models.yml` (the model catalogue, carrying the provider and the per-model metadata), each with its `.schema` companion beside it — `omp-config.yml.schema`, `omp-models.yml.schema` |
+| 4. Spec: the acceptance row | The body half of `scripts/verify-harness-layer.sh` gained the arm's own configuration branch and its `CHECK_CONF` value; the rows it feeds are **H-8** (the endpoints, the alias and the credential variable, compared) and **H-11** (the context window present for the primary alias, absent from the fast alias's entry) |
+| 5. Module: the wiring | `modules/router-wiring.md` gained the `omp` section: the two file shapes, the per-arm endpoint row (`/chat/completions`, written as the root plus `/v1`), the metadata table's third column, and the statement that the arm writes no `fallbackChains` |
+| 6. Parameters: the metadata | `P-7` and `P-8` map to `contextWindow`/`maxTokens` in the catalogue's model entry — the only place the CLI accepts either. No new parameter was added: the fast alias's entry carries no copy of the primary's numbers, which is stated rather than filled in |
+| 7. Catalogue: the description | Unchanged in wording — "exactly one coding-agent CLI" is still what the package does — so the frontmatter and the catalogue entry still say the same thing. The catalogue's keyword list gained `omp` |
+| 8. Run it | `HARNESS=omp sh scripts/verify-harness-layer.sh`, both halves; `EXPECTED_MIN_ROWS` was raised to the row count the arm prints |
+
+Two things the addition did **not** get for free, and both are recorded in
+`SCHEMATIC.md`'s decision log rather than here: `R-5` had to name the *channel* a
+CLI is published through rather than the registry alone, and `R-6`/`R-11` had to
+say "template or templates" because a CLI may read more than one file. A future
+value whose CLI is published the same way as one of these three inherits both.
+
 ## What the new value inherits, for free and by construction
 
 Everything the other values get: the refusal for an unknown value, the
@@ -76,8 +99,8 @@ where every value keeps it.
 
 ## The values this version deliberately does not carry
 
-`omp`, OpenCode and Cursor CLI are named non-goals of this version. Each is
-reachable by the procedure above; none is a stub branch here, because a branch
+OpenCode and Cursor CLI are named non-goals of this version. Each is
+reachable by the procedure above; neither is a stub branch here, because a branch
 that installs nothing is worse than an absent value — it makes the enum look
 wider than the package is, and the failure moves from the build (where an unknown
 value is refused out loud) to the container, where the entrypoint refuses a

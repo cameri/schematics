@@ -22,17 +22,33 @@
 #     -f Containerfile -t <name>:<tag> .
 #
 # `ROUTER_BASE_URL` is the router's ROOT — no `/v1`. Each CLI appends its own
-# path (`/v1/messages` for Claude Code, `/v1/responses` for Codex CLI), so this
-# file derives the endpoint per arm; a value that already ends in `/v1` is
-# refused rather than doubled.
+# protocol path (`/v1/messages` for Claude Code, `/responses` under a `/v1` base
+# for Codex CLI, `/chat/completions` under a `/v1` base for omp), so this file
+# derives the endpoint per arm; a value that already ends in `/v1` is refused
+# rather than doubled.
 #
 # Required per arm: `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`,
 # `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` always (`HARNESS_HOME` has a
-# default); `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` for `claude`;
-# `ROUTER_CREDENTIAL_ENV` for `codex`, whose provider block names it as `env_key`.
-# An omitted or empty required argument stops the build with one line naming it
-# and exit 78 — the same refusal the unknown harness id produces, and the same
-# one the base uses.
+# default); `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` for the arms whose
+# CLI has those roles (`claude`, `omp`); `ROUTER_CREDENTIAL_ENV` for the arms whose
+# configuration names the credential variable (`codex`, `omp`). An omitted or empty
+# required argument stops the build with one line naming it and exit 78 — the same
+# refusal the unknown harness id produces, and the same one the base uses.
+#
+# Two install channels, chosen by the arm in the case block and dispatched in one
+# shared step below, so every arm keeps the version resolution, the record files,
+# the substitution, the placeholder check and the build-time `--version`:
+#
+#   * `registry` — the CLI is published as a package. The version is resolved with
+#     `npm view <package> version` and installed with npm, which needs a Node.js
+#     runtime in the layer.
+#   * `release` — the CLI is published as a release artifact. The version is the
+#     vendor's current release tag, the artifact is fetched for this platform and
+#     architecture, compared against the checksum file the same release publishes,
+#     and installed as a binary. It needs an HTTP client and no runtime.
+#
+# Nothing is piped to a shell on either channel, and nothing floats: the resolved
+# version is what is installed, and it is what this image records (R-5).
 #
 # This file needs no BuildKit: a multi-stage copy, no cache mounts, no heredocs,
 # no --link, and no build-platform variables, so the legacy builder builds it
@@ -67,7 +83,9 @@ ARG HARNESS_MAX_OUTPUT_TOKENS
 # (`AGENT_USER`) and gives it a home under /home, so the default is expressible
 # here; a build over a base whose account lives elsewhere passes HARNESS_HOME.
 ARG HARNESS_HOME=/home/${AGENT_USER}/.${AGENT_HARNESS_ID}
-# Optional: empty resolves the current version from the registry at build time.
+# Optional: empty resolves the current version from the channel this arm uses at
+# build time; set it to reproduce an earlier build (a package version, or the
+# release tag a release arm publishes).
 ARG HARNESS_PACKAGE_VERSION=
 # Optional: when non-empty, the build checks that this URL answers before it
 # produces an image. No credential is sent — a credential must never be a build
@@ -81,16 +99,17 @@ USER root
 
 # The decryptor the inherited boot path execs, and the configuration templates.
 COPY --from=sops /usr/local/bin/sops /usr/local/bin/sops
-COPY claude-settings.json codex-config.toml /usr/local/share/agent-harness/templates/
+COPY claude-settings.json codex-config.toml omp-config.yml omp-models.yml /usr/local/share/agent-harness/templates/
 
 # The install: one CLI, chosen by the closed parameter, at a version resolved
 # here and recorded in the image. Nothing is piped to a shell, nothing floats,
 # and no credential is written.
 RUN set -eu; \
     case "${AGENT_HARNESS_ID}" in \
-      claude) PKG='@anthropic-ai/claude-code'; CLI='claude'; TPL='claude-settings.json'; CONF='settings.json'; CRED='ANTHROPIC_AUTH_TOKEN'; NEED_FAST=1; NEED_MAX=1 ;; \
-      codex)  PKG='@openai/codex';              CLI='codex';  TPL='codex-config.toml';    CONF='config.toml';    CRED="${ROUTER_CREDENTIAL_ENV:-}"; NEED_FAST=0; NEED_MAX=0 ;; \
-      *) printf '%s\n' "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex" >&2; exit 78 ;; \
+      claude) CHANNEL='registry'; PKG='@anthropic-ai/claude-code'; CLI='claude'; TEMPLATES='claude-settings.json:settings.json';                                    CRED='ANTHROPIC_AUTH_TOKEN';           NEED_FAST=1; NEED_MAX=1 ;; \
+      codex)  CHANNEL='registry'; PKG='@openai/codex';              CLI='codex';  TEMPLATES='codex-config.toml:config.toml';                                          CRED="${ROUTER_CREDENTIAL_ENV:-}";     NEED_FAST=0; NEED_MAX=0 ;; \
+      omp)    CHANNEL='release';  PKG='can1357/oh-my-pi';           CLI='omp';    TEMPLATES='omp-config.yml:config.yml omp-models.yml:models.yml';                      CRED="${ROUTER_CREDENTIAL_ENV:-}";     NEED_FAST=1; NEED_MAX=1 ;; \
+      *) printf '%s\n' "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex omp" >&2; exit 78 ;; \
     esac; \
     for pair in "ROUTER_BASE_URL=${ROUTER_BASE_URL:-}" "HARNESS_MODEL_ALIAS=${HARNESS_MODEL_ALIAS:-}" "HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW:-}" "HARNESS_HOME=${HARNESS_HOME:-}"; do \
       name="${pair%%=*}"; value="${pair#*=}"; \
@@ -105,15 +124,15 @@ RUN set -eu; \
       printf '%s\n' "add-an-agent-harness: HARNESS_MAX_OUTPUT_TOKENS is required for the ${AGENT_HARNESS_ID} harness and was not set" >&2; exit 78; \
     fi; \
     if [ -z "${CRED}" ]; then \
-      printf '%s\n' "add-an-agent-harness: ROUTER_CREDENTIAL_ENV is required for the ${AGENT_HARNESS_ID} harness (its provider block names the variable the credential arrives in) and was not set" >&2; exit 78; \
+      printf '%s\n' "add-an-agent-harness: ROUTER_CREDENTIAL_ENV is required for the ${AGENT_HARNESS_ID} harness (its configuration names the variable the credential arrives in) and was not set" >&2; exit 78; \
     fi; \
     ROOT="${ROUTER_BASE_URL%/}"; \
     case "${ROOT}" in \
       */v1) printf '%s\n' "add-an-agent-harness: ROUTER_BASE_URL must be the router root without the /v1 suffix; this build was given ${ROUTER_BASE_URL} — each CLI appends its own protocol path, so keep '/v1' off this parameter" >&2; exit 78 ;; \
     esac; \
     case "${AGENT_HARNESS_ID}" in \
-      claude) ENDPOINT="${ROOT}" ;; \
-      codex)  ENDPOINT="${ROOT}/v1" ;; \
+      claude)    ENDPOINT="${ROOT}" ;; \
+      codex|omp) ENDPOINT="${ROOT}/v1" ;; \
     esac; \
     if [ -n "${HARNESS_VERIFY_ENDPOINT:-}" ]; then \
       if command -v curl >/dev/null 2>&1; then \
@@ -131,34 +150,98 @@ RUN set -eu; \
     if [ -n "${HOME:-}" ] && [ "${HOME}" != "$(dirname "${HARNESS_HOME}")" ]; then \
       printf '%s\n' "add-an-agent-harness: note: the base account's home is ${HOME} while HARNESS_HOME is ${HARNESS_HOME}; set HARNESS_HOME explicitly if that is not what this deployment wants" >&2; \
     fi; \
-    if ! command -v npm >/dev/null 2>&1; then \
-      apt-get update; \
-      apt-get install -y --no-install-recommends nodejs npm; \
-      rm -rf /var/lib/apt/lists/*; \
-    fi; \
-    V="${HARNESS_PACKAGE_VERSION:-$(npm view "${PKG}" version)}"; \
-    printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness, endpoint ${ENDPOINT}"; \
-    npm config set "allow-scripts=${PKG}" --location=user >/dev/null 2>&1 || true; \
-    npm install --global --no-audit --no-fund "${PKG}@${V}"; \
-    npm cache clean --force >/dev/null 2>&1 || true; \
     mkdir -p /usr/local/share/agent-harness "${HARNESS_HOME}"; \
+    case "${CHANNEL}" in \
+      registry) \
+        if ! command -v npm >/dev/null 2>&1; then \
+          apt-get update; \
+          apt-get install -y --no-install-recommends nodejs npm; \
+          rm -rf /var/lib/apt/lists/*; \
+        fi; \
+        V="${HARNESS_PACKAGE_VERSION:-$(npm view "${PKG}" version)}"; \
+        printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness, endpoint ${ENDPOINT}"; \
+        npm config set "allow-scripts=${PKG}" --location=user >/dev/null 2>&1 || true; \
+        npm install --global --no-audit --no-fund "${PKG}@${V}"; \
+        npm cache clean --force >/dev/null 2>&1 || true ;; \
+      release) \
+        FETCH=''; \
+        if command -v curl >/dev/null 2>&1; then FETCH='curl'; \
+        elif command -v wget >/dev/null 2>&1; then FETCH='wget'; \
+        else \
+          printf '%s\n' "add-an-agent-harness: the ${AGENT_HARNESS_ID} harness is installed from a release host and this base image carries neither curl nor wget; rebuild on a base that has one" >&2; exit 78; \
+        fi; \
+        case "$(uname -m)" in \
+          x86_64|amd64)  ARCH='x64' ;; \
+          aarch64|arm64) ARCH='arm64' ;; \
+          *) printf '%s\n' "add-an-agent-harness: no ${AGENT_HARNESS_ID} release artifact is published for architecture $(uname -m); this layer has no path to install that CLI" >&2; exit 78 ;; \
+        esac; \
+        PLATFORM='linux'; \
+        if [ -f /etc/alpine-release ] || { command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; }; then PLATFORM='linux-musl'; fi; \
+        ARTIFACT="${CLI}-${PLATFORM}-${ARCH}"; \
+        if [ -n "${HARNESS_PACKAGE_VERSION:-}" ]; then \
+          V="${HARNESS_PACKAGE_VERSION}"; \
+        else \
+          RELEASE_URL="https://api.github.com/repos/${PKG}/releases/latest"; \
+          if [ "${FETCH}" = 'curl' ]; then \
+            RELEASE_JSON="$(curl -fsSL --connect-timeout 10 --max-time 60 "${RELEASE_URL}" 2>/dev/null || true)"; \
+          else \
+            RELEASE_JSON="$(wget -q -O - -T 60 "${RELEASE_URL}" 2>/dev/null || true)"; \
+          fi; \
+          V="$(printf '%s' "${RELEASE_JSON}" | grep '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"; \
+          if [ -z "${V}" ]; then \
+            printf '%s\n' "add-an-agent-harness: could not resolve the current release of ${PKG} from ${RELEASE_URL}; set HARNESS_PACKAGE_VERSION to the release tag to install (the failure is the release host's or the network's, not this layer's)" >&2; exit 78; \
+          fi; \
+        fi; \
+        printf '%s\n' "add-an-agent-harness: installing ${PKG}@${V} as the ${CLI} harness, endpoint ${ENDPOINT}"; \
+        BASE_URL="https://github.com/${PKG}/releases/download/${V}"; \
+        TMP="$(mktemp -d)"; \
+        fetch() { \
+          if [ "${FETCH}" = 'curl' ]; then \
+            curl -fsSL --connect-timeout 10 --max-time 900 -o "$1" "$2"; \
+          else \
+            wget -q -O "$1" -T 900 "$2"; \
+          fi; \
+        }; \
+        if ! fetch "${TMP}/SHA256SUMS.txt" "${BASE_URL}/SHA256SUMS.txt"; then \
+          printf '%s\n' "add-an-agent-harness: ${BASE_URL}/SHA256SUMS.txt could not be fetched; the release publishes one, and this layer does not install an artifact it cannot check" >&2; exit 78; \
+        fi; \
+        if ! fetch "${TMP}/${ARTIFACT}" "${BASE_URL}/${ARTIFACT}"; then \
+          printf '%s\n' "add-an-agent-harness: ${BASE_URL}/${ARTIFACT} could not be fetched; check that this release publishes an artifact for ${PLATFORM}/${ARCH}" >&2; exit 78; \
+        fi; \
+        WANT="$(grep -E "[[:space:]]\*?${ARTIFACT}\$" "${TMP}/SHA256SUMS.txt" | head -1 | cut -d' ' -f1)"; \
+        GOT="$(sha256sum "${TMP}/${ARTIFACT}" | cut -d' ' -f1)"; \
+        if [ -z "${WANT}" ]; then \
+          printf '%s\n' "add-an-agent-harness: ${BASE_URL}/SHA256SUMS.txt carries no checksum for ${ARTIFACT}, so the artifact cannot be verified; this layer does not install it unchecked" >&2; exit 78; \
+        fi; \
+        if [ "${WANT}" != "${GOT}" ]; then \
+          printf '%s\n' "add-an-agent-harness: ${ARTIFACT} does not match the checksum the release publishes (expected ${WANT}, got ${GOT}); the download is not what the release published" >&2; exit 78; \
+        fi; \
+        install -m 0755 "${TMP}/${ARTIFACT}" "/usr/local/bin/${CLI}"; \
+        if ! "${CLI}" --version >/dev/null 2>&1; then \
+          printf '%s\n' "add-an-agent-harness: the ${CLI} artifact installed but does not start; on a musl base the vendor's binary links the C++ runtime, which such a base does not ship — install its libstdc++ and libgcc runtime packages in the base image" >&2; exit 78; \
+        fi; \
+        rm -rf "${TMP}" ;; \
+    esac; \
     printf '%s\n' "${V}"       > /usr/local/share/agent-harness/version; \
     printf '%s\n' "${PKG}"     > /usr/local/share/agent-harness/package; \
     printf '%s\n' "${CLI}"     > /usr/local/share/agent-harness/command; \
     printf '%s\n' "${CRED}"    > /usr/local/share/agent-harness/credential-env; \
     printf '%s\n' "${ENDPOINT}" > /usr/local/share/agent-harness/endpoint; \
-    sed -e "s|@HARNESS_ENDPOINT@|${ENDPOINT}|g" \
-        -e "s|@ROUTER_CREDENTIAL_ENV@|${CRED}|g" \
-        -e "s|@HARNESS_MODEL_ALIAS@|${HARNESS_MODEL_ALIAS}|g" \
-        -e "s|@HARNESS_FAST_ALIAS@|${HARNESS_FAST_ALIAS:-}|g" \
-        -e "s|@HARNESS_CONTEXT_WINDOW@|${HARNESS_CONTEXT_WINDOW}|g" \
-        -e "s|@HARNESS_MAX_OUTPUT_TOKENS@|${HARNESS_MAX_OUTPUT_TOKENS:-}|g" \
-        "/usr/local/share/agent-harness/templates/${TPL}" > "${HARNESS_HOME}/${CONF}"; \
-    if grep -qE '@(ROUTER|HARNESS)_[A-Z_]+@' "${HARNESS_HOME}/${CONF}"; then \
-      printf '%s\n' "add-an-agent-harness: ${CONF} still contains an unsubstituted parameter" >&2; exit 78; \
-    fi; \
+    for pair in ${TEMPLATES}; do \
+      tpl="${pair%%:*}"; conf="${pair#*:}"; \
+      sed -e "s|@HARNESS_ENDPOINT@|${ENDPOINT}|g" \
+          -e "s|@ROUTER_CREDENTIAL_ENV@|${CRED}|g" \
+          -e "s|@HARNESS_MODEL_ALIAS@|${HARNESS_MODEL_ALIAS}|g" \
+          -e "s|@HARNESS_FAST_ALIAS@|${HARNESS_FAST_ALIAS:-}|g" \
+          -e "s|@HARNESS_CONTEXT_WINDOW@|${HARNESS_CONTEXT_WINDOW}|g" \
+          -e "s|@HARNESS_MAX_OUTPUT_TOKENS@|${HARNESS_MAX_OUTPUT_TOKENS:-}|g" \
+          "/usr/local/share/agent-harness/templates/${tpl}" > "${HARNESS_HOME}/${conf}"; \
+      if grep -qE '@(ROUTER|HARNESS)_[A-Z_]+@' "${HARNESS_HOME}/${conf}"; then \
+        printf '%s\n' "add-an-agent-harness: ${conf} still contains an unsubstituted parameter" >&2; exit 78; \
+      fi; \
+      chmod 0644 "${HARNESS_HOME}/${conf}"; \
+    done; \
     chown -R "${AGENT_USER}" "${HARNESS_HOME}" /usr/local/share/agent-harness; \
-    chmod 0644 "${HARNESS_HOME}/${CONF}"; \
     sops --version >/dev/null; \
     "${CLI}" --version
 
@@ -166,12 +249,13 @@ RUN set -eu; \
 # the value is portable across a base image that relocates its binaries.
 ENV AGENT_HARNESS=${AGENT_HARNESS_ID}
 
-# The CLI's config root: each CLI reads its own variable, and the one that does
-# not apply to this image is inert. A single parameter, so a deployment that
+# The CLI's config root: each CLI reads its own variable, and the ones that do
+# not apply to this image are inert. A single parameter, so a deployment that
 # bind-mounts the harness home mounts one path. This root is per image and shared
 # by every agent a deployment runs from it (see SCHEMATIC.md).
 ENV CLAUDE_CONFIG_DIR=${HARNESS_HOME} \
-    CODEX_HOME=${HARNESS_HOME}
+    CODEX_HOME=${HARNESS_HOME} \
+    PI_CODING_AGENT_DIR=${HARNESS_HOME}
 
 # Back to the base's account: this image's runtime identity is the base's,
 # unchanged, with no group and no privilege this layer added.
