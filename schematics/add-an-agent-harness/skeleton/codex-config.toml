@@ -1,0 +1,9 @@
+model = "@HARNESS_MODEL_ALIAS@"
+model_provider = "router"
+model_context_window = @HARNESS_CONTEXT_WINDOW@
+
+[model_providers.router]
+name = "router"
+base_url = "@HARNESS_ENDPOINT@"
+env_key = "@ROUTER_CREDENTIAL_ENV@"
+wire_api = "responses"

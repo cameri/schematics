@@ -1,0 +1,7 @@
+# The acceptance script's run directory. It holds that run's build logs, its
+# synthesized stand-in base and the evidence copies its rows read back — scratch
+# from a deployment, not a shipped artifact. Ignored here so a consumer who
+# clones the catalogue never receives somebody else's verification output, and so
+# a re-run cannot re-add it: `scripts/verify-harness-layer.sh` writes here by
+# default (RUN_DIR), and everything under it stays out of the tree.
+.verify-run/

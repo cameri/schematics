@@ -420,6 +420,31 @@
         "persistence",
         "infrastructure"
       ]
+    },
+    {
+      "name": "add-an-agent-harness",
+      "description": "An agent harness layer — the agent-host image plus exactly one coding-agent CLI and its configuration, wired to a local LLM router by model alias: the CLI becomes the container's process through the inherited entrypoint, its model ids come from the router's alias set with the context window and output limit the router does not report declared beside them, its version is resolved at build time and recorded in the image, and no credential exists anywhere in the image.",
+      "source": "./schematics/add-an-agent-harness",
+      "category": "infrastructure",
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "agent",
+        "harness",
+        "claude-code",
+        "codex",
+        "coding-agent",
+        "cli",
+        "layers",
+        "infrastructure"
+      ],
+      "composes": [
+        "run-multiplexed-agent-workspaces",
+        "run-an-llm-router",
+        "encrypt-container-secrets"
+      ]
     }
   ]
 }

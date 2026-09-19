@@ -1,0 +1,79 @@
+# The harness layer's deployment delta.
+#
+# Apply this on top of the agent host's own fragment — the agent host's
+# fragment keeps owning the tree, the agents, the supervision and the SSH
+# posture; this file changes the image to the harness layer's and routes the
+# credential in:
+#
+#   docker compose \
+#     -f <agent host>/compose.service.yaml \
+#     -f compose.service.yaml \
+#     up -d
+#
+# The harness needs nothing in `environment:` below. Which CLI runs
+# (`AGENT_HARNESS`), where it keeps its configuration and the configuration
+# itself are all in the image, written at build time from the layer's own
+# parameters; a deployment supplies an alias when it builds, not when it starts.
+#
+# What the deployment does supply is the credential, and it never appears in an
+# environment block: encrypt-container-secrets mounts the encrypted dotenv file
+# and this service's dedicated key read-only, and `sops exec-env` decrypts in
+# memory and execs the boot program with the entries injected. The variable the
+# harness reads is recorded inside the image, at
+# /usr/local/share/agent-harness/credential-env, so the dotenv entry that carries
+# the router credential must use that name: `ANTHROPIC_AUTH_TOKEN` for the Claude
+# harness, the layer's `ROUTER_CREDENTIAL_ENV` for the Codex harness.
+
+services:
+  agent-host:
+    # One complete reference to the HARNESS LAYER's image: `name:tag`, or
+    # `name@sha256:<digest>` for a published one. It is used verbatim — a tag
+    # appended here would break a digest reference and would name the host image
+    # rather than the harness layer's.
+    image: "${HARNESS_IMAGE:?set HARNESS_IMAGE to the harness layer's complete image reference}"
+
+    # Decrypt in memory, then exec the boot program. No `--` separator before
+    # the command: `sops exec-env` treats everything after the file as the
+    # command. The image's own entrypoint is untouched — this starts the boot
+    # program explicitly, which is how the agent host is selected (see the
+    # agent host's fragment).
+    entrypoint:
+      - sh
+      - -c
+      - exec sops exec-env /run/secrets/secrets.env /usr/local/bin/agent-host-boot
+
+    environment:
+      # Where sops reads the private key inside the container.
+      - SOPS_AGE_KEY_FILE=/run/secrets/age-keys
+
+    secrets:
+      # The encrypted dotenv store. The target name must keep the `.env`
+      # suffix: `sops exec-env` infers the dotenv format from the extension.
+      - source: agent-host-env-encrypted
+        target: secrets.env
+      # The dedicated key for THIS service only. Never the master key.
+      - source: agent-host-age-keys
+        target: age-keys
+
+    # The harness home, optionally. The image writes its configuration under
+    # this path and the CLI keeps session state there; bind-mounting it makes
+    # that state survive a recreate, and leaving it out keeps a recreate clean.
+    # The mount must be owned by the base image's account, or the CLI cannot
+    # write session state.
+    #
+    # The destination is the layer's own P-9 HARNESS_HOME — the config root the
+    # image sets CLAUDE_CONFIG_DIR/CODEX_HOME to — not a path of this file's
+    # choosing: mounting anywhere else gives the CLI a directory it never reads.
+    # The default is the base account's home plus `.<cli>`, so it is
+    # `<account home>/.claude` for the Claude arm and `<account home>/.codex`
+    # for the Codex arm.
+    #
+    # volumes:
+    #   - "${HARNESS_HOME_STATE:?set HARNESS_HOME_STATE to the host directory}:${HARNESS_HOME:?set HARNESS_HOME to the layer's P-9 config root}"
+
+secrets:
+  agent-host-env-encrypted:
+    file: ./.env.encrypted
+  agent-host-age-keys:
+    # KEY_DIR default is $HOME/sops/age (that package's P-1).
+    file: ${KEY_DIR:-$HOME/sops/age}/agent-host-keys.txt

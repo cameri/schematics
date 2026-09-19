@@ -1,0 +1,47 @@
+# Containerfile.schema
+#
+# Companion document for `Containerfile`, the harness layer's build file.
+#
+# ## The shape, and why
+#
+# | Instruction | Why it is there |
+# |---|---|
+# | `FROM …:v3.11.0-alpine AS sops` + `COPY --from=sops …` | The boot path the deployment starts this image with (`sops exec-env … agent-host-boot`) execs `sops`, so the binary has to be in the image. It is taken from the upstream project's own pinned image in one copy: no pipe-to-shell, no package repository, and the builder stage is discarded. Without it the container dies at `sops: not found` before either the harness or its boot program runs — a run-time brick that no row about the CLI can see (R-2). |
+# | `ARG AGENT_BASE_REF` + `FROM ${AGENT_BASE_REF}` | One complete base reference (`P-2`): `name:tag` for an image built locally, `name@sha256:<manifest list digest>` for a published one. Deliberately not two parameters — a registry host and a digest — because a deployment that has not published the base yet must still be able to build a layer over it. |
+# | `USER root` … `USER ${AGENT_USER}` | The install needs root; the produced image does not. `${AGENT_USER}` is the **base's** own environment variable, so the layer returns to an account it did not name, create or modify (R-1). |
+# | the `case` arm | The closed harness parameter (`P-1`). An unknown value stops the build with one stderr line naming it and exit `78` before anything is installed, so no image can exist without a harness (R-4). |
+# | `ARG … =<default>` | The defaults the parameter table advertises are implemented here, not just documented: `ROUTER_BASE_URL` (the router root), `ROUTER_CREDENTIAL_ENV`, and `HARNESS_HOME` as the base account's home plus `.<cli>`. `HARNESS_HOME`'s default is composed from the base's own `AGENT_USER`, because `HOME` is not in the base image's `Config.Env` — measured: `ARG X=${HOME}/…` expands to `/.…`, while `ARG X=/home/${AGENT_USER}/…` resolves. |
+# | the parameter guard loop | `ROUTER_BASE_URL`, `HARNESS_MODEL_ALIAS`, `HARNESS_CONTEXT_WINDOW` and `HARNESS_HOME` are required for every arm; `HARNESS_FAST_ALIAS` and `HARNESS_MAX_OUTPUT_TOKENS` are required for the harness that has those roles; `ROUTER_CREDENTIAL_ENV` is required for the one whose configuration names the variable. Every read uses the shell's empty-default form, so an **omitted** argument produces this file's own message and exit `78` — never a shell's `parameter not set` under `set -eu`. An empty one refuses the same way. A build that produced an image with an empty alias, or with `env_key = ""`, would look successful and fail at the first request. |
+# | the `/v1` refusal | `ROUTER_BASE_URL` is the router's root. Each CLI appends its own protocol path, so a value ending in `/v1` would produce `/v1/v1/messages` on one arm: the build refuses it, naming the parameter, rather than doubling the path. |
+# | the per-arm endpoint | `claude` takes the root (Claude Code appends `/v1/messages`); `codex` takes `${root}/v1` (Codex CLI appends `/responses`). The derived value is what the template substitutes and what the image records, so a deployment can read back the URL its CLI actually uses. |
+# | `npm view … version` | The version is resolved from the registry at build time, never copied from documentation and never a floating tag (R-5). `HARNESS_PACKAGE_VERSION` (`P-10`) overrides it to reproduce an older image. |
+# | the five `printf` records | `/usr/local/share/agent-harness/{version,package,command,credential-env,endpoint}`: what was installed, what the deployment must call the credential variable, and the endpoint the CLI will call. Readable without starting the CLI, so the acceptance table can assert what was actually built inside the image (R-5, H-7, H-8). |
+# | `sed` over the template | The CLI's configuration is written at build time, in the CLI's own file shape, with the layer's parameters substituted. The templates ship beside this file and are the shape the `.schema` companions describe. |
+# | the placeholder check | A template that still contains `@…@` fails the build. Substitution that silently no-ops produces a configuration naming `@HARNESS_MODEL_ALIAS@` as a model — a file that parses and cannot work. |
+# | `sops --version` beside `"${CLI}" --version` | The build proves the decryptor is present and executable before it declares success — the check whose absence let a run-time brick reach a deployment (F6). |
+# | `"${CLI}" --version` | The build proves the CLI is installed and runnable before it declares success. A build that cannot run its own harness is a build that should not produce an image. |
+# | `ENV AGENT_HARNESS=${AGENT_HARNESS_ID}` | The one variable the inherited entrypoint reads (R-3). It is the CLI's own name, resolved from `PATH`, so nothing here needs to know where the package manager put it. |
+# | `ENV CLAUDE_CONFIG_DIR=… CODEX_HOME=…` | The CLI's config root (`P-9`). Each CLI reads its own variable and the other is inert; one parameter means a deployment that bind-mounts the harness home mounts one path. |
+#
+# ## What this file must never contain
+#
+# - `ENTRYPOINT`, `CMD` or `WORKDIR`: they are the base's, and a harness layer
+#   that took them over would have to reimplement the base's validation, its
+#   workspace preparation and its refusals (R-1, R-3).
+# - A credential, a token, or a login file: the image must contain none (R-8).
+# - A pipe-to-shell installer, an unpinned tag, or a second CLI (R-2, R-5).
+# - `RUN --mount=…`, a heredoc, `COPY --link`, or a dependency on `TARGETARCH`:
+#   the layer must build with the legacy builder as well as BuildKit, so a
+#   deployment with only the former is not blocked by this package.
+#
+# ## Validation
+#
+# ```
+# docker build -f Containerfile -t <name>:<tag> .            # succeeds, legacy builder too
+# docker build --build-arg AGENT_HARNESS_ID=nope -f Containerfile .   # fails, naming "nope"
+# docker image inspect <name>:<tag> --format '{{.Config.User}} {{json .Config.Entrypoint}}'
+# ```
+#
+# The second command must fail: an enum that accepts anything is not an enum.
+# The third must show the base's account and the base's entrypoint — this layer
+# sets neither.
