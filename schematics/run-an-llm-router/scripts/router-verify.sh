@@ -78,18 +78,6 @@ export ROUTER_BASE_URL HEALTH_PATH ROUTER_CONTAINER STORE_PATH EXPECTED_ALIASES 
 python3 - <<'PY'
 import json, os, shlex, subprocess, sys, urllib.error, urllib.request
 
-BASE = os.environ["ROUTER_BASE_URL"].rstrip("/")
-ORIGIN = BASE[:-3] if BASE.endswith("/v1") else BASE
-KEY = os.environ["ROUTER_API_KEY"]
-HEALTH = "/" + os.environ["HEALTH_PATH"].lstrip("/")
-TIMEOUT = float(os.environ["TIMEOUT"])
-EXPECTED = [a.strip() for a in os.environ["EXPECTED_ALIASES"].split(",") if a.strip()]
-SUBSET = [a.strip() for a in os.environ["ALIASES"].split(",") if a.strip()]
-CONTAINER = os.environ["ROUTER_CONTAINER"]
-STORE_PATH = os.environ["STORE_PATH"]
-SKIP_COMPLETIONS = os.environ["SKIP_COMPLETIONS"] == "1"
-CLIENT_ARMS = [a.strip() for a in os.environ["CLIENT_ARMS"].split(",") if a.strip()]
-
 results = []
 def check(name, ok, detail="", skip=False):
     results.append((name, "SKIP" if skip else ("PASS" if ok else "FAIL"), detail))
@@ -113,6 +101,19 @@ def runner_error(exc_type, exc, tb):
     sys.exit(2)
 
 sys.excepthook = runner_error
+
+BASE = os.environ["ROUTER_BASE_URL"].rstrip("/")
+ORIGIN = BASE[:-3] if BASE.endswith("/v1") else BASE
+KEY = os.environ["ROUTER_API_KEY"]
+HEALTH = "/" + os.environ["HEALTH_PATH"].lstrip("/")
+TIMEOUT = float(os.environ["TIMEOUT"])
+EXPECTED = [a.strip() for a in os.environ["EXPECTED_ALIASES"].split(",") if a.strip()]
+SUBSET = [a.strip() for a in os.environ["ALIASES"].split(",") if a.strip()]
+CONTAINER = os.environ["ROUTER_CONTAINER"]
+STORE_PATH = os.environ["STORE_PATH"]
+SKIP_COMPLETIONS = os.environ["SKIP_COMPLETIONS"] == "1"
+CLIENT_ARMS = [a.strip() for a in os.environ["CLIENT_ARMS"].split(",") if a.strip()]
+
 
 def request(path, method="GET", body=None, key=KEY, base=None):
     """Returns (status, parsed-or-text). Never raises on an HTTP error status."""
