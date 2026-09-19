@@ -1,0 +1,17 @@
+# Cloudflare Pages serves /assets/* with "max-age=14400" (4 hours) by default,
+# and these files are not fingerprinted: index.html points at assets/site.js
+# by a fixed name. The page's data, by contrast, is always current - it fetches
+# .agent-schematics/marketplace.json from raw.githubusercontent at load time.
+#
+# That combination broke the site on 2026-09-19. The catalogue split renamed a
+# key inside that JSON (#78), so a browser still holding the previous site.js
+# read a key the data no longer had and the page failed soft: hero stat
+# "0 schematics" and "No schematics published yet.", not an error. Reproduced
+# against the live catalogue with the previous script - 0 cards, 0 hero count,
+# empty state shown - while a fresh load of the same data rendered 5.
+#
+# Revalidating instead of caching for hours costs a 304 per asset and makes the
+# page's code at least as fresh as the data it renders. index.html already
+# revalidates (max-age=0, must-revalidate), so the HTML was never the problem.
+/assets/*
+  Cache-Control: public, max-age=0, must-revalidate
