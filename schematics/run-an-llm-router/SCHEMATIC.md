@@ -338,7 +338,7 @@ Every environment-specific value. Referenced by name from prose and code.
 | `POST` | `/v1/completions` | bearer | The legacy OpenAI completion route, same alias rule |
 | `POST` | `/v1/embeddings` | bearer | Embeddings, same alias rule; the alias must be bound to a provider that serves embeddings |
 | `POST` | `/v1/messages` | bearer | **Anthropic Messages** shape — the route a Claude Code client appends to its base URL. Same alias rule, Anthropic request and response shape |
-| `POST` | `/v1/responses` | bearer | **OpenAI Responses** shape — the route Codex CLI appends. Same alias rule |
+| `POST` | `/v1/responses` | bearer | **OpenAI Responses** shape — the route a Codex CLI lands on, since Codex appends only `/responses` to a base ending in `/v1`. Same alias rule |
 | `POST` | `/v1/rerank` | bearer | Reranking, same alias rule |
 | `POST` | `/v1/moderations` | bearer | Moderation, same alias rule |
 | `POST` | `/v1/images/generations` | bearer | Image generation, same alias rule |
@@ -354,20 +354,25 @@ above, and they are exactly the rows an OpenAI-only build can silently lack.
 - Authentication is `Authorization: Bearer <router credential>` on every
   `/v1` request; a missing or wrong credential is `401` *(observed)*.
 - **What a `401` proves, and how this table was measured (2026-09-19):** against
-  the reference deployment, every row above answers `401` with no credential
-  while a path the router does not serve answers `404 {"detail":"Not Found"}`.
-  The two are distinguishable, so an unauthenticated probe is evidence that a
-  route is registered — which is how this table was established rather than
-  copied from the router's documentation.
-- **A client's base URL is `P-13`, or the router root, depending on what the
-  protocol appends.** `P-13` ends in `/v1` because the OpenAI family appends
-  only a resource (`/chat/completions`). A protocol whose own path begins with
-  `/v1` — Anthropic Messages (`/v1/messages`), OpenAI Responses
-  (`/v1/responses`) — MUST be given the **root** (`http://<service>:<port>`), or
-  it requests `/v1/v1/…` and gets a 404. Both forms address the same server; the
-  only difference is where the client stops. This is the one contract detail
-  that has already cost a downstream package a broken build, so a client-wiring
-  step reads the protocol before it writes the base URL.
+  the reference deployment, every `/v1` row above answers `401` with no
+  credential, the two `/health` rows answer `200`, and a path the router does
+  not serve answers `404 {"detail":"Not Found"}`. The `404` is the control that
+  makes the others evidence: an unregistered path is distinguishable from a
+  registered one, so an unauthenticated probe establishes that a route is
+  registered rather than that a blanket gate rejected the request — which is how
+  this table was established rather than copied from the router's documentation.
+- **A client's base URL is `P-13`, or the router root, decided by the path that
+  client appends — not by which protocol it speaks.** `P-13` ends in `/v1`. A
+  client that appends a bare resource MUST be given `P-13`: the OpenAI family
+  (`/chat/completions`, `/models`) and the Codex CLI, which appends `/responses`
+  and therefore takes the base that already ends in `/v1`. A client whose own
+  appended path already begins with `/v1` MUST be given the **root**
+  (`http://<service>:<port>`) — Claude Code, which appends `/v1/messages`; given
+  `P-13` it requests `/v1/v1/messages` and gets a 404. Both forms address the
+  same server; the only difference is where the client stops. This is the one
+  contract detail that has already cost a downstream package a broken build, so
+  a client-wiring step reads the suffix the client appends before it writes the
+  base URL.
 - Whether an alias can *answer* a route is a second question: the alias is bound
   to one provider (R-3), and a provider that does not serve the operation
   returns its own error rather than another provider's success.
@@ -567,7 +572,7 @@ Verify: the specific checks named above pass.
 
 One test per requirement minimum. All of them are runnable by the implementer
 after the phases. `scripts/router-verify.sh` implements A-1, A-2, A-3, A-4's
-negative, A-6, and the R-9 check mechanically:
+negative, A-6, A-14, and the R-9 check mechanically:
 
 ```
 ROUTER_BASE_URL=<P-13> ROUTER_API_KEY_FILE=<file with the P-7 credential> \
@@ -633,16 +638,18 @@ scripts/router-verify.sh
   pinned commit and the file's SHA-256 matches the recorded value. expected:
   `curl <raw-url-at-commit> | sha256sum` equals the recorded digest.
 - **A-14** (covers R-1): every route in the HTTP surface table is registered.
-  An unauthenticated request to each answers `401`, while a path the router does
-  not serve answers `404` — measured against the reference deployment on
-  2026-09-19: eleven routes `401`, `/v1/bogus-route-xyz` `404`, so the two
-  answers are distinguishable and a `401` is evidence of registration. expected:
-  the routes the deployment's clients need — at least `/v1/models` and
-  `/v1/chat/completions`, plus the protocol route of every client wired in A-10
-  (`/v1/messages` for a Claude-family client, `/v1/responses` for a Codex-family
-  one) — answer `401`, and an unknown path answers `404`. A router built for one
-  protocol only FAILS this row for the other, which is the failure this row
-  exists to catch.
+  An unauthenticated request to each `/v1` row answers `401`, the two `/health`
+  rows answer `200`, and a path the router does not serve answers `404` —
+  measured against the reference deployment on 2026-09-19: ten `/v1` routes
+  `401` (one `GET`, nine `POST`), two `/health` routes `200`,
+  `/v1/bogus-route-xyz` `404`, so the answers are distinguishable and a `401` is
+  evidence of registration. `scripts/router-verify.sh` runs this row
+  mechanically. expected: the routes the deployment's clients need — at least
+  `/v1/models` and `/v1/chat/completions`, plus the protocol route of every
+  client wired in A-10 (`/v1/messages` for a Claude-family client,
+  `/v1/responses` for a Codex-family one) — answer `401`, and an unknown path
+  answers `404`. A router built for one protocol only FAILS this row for the
+  other, which is the failure this row exists to catch.
 
 ## Failure Modes and Rollback
 

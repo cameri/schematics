@@ -217,6 +217,53 @@ else:
     except Exception as e:
         check("A-6 mounted key store holds no plaintext", False, f"docker exec failed: {e}"[:160])
 
+# --- A-14: every route in the surface table is registered (R-1) --------------
+# An unregistered path answers 404 while a registered one answers 401 without a
+# credential, so one unauthenticated request per row separates "the route
+# exists" from "this deployment lacks it". This is the failure a router built
+# for a single protocol has: invisible to every provider-side check, and the
+# reason this row is worth running on its own. Costs no tokens.
+ROUTES = [
+    ("GET", "/v1/models"),
+    ("POST", "/v1/chat/completions"),
+    ("POST", "/v1/completions"),
+    ("POST", "/v1/embeddings"),
+    ("POST", "/v1/messages"),
+    ("POST", "/v1/responses"),
+    ("POST", "/v1/rerank"),
+    ("POST", "/v1/moderations"),
+    ("POST", "/v1/images/generations"),
+    ("POST", "/v1/batches"),
+]
+CONTROL = "/v1/bogus-route-xyz"
+
+control_status, _ = request(CONTROL, method="POST", key=None, base=ORIGIN)
+check("A-14 unserved path answers 404 (the control)", control_status == 404,
+      f"HTTP {control_status} POST {ORIGIN}{CONTROL}"
+      + ("" if control_status == 404 else " — without a 404 here the 401s prove nothing"))
+
+registered = {}
+for method, path in ROUTES:
+    status, _ = request(path, method=method, key=None, base=ORIGIN)
+    registered[path] = status in (401, 403)
+    detail = f"HTTP {status} {method} {ORIGIN}{path}"
+    if status == 404:
+        detail += " — 404: this router does not serve the route"
+    elif not registered[path]:
+        detail += " — expected 401 (or 403) with no credential"
+    check(f"A-14 {method} {path} is registered", registered[path], detail)
+
+# The two protocol rows are the ones a single-protocol build silently lacks, so
+# they get their own named result rather than being folded into the list above.
+for path, family in (("/v1/messages", "Claude-family"), ("/v1/responses", "Codex-family")):
+    check(f"A-14 {path} serves the {family} client wired in A-10",
+          registered.get(path, False),
+          "" if registered.get(path) else "route not registered: that client cannot reach the router")
+
+for path in (HEALTH, "/health/readiness"):
+    status, _ = request(path, base=ORIGIN, key=None)
+    check(f"A-14 {path} answers 200 with no credential", status == 200, f"HTTP {status} {ORIGIN}{path}")
+
 # --- Summary -----------------------------------------------------------------
 failed = [n for n, s, _ in results if s == "FAIL"]
 skipped = [n for n, s, _ in results if s == "SKIP"]
