@@ -1,0 +1,69 @@
+# Shell Script, `.sh` Schema
+
+This file is a POSIX `sh` script (not bash): it runs under dash as well as
+busybox `ash`, so it avoids bashisms entirely.
+
+## Constraints
+
+- Shebang `#!/bin/sh`; no `[[ ]]`, no arrays, no `local`, no `${var^^}`, no
+  process substitution, no `set -o pipefail`.
+- `set -eu`: exit on the first failing command and on an unset variable. Every
+  optional input is read as `${VAR:-default}`.
+- Requires a `sops` binary **on this host**: the wrapper's whole job is to put
+  values into *this* process's environment before exec'ing a consumer here, and
+  a container cannot do that for a host process. The script refuses with that
+  explanation rather than falling back to `SOPS_IMAGE`.
+- `exec` for the final command, so the consumer replaces the shell and receives
+  signals (`systemctl stop`, `kill`) directly, and so its exit status is the
+  wrapper's.
+
+## Variables
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `STORE_FILE` | (none) | Store to decrypt; `--store` overrides it (`P-2`) |
+| `SOPS_AGE_KEY_FILE` | `$KEY_DIR/keys.txt`, `KEY_DIR` defaulting to `$HOME/sops/age` | Age key sops decrypts with; `--age-key` overrides it (`P-8`, `P-11`) |
+| `RUNTIME_DIR` | `/run` | Parent of the alias directory (`P-5`) |
+| `--require` | (none) | Comma-separated names that MUST be in the store (`R-5`) |
+| `--pristine` | off | Do not forward the wrapper's environment to the child |
+| `--alias-dir` | `${RUNTIME_DIR}/sops-alias` | Where the `.env`-named symlink is created |
+
+## Control Flow
+
+1. Parse options; the first non-option argument is the command. Reject a second
+   one: several argv words make sops report `error: missing file to decrypt`,
+   which names neither the cause nor the argument.
+2. Resolve the store and the age key; refuse if either is missing.
+3. If `--require` is given, read the store's key **names** (`sops --decrypt
+   --input-type dotenv --output-type dotenv <store>`, then a name-only grep and
+   sort) and refuse if any required name is absent. Nothing is printed but
+   names, and nothing runs before this passes.
+4. Build the alias: the store's basename with `.encrypted` stripped, and
+   `.env` appended if it still does not end that way (`shared.env.encrypted` →
+   `shared.env`). Create it as a relative-free symlink to the absolute store
+   path under a 0700 directory.
+5. `exec sops exec-env [--pristine] <alias> '<command>'`.
+
+## Why an Alias, and Why the Flags Sit Where They Do
+
+`sops exec-env` chooses its parser from the file name and has no
+`--input-type` of its own: a store called `*.encrypted` fails with
+`Error unmarshalling input json`, and passing `--input-type dotenv` before the
+subcommand does not help. The alias is therefore not a convenience but the only
+way to read a `.encrypted` store without decrypting it to disk; the content
+stays ciphertext, so an alias left behind leaks nothing.
+
+`--pristine` must precede the two positionals. After the file, it is read as
+the command and the next argument as the file (`Error reading file: open <the
+command>`).
+
+## Testing the Script
+
+```
+KEY_DIR=/path/to/keys STORE_FILE=/path/to/shared.env.encrypted \
+  ./host-wrapper.sh --require API_TOKEN 'printf "%s\n" "${API_TOKEN:+present}"'
+```
+
+Expected: `present`, exit 0. With `--require API_TOKEN,NOPE`: a non-zero exit, a
+line naming `NOPE`, and no command output. With the command split into two
+arguments: exit 2 and the quoting message.
