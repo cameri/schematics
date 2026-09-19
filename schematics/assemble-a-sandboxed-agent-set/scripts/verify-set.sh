@@ -23,7 +23,11 @@
 #   HARNESS_ID            the single CLI the layer installs        (no default)
 #   HARNESS_CONFIG_PATH   the CLI's configuration file inside the
 #                         container, absolute path                 (no default)
-#   ROUTER_BASE_URL       the router endpoint the harness uses     (no default)
+#   ROUTER_BASE_URL       the router ROOT, no /v1: the harness layer
+#                         derives each arm's path from it (the root for
+#                         claude, root plus /v1 for codex), so the
+#                         models endpoint is read at <root>/v1/models
+#                                                                  (no default)
 #   ROUTER_CREDENTIAL_ENV name of the variable carrying the router
 #                         credential                               (default: ROUTER_API_KEY)
 #   ROUTER_ALIAS          the model alias the harness sends        (no default)
@@ -612,13 +616,16 @@ fi
 # ---------------------------------------------------------------------------
 # A-11: a request from the pane reaches the router by alias
 # ---------------------------------------------------------------------------
+# P-8 is the ROOT; the models endpoint is <root>/v1/models, which is the path
+# the harness layer's own P-11 check reads at build time.
+# ---------------------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
     skip "A-11 docker is not available"
 else
     code="$(docker exec -e CRED_NAME="$ROUTER_CREDENTIAL_ENV" "$HOST_CONTAINER" sh -c '
         v="$(printenv "$CRED_NAME" 2>/dev/null)"
         [ -n "$v" ] || { echo "NO_CREDENTIAL"; exit 0; }
-        curl -s -o /tmp/agent-set-models -w "%{http_code}" -H "Authorization: Bearer $v" "'"$ROUTER_BASE_URL"'/models"' 2>&1 | tail -1)"
+        curl -s -o /tmp/agent-set-models -w "%{http_code}" -H "Authorization: Bearer $v" "'"$MODELS_URL"'"' 2>&1 | tail -1)"
     if denied "$code"; then
         skip "A-11 $(exec_reason)"
     elif [ "$code" = "NO_CREDENTIAL" ]; then
@@ -626,16 +633,16 @@ else
     elif [ "$code" = "200" ]; then
         got="$(docker exec "$HOST_CONTAINER" cat /tmp/agent-set-models 2>/dev/null | grep -o "\"$ROUTER_ALIAS\"" | head -1)"
         [ -n "$got" ] \
-            && pass "A-11 the pane's request to $ROUTER_BASE_URL/models returns 200 and the alias '$ROUTER_ALIAS' is in the answer" \
+            && pass "A-11 the pane's request to $MODELS_URL returns 200 and the alias '$ROUTER_ALIAS' is in the answer" \
             || fail "A-11 the router answered 200 but does not list the alias '$ROUTER_ALIAS'"
-        nocode="$(docker exec "$HOST_CONTAINER" sh -c 'curl -s -o /dev/null -w "%{http_code}" "'"$ROUTER_BASE_URL"'/models"' 2>/dev/null | tail -1)"
+        nocode="$(docker exec "$HOST_CONTAINER" sh -c 'curl -s -o /dev/null -w "%{http_code}" "'"$MODELS_URL"'"' 2>/dev/null | tail -1)"
         case "$nocode" in
             401|403) pass "A-11 a request without the router credential is rejected ($nocode)" ;;
             "") skip "A-11 credential-refusal check: no answer from the router" ;;
             *) fail "A-11 a request without the router credential returned $nocode, not 401/403" ;;
         esac
     else
-        fail "A-11 the pane's request to $ROUTER_BASE_URL/models returned '$code', not 200"
+        fail "A-11 the pane's request to $MODELS_URL returned '$code', not 200"
     fi
 fi
 
@@ -784,7 +791,7 @@ elif ! command -v docker >/dev/null 2>&1; then
 else
     code="$(docker exec -e CRED_NAME="$ROUTER_CREDENTIAL_ENV" -e ALIAS="$ROUTER_ALIAS" "$HOST_CONTAINER" sh -c '
         v="$(printenv "$CRED_NAME" 2>/dev/null)"
-        curl -s -o /tmp/agent-set-completion -w "%{http_code}" -X POST "'"$ROUTER_BASE_URL"'/chat/completions" \
+        curl -s -o /tmp/agent-set-completion -w "%{http_code}" -X POST "'"$ROUTER_ROOT"'/v1/chat/completions" \
             -H "Authorization: Bearer $v" -H "Content-Type: application/json" \
             -d "{\"model\":\"$ALIAS\",\"messages\":[{\"role\":\"user\",\"content\":\"reply with the single word: ok\"}],\"max_tokens\":8}"' 2>&1 | tail -1)"
     if denied "$code"; then
