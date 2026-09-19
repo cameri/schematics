@@ -31,16 +31,18 @@
 #   DOCKER_PROXY_URL      the Docker-access endpoint consumers use (no default)
 #   DOCKER_PROXY_ALLOWLIST  the proxy's allowed endpoint groups    (no default)
 #   SECRETS_KEY_DIR       host directory holding the age key material
-#   SECRETS_SERVICE_NAME  the store service whose file the set uses
 #   HOST_CONTAINER        the running host container's name        (no default)
 #   ROUTER_CONTAINER      the running router container's name      (optional)
+#   PROXY_CONTAINER       the running Docker-access proxy's name   (optional:
+#                         without it A-5 cannot inspect the proxy, and cannot
+#                         apply its one sanctioned socket mount)
 #   PART_SCRIPTS          space-separated name:path entries for the parts'
 #                         own acceptance scripts (optional; A-3)
 #   COMPOSE_FILES         space-separated paths of the parts' compose fragments
+#                         and this package's glue, in merge order (A-2)
 #   EXPECTED_SERVICES     service names the merged configuration must define
 #                         (optional; without it, A-2 checks that the merge works,
 #                         not that the set is complete)
-#                         and this package's glue, in merge order (A-2)
 #   PACKAGE_DIR           this package's directory (default: the script's parent)
 #   REPO_DIR              the git checkout to check pins against (A-1; default:
 #                         PACKAGE_DIR/../..)
@@ -123,6 +125,14 @@ for v in AGENT_SET_NETWORK AGENT_TREE_DIR AGENT_IDS AGENT_HOST_IMAGE HARNESS_IMA
 done
 ROUTER_CREDENTIAL_ENV="${ROUTER_CREDENTIAL_ENV:-ROUTER_API_KEY}"
 AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-/workspace}"
+# P-8 is the router root; the API path is appended here, exactly as the harness
+# layer appends it per arm. A value that already ends in /v1 would double it.
+ROUTER_ROOT="${ROUTER_BASE_URL%/}"
+case "$ROUTER_ROOT" in
+    */v1) printf 'note: ROUTER_BASE_URL ends in /v1, but P-8 is the router root; the models endpoint is read at %s/v1/models\n' "$ROUTER_ROOT" ;;
+esac
+MODELS_URL="$ROUTER_ROOT/v1/models"
+PROXY_CONTAINER="${PROXY_CONTAINER:-}"
 
 printf 'verifying the sandboxed agent set\n'
 printf '  host container   %s\n' "$HOST_CONTAINER"
@@ -339,12 +349,16 @@ else
         skip "A-5 docker refused the request on this host: $(printf '%s' "$containers" | head -1)"
         skip "A-6 docker refused the request on this host"
     else
-        set_containers="$(printf '%s' "$containers" | grep -E "^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__})$" || true)"
+        # Every service of the set, the proxy included: it is the one container
+        # whose socket mount is by design, so leaving it out of the set would hide
+        # both the exception and any second socket mount.
+        set_pattern="^(${HOST_CONTAINER}|${ROUTER_CONTAINER:-__none__}|${PROXY_CONTAINER:-__none__})$"
+        set_containers="$(printf '%s' "$containers" | grep -E "$set_pattern" || true)"
         if [ -z "$set_containers" ]; then
-            skip "A-5 no container of the set is running (expected $HOST_CONTAINER${ROUTER_CONTAINER:+, $ROUTER_CONTAINER})"
+            skip "A-5 no container of the set is running (expected $HOST_CONTAINER${ROUTER_CONTAINER:+, $ROUTER_CONTAINER}${PROXY_CONTAINER:+, $PROXY_CONTAINER})"
             skip "A-6 no container of the set is running"
         else
-            bad_pub=""; bad_priv=""; bad_cap=""; bad_dev=""; bad_sock=""; ro_ok=1; rw_paths=""
+            bad_pub=""; bad_priv=""; bad_cap=""; bad_dev=""; bad_sock=""; ro_ok=1; rw_paths=""; sock_ok=0
             for c in $set_containers; do
                 cfg="$(docker inspect "$c" 2>/dev/null)"
                 [ -n "$cfg" ] || continue
@@ -356,11 +370,22 @@ else
                     || bad_cap="$bad_cap $c"
                 printf '%s' "$cfg" | grep -q '"Devices": *\[\]\|"Devices": *null' \
                     || bad_dev="$bad_dev $c"
-                printf '%s' "$cfg" | grep -q '/var/run/docker.sock' \
-                    && bad_sock="$bad_sock $c"
                 mounts="$(docker inspect "$c" --format '{{range .Mounts}}{{.Source}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' 2>/dev/null)"
+                sock_n=0
                 while IFS='|' read -r src dst rw; do
                     [ -n "$src" ] || continue
+                    case "$src" in
+                        *docker.sock*)
+                            sock_n=$((sock_n + 1))
+                            # The proxy's own socket mount is the design: one
+                            # mount, read-only (the Docker-access part's R-6).
+                            # Anywhere else, or a writable one, is a failure.
+                            if [ -n "$PROXY_CONTAINER" ] && [ "$c" = "$PROXY_CONTAINER" ] && [ "$rw" = "false" ] && [ "$sock_n" -le 1 ]; then
+                                sock_ok=1
+                            else
+                                bad_sock="$bad_sock $c"
+                            fi ;;
+                    esac
                     if [ "$rw" = "true" ]; then
                         rw_paths="$rw_paths $src"
                         if [ -n "${AGENT_TREE_DIR:-}" ] && [ "$src" != "$AGENT_TREE_DIR" ]; then
@@ -375,7 +400,13 @@ EOF
                 && pass "A-5 no container of the set publishes a port" \
                 || fail "A-5 published ports on:$bad_pub"
             if [ -z "$bad_priv$bad_cap$bad_dev$bad_sock" ]; then
-                pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket"
+                if [ "$sock_ok" = "1" ]; then
+                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket — with the proxy's own read-only socket mount as the one sanctioned exception"
+                elif [ -n "$PROXY_CONTAINER" ]; then
+                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket"
+                else
+                    pass "A-5 no container of the set is privileged, holds an added capability or device, or mounts the Docker socket (PROXY_CONTAINER is unset, so the proxy was not inspected and its sanctioned mount was not seen)"
+                fi
             else
                 fail "A-5 forbidden properties — privileged:$bad_priv cap:$bad_cap device:$bad_dev socket:$bad_sock"
             fi
