@@ -111,8 +111,12 @@ end-to-end acceptance test. Everything it deploys belongs to a part.
 - **R-1**: The set MUST be deployed in dependency order, and every phase MUST
   refuse to proceed when an input does not yet exist: the base reference before
   the host image build, the host image before the harness layer build, a running
-  router serving the chosen alias before the harness layer build, and the
-  store's key material before any container that decrypts at boot.
+  router serving the chosen alias set before the layer is built *or*, failing
+  that, before the set is started — the composition's own gate (Phase 3 step 3,
+  the bring-up script's step 7) is where alias membership is enforced, and the
+  layer's build-time check (part 3's `P-11`) is opt-in and proves reachability
+  only, because a credential may not be a build argument — and the store's key
+  material before any container that decrypts at boot.
 - **R-2**: This package MUST own no image, no service, and no file beyond the
   shared contracts and the end-to-end test (binding principle 8). For every
   service a part defines it MUST declare no `image`, no `build`, no `command`,
@@ -235,9 +239,9 @@ that parameter's contract lives.
 | P-5  | `AGENT_HOST_IMAGE` | string | *(none — required)* | `docker image ls` after the host image build, or the published reference | The `FROM` of the harness layer build (part 3's `P-2`) and the image the host container runs |
 | P-6  | `HARNESS_IMAGE` | string | *(none — required)* | `docker image ls` after the harness layer build, or the published reference | The image an agent pane's CLI comes from; the top of the chain |
 | P-7  | `HARNESS_ID` | string | *(none — required)* | The harness arm this deployment wants; the layer part's templates name the arms it ships | Which CLI the layer installs and what `AGENT_HARNESS` becomes (part 3's `P-1`). Empty is not a default: a build that names no harness is refused, so it must be chosen here |
-| P-8  | `ROUTER_BASE_URL` | string (URL) | `http://llm-router:4000/v1` | The router's endpoint on `P-1`'s network: its service name and port (the router part's `P-1`, `P-2`) | Where the harness sends inference requests (part 3's `P-3`) |
+| P-8  | `ROUTER_BASE_URL` | string (URL) | `http://llm-router:4000` | The router's endpoint on `P-1`'s network: its service name and port (the router part's `P-1`, `P-2`) | Where the harness sends inference requests. It is the router ROOT, with no `/v1`: the harness layer takes it as part 3's `P-3` and derives each arm's protocol path (the root for Claude Code's `ANTHROPIC_BASE_URL`, root plus `/v1` for Codex's `base_url`), which is why the router's own API paths are written as `<root>/v1/…` wherever this package reads them (`A-11`). A value ending in `/v1` is refused by the layer's build |
 | P-9  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The variable name the chosen harness's configuration reads; the layer part's templates show the arm's own name where it differs | The environment variable the harness reads its router credential from (part 3's `P-4`) |
-| P-10 | `ROUTER_ALIAS` | string | *(none — required)* | Read the alias set from the running router: `GET /v1/models` with the router credential | The model id the harness sends for its primary role (part 3's `P-5`). It must be a member of the router's alias set (`P-11` here), validated when the layer is built |
+| P-10 | `ROUTER_ALIAS` | string | *(none — required)* | Read the alias set from the running router: `GET /v1/models` with the router credential | The model id the harness sends for its primary role (part 3's `P-5`). It must be a member of the router's alias set (`P-11` here), and this composition's own gate checks that before the set starts (the bring-up script's step 7, `A-11`), because the layer's build-time check proves reachability only |
 | P-11 | `ROUTER_ALIAS_SET` | list | *(none — required)* | `GET /v1/models` returns it exactly; the operator chooses what it contains in the router's own configuration | The ids any client may send (the router part's `P-10`). `ROUTER_ALIAS` and `ROUTER_FAST_ALIAS` must both be members |
 | P-12 | `ROUTER_FAST_ALIAS` | string | *(empty — arm-dependent)* | As `ROUTER_ALIAS`; some harness arms have no second role | The model id for the harness's background/small-task role (part 3's `P-6`) |
 | P-13 | `HARNESS_CONTEXT_WINDOW` | int (tokens) | *(none — required)* | The model behind `ROUTER_ALIAS` on the router's side: the operator's record of it, or the provider's documentation for that alias | Written into the harness configuration (part 3's `P-7`); a wrong value is a run-time symptom, not a build failure |
@@ -523,7 +527,9 @@ reported as a pass.
   names only aliases from `ROUTER_ALIAS_SET`. expected: the wiring is the one
   this document specifies, read from inside the container that matters.
 - **A-11** (covers R-9): from inside an agent pane, a request to
-  `ROUTER_BASE_URL` + `/models` with the router credential returns 200 and a
+  `ROUTER_BASE_URL` + `/v1/models` (P-8 is the router ROOT; the protocol path is
+  appended here exactly as the harness layer appends it per arm) with the router
+  credential returns 200 and a
   body whose ids include `ROUTER_ALIAS`; the same request without the credential
   is rejected (401/403). expected: the alias path works end to end and the
   router's own credential gate is intact. **If the router credential cannot be
