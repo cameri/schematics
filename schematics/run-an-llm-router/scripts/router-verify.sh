@@ -95,6 +95,25 @@ def check(name, ok, detail="", skip=False):
     results.append((name, "SKIP" if skip else ("PASS" if ok else "FAIL"), detail))
     print(f"{'SKIP' if skip else ('PASS' if ok else 'FAIL')}  {name}" + (f" — {detail}" if detail else ""))
 
+def runner_error(exc_type, exc, tb):
+    """An error in this script still prints the checks that ran, and exits 2.
+
+    The rows are the deliverable and the summary is how a caller reads them, so
+    the one outcome that must never happen is a traceback where the verdicts
+    should be. The traceback follows the summary, not instead of it.
+    """
+    import traceback
+    print()
+    print(f"RUNNER ERROR  {exc_type.__name__}: {exc} — the rows above are every check that ran; "
+          f"this is a defect in the script, not a verdict on the router")
+    failed = [n for n, state, _ in results if state == "FAIL"]
+    skipped = [n for n, state, _ in results if state == "SKIP"]
+    print(f"{len(results) - len(failed) - len(skipped)} passed, {len(failed)} failed, {len(skipped)} skipped")
+    traceback.print_exception(exc_type, exc, tb)
+    sys.exit(2)
+
+sys.excepthook = runner_error
+
 def request(path, method="GET", body=None, key=KEY, base=None):
     """Returns (status, parsed-or-text). Never raises on an HTTP error status."""
     url = (base or BASE) + path
@@ -177,7 +196,11 @@ else:
 # --- R-3: an unconfigured model id is an error, not a passthrough ------------
 status, payload = request("/chat/completions", method="POST",
                           body=dict(COMPLETION, model="router-verify-nonexistent-model"))
-detail = payload if isinstance(payload, str) else json.dumps(payload.get("error", payload))[:160]
+# A body is whatever the router answered with, including a JSON array or a bare
+# string, so the shape is tested rather than assumed: `payload.get` on a list is
+# the same defect as a name a failed command never set.
+error = payload.get("error", payload) if isinstance(payload, dict) else payload
+detail = (payload if isinstance(payload, str) else json.dumps(error))[:200]
 check("R-3 unconfigured model id is refused", 400 <= status < 500, f"HTTP {status} {detail}")
 
 # --- R-9: unsupported parameters are dropped, not rejected ------------------
@@ -280,8 +303,14 @@ else:
         try:
             import pwd
             return pwd.getpwnam(head).pw_uid
-        except KeyError:
+        except (KeyError, ImportError):
             return None
+    # Both are assigned before the attempt, so a failed `docker inspect` leaves
+    # them at None rather than undefined: state that a command sets and a
+    # handler skips is read on the far side of that handler, and an unbound name
+    # there turns a failed check into a traceback with no summary at all.
+    configured = None
+    configured_uid = None
     try:
         p = subprocess.run(["docker", "inspect", "--format", "{{.Config.User}}", CONTAINER],
                            capture_output=True, timeout=TIMEOUT)
@@ -296,8 +325,16 @@ else:
         configured_uid = 0 if configured.strip() == "" else account_uid(configured)
     except Exception as e:
         check("A-15 container account is stated and is not root", False, f"docker inspect failed: {e}"[:160])
+        # A failed inspect leaves no account to compare against, so the second
+        # reading says so rather than blaming the host's passwd for a value the
+        # command never returned.
+        configured = None
 
-    if configured_uid is None:
+    if configured is None:
+        check("A-15 every process runs as that account", False,
+              "could not inspect the container: the account it states is unknown, so nothing can be "
+              "compared with it")
+    elif configured_uid is None:
         check("A-15 every process runs as that account", False,
               f"cannot compare: this host cannot resolve the configured account {configured!r} to a "
               f"uid. Configure a numeric account (user: \"65532:65532\") so the check is decidable "
