@@ -407,7 +407,14 @@ body() {
             else
                 bf "H-9 $(basename "$f") names another endpoint: $OTHER"
             fi
-            if grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]|api[_-]?key"?[[:space:]]*[:=][[:space:]]*"[^"]+)' "$f"; then
+            # A credential field must NAME a variable, not carry a value — and
+            # omp's own spelling is camel-cased, which a case-sensitive
+            # `api[_-]?key` never matched, so a literal written into its models
+            # file passed this row. The value class below is what separates the
+            # two: `apiKey: "ROUTER_API_KEY"` is name-shaped and stays quiet,
+            # `apiKey: "topsecret"` is not and does not. An all-uppercase
+            # literal is indistinguishable from a name and is not caught.
+            if grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]|api[_-]?[Kk]ey"?[[:space:]]*[:=][[:space:]]*"[^"]*[^A-Z_"][^"]*")' "$f"; then
                 bf "H-10 $(basename "$f") carries a credential-shaped value"
             else
                 bp "H-10 $(basename "$f") carries the credential's name, not a value"
@@ -740,6 +747,8 @@ run_container() {
         -e "CHECK_CONF=$CHECK_CONF" -e "CHECK_MODELS=$CHECK_MODELS" -e "CHECK_CMD=$CHECK_CMD" \
         -e "ROUTER_BASE_URL=$ROUTER_BASE_URL" -e "HARNESS_MODEL_ALIAS=$HARNESS_MODEL_ALIAS" \
         -e "HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW" \
+        -e "HARNESS_FAST_ALIAS=$HARNESS_FAST_ALIAS" \
+        -e "HARNESS_MAX_OUTPUT_TOKENS=$HARNESS_MAX_OUTPUT_TOKENS" \
         -e "AGENT_HARNESS=$h" \
         -e "CHECK_ENDPOINT=${CHECK_ENDPOINT:-}" \
         -e "BODY_EXIT=${RUN_BODY_EXIT:-}" \
