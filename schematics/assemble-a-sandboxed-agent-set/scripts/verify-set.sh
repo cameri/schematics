@@ -436,12 +436,29 @@ if [ "${ALLOW_BUILD_PROBE:-0}" != "1" ]; then
     skip "A-4 build probe not enabled (set ALLOW_BUILD_PROBE=1; it builds one throwaway image)"
 else
     LAYER_CTX="${LAYER_BUILD_CONTEXT:-}"
+    # The arguments this row supplies come from the RUN, never from a default
+    # invented here: a probe that defaulted a value the deployment omits would
+    # test a build no deployment makes, and would pass over exactly what this
+    # row's failure column calls a failure — a build given less than it requires.
+    # bring-up.sh requires the same ones for the same arms: P-13 always, and P-12
+    # and P-14 for claude and omp, whose configuration carries the second role
+    # and the max-output key.
+    a4_missing=""
+    [ -n "${HARNESS_CONTEXT_WINDOW:-}" ] || a4_missing="$a4_missing P-13(HARNESS_CONTEXT_WINDOW)"
+    case "$HARNESS_ID" in
+        claude|omp)
+            [ -n "${ROUTER_FAST_ALIAS:-}" ] || a4_missing="$a4_missing P-12(ROUTER_FAST_ALIAS)"
+            [ -n "${HARNESS_MAX_OUTPUT_TOKENS:-}" ] || a4_missing="$a4_missing P-14(HARNESS_MAX_OUTPUT_TOKENS)" ;;
+    esac
+    a4_missing_list="$(printf '%s' "$a4_missing" | sed 's/^ //;s/ /, /g')"
     if [ -z "$LAYER_CTX" ] || [ ! -f "$LAYER_CTX/Containerfile" ]; then
         skip "A-4 no harness layer build context (set LAYER_BUILD_CONTEXT to the directory holding its Containerfile)"
+    elif [ -n "$a4_missing" ]; then
+        skip "A-4 $a4_missing_list not set, so the probe cannot supply every argument $HARNESS_ID's build requires; the row is not asserted rather than asserted over a build assembled from values it invented"
     else
-        arm_args="--build-arg HARNESS_MODEL_ALIAS=$ROUTER_ALIAS --build-arg HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW:-200000}"
+        arm_args="--build-arg HARNESS_MODEL_ALIAS=$ROUTER_ALIAS --build-arg HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW"
         case "$HARNESS_ID" in
-            claude|omp) arm_args="$arm_args --build-arg HARNESS_FAST_ALIAS=${ROUTER_FAST_ALIAS:-$ROUTER_ALIAS} --build-arg HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS:-32000}" ;;
+            claude|omp) arm_args="$arm_args --build-arg HARNESS_FAST_ALIAS=$ROUTER_FAST_ALIAS --build-arg HARNESS_MAX_OUTPUT_TOKENS=$HARNESS_MAX_OUTPUT_TOKENS" ;;
         esac
         [ -n "${HARNESS_HOME:-}" ] && arm_args="$arm_args --build-arg HARNESS_HOME=$HARNESS_HOME"
         # shellcheck disable=SC2086
@@ -850,16 +867,24 @@ else
             fi
         fi
         # P-7 may name more than one file: the omp arm's layout splits the roles
-        # from the endpoint and the model metadata. Every named path is read, into
-        # one blob, which is what the per-arm key readers below scan.
-        cfg=""
+        # from the endpoint and the model metadata. EVERY named path is read, into
+        # one blob, which is what the per-arm key readers below scan — and every
+        # path has to be readable, because one that is not would make those readers
+        # report the keys it holds as absent from a configuration whose other file
+        # read fine. That is a finding about a deployment that does not exist: the
+        # defect would be the unreadable path, named by P-21.
+        cfg=""; cfg_unreadable=""
         for _p in $HARNESS_CONFIG_PATH; do
             _c="$(docker exec "$HOST_CONTAINER" cat "$_p" 2>/dev/null)"
-            [ -n "$_c" ] && cfg="$cfg
+            if [ -n "$_c" ]; then
+                cfg="$cfg
 $_c"
+            else
+                cfg_unreadable="$cfg_unreadable $_p"
+            fi
         done
-        if [ -z "$cfg" ]; then
-            skip "A-10 configuration check: none of $HARNESS_CONFIG_PATH is readable"
+        if [ -n "$cfg_unreadable" ]; then
+            skip "A-10 configuration check: not readable (or empty) inside $HOST_CONTAINER:$cfg_unreadable — P-21 names every file this arm's CLI reads, so the check is not asserted over the paths it could read"
         else
             forbidden="$(printf '%s' "$cfg" | grep -oE '(sk-[A-Za-z0-9_-]{8,}|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY)' | head -1)"
             if [ -n "$forbidden" ]; then
@@ -909,7 +934,7 @@ $_c"
                 got_fast="$(cfg_value "$cfg" "$fast_key")"
                 [ "$got_fast" = "${model_prefix}$ROUTER_FAST_ALIAS" ] \
                     && pass "A-10 the harness configuration's $fast_key is ${model_prefix}$ROUTER_FAST_ALIAS, P-12's alias" \
-                    || fail "A-10 the harness configuration's $fast_key is '${got_fast:-absent}', not P-12's alias $ROUTER_FAST_ALIAS"
+                    || fail "A-10 the harness configuration's $fast_key is '${got_fast:-absent}', not P-12's alias ${model_prefix}$ROUTER_FAST_ALIAS (the spelling the file carries for this arm)"
             fi
             if [ -n "$cred_key" ]; then
                 got_cred="$(cfg_value "$cfg" "$cred_key")"

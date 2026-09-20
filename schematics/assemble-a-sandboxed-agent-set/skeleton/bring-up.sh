@@ -367,7 +367,7 @@ else
             claude|omp)
                 # Both arms' configuration carries a second role and a max-output
                 # field — Claude Code's settings.json a key of its own, the omp
-                # arm its catalogue entry for the primary alias — so both are
+                # arm's catalogue entry for the primary alias — so both are
                 # required here rather than defaulted.
                 need ROUTER_FAST_ALIAS "${ROUTER_FAST_ALIAS:-}"
                 need HARNESS_MAX_OUTPUT_TOKENS "${HARNESS_MAX_OUTPUT_TOKENS:-}" ;;
