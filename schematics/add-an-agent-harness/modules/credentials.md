@@ -22,7 +22,7 @@ decryption belong to `encrypt-container-secrets` (D-3).
 |---|---|---|
 | `P-4 ROUTER_CREDENTIAL_ENV` | The *name* of the credential variable. The value is never a build input and never appears in this package's files | The deployment, injected at boot |
 | `P-9 HARNESS_HOME` | The config root the layer points the CLI's own relocation variable at | Build arg |
-| The CLI's relocation variable | `CLAUDE_CONFIG_DIR` (Claude Code), `CODEX_HOME` (Codex CLI) | The CLIs |
+| The CLI's relocation variable | `CLAUDE_CONFIG_DIR` (Claude Code), `CODEX_HOME` (Codex CLI), `PI_CODING_AGENT_DIR` (omp) | The CLIs |
 | The D-3 store and the service's dedicated key file | Mounted read-only; decrypted in memory at boot | The deployment's `encrypt-container-secrets` wiring |
 
 Error inputs it must tolerate: the credential variable absent at boot, a store
@@ -43,13 +43,21 @@ variable.
 
 Each CLI keeps everything it persists in one directory: its configuration, its
 session state, and — when a login flow runs — its stored credential file
-(`auth.json` for both CLIs this package names). The directory is the CLI's own
-config root, relocatable by a variable the CLI defines:
+(`auth.json` for the two npm-distributed CLIs this package names, and `agent.db`
+for omp). The directory is the CLI's own config root, relocatable by a variable
+the CLI defines:
 
 | CLI | Config root variable | Built-in default |
 |---|---|---|
 | Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude` |
 | Codex CLI | `CODEX_HOME` | `~/.codex` |
+| omp | `PI_CODING_AGENT_DIR` | `~/.omp/agent` — or `~/.omp/profiles/<profile>/agent` under a named profile, which takes precedence over the variable |
+
+omp's relocation is the reason the third row carries a caveat: its own variable
+names the *agent directory*, and a named profile derives that directory instead of
+honouring it. The layer sets the variable and no profile, so the root is the one
+this layer pinned; a deployment that selects a profile for the pane moves the root
+to the profile's directory and must mount that path instead (Q-1).
 
 The layer sets whichever variable the selected CLI defines to `P-9
 HARNESS_HOME`, so every file the CLI writes lands in one known place. One
@@ -93,6 +101,7 @@ Each CLI consumes the variable in its own way:
 |---|---|---|---|
 | Claude Code | The process environment. `settings.json` carries no credential: its `env` block takes values, so a value written there would be a credential in the image (R-8) | `ANTHROPIC_AUTH_TOKEN`, read from the environment; the CLI prefixes `Bearer ` | `Authorization: Bearer <credential>` |
 | Codex CLI | The *name* is configuration: `model_providers.<id>.env_key` in `config.toml` is set to `P-4` | The named variable, read from the environment at request time | `Authorization: Bearer <credential>` |
+| omp | The *name* is configuration: `providers.router.apiKey` in `models.yml` is set to `P-4`, with `authHeader: true` so the resolved value becomes a bearer header | The named variable when it is set; a literal value in that field otherwise, which is why the name is the only thing this layer writes there | `Authorization: Bearer <credential>` |
 
 Who picks the name differs, and the difference matters when wiring:
 
@@ -106,6 +115,13 @@ Who picks the name differs, and the difference matters when wiring:
   request time. Naming the variable is configuration; holding the value is not
   possible in the file (R-8) — the value stays in the environment, which the
   deployment owns.
+- **omp defers it, with a fallback to remember.** Its `apiKey` field reads the
+  variable `P-4` names when that variable is set, and treats the field's text as a
+  literal credential when it is not. So the file is safe exactly as long as the
+  field holds the *name*: writing a value there would put a credential in an image
+  layer, and the CLI would then send the literal whether or not the deployment's
+  store decrypted anything — a failure H-10 catches at build time, which is what
+  the row is for.
 
 ## Why the image holds none
 
@@ -138,9 +154,9 @@ log). A CLI that accepts the variable never asks. One that nonetheless insists
 on an interactive login is handled outside the image:
 
 1. Start a one-off container from the built image with `P-9` bind-mounted and
-   a TTY, and run the CLI's login there. The credential file the flow writes —
-   `auth.json` for both CLIs this package names — lands under `P-9`, on the
-   mount, not in a container layer.
+   a TTY, and run the CLI's login there. The credential the flow writes —
+   `auth.json` for the two npm-distributed CLIs this package names, `agent.db` for
+   omp — lands under `P-9`, on the mount, not in a container layer.
 2. Leave it on the mount. That is session-state territory (Q-1): the file
    survives recreates, belongs to the deployment, and is absent from every
    image this layer produces.
@@ -158,6 +174,13 @@ on an interactive login is handled outside the image:
    never seen the credential, must produce an image that passes H-10. If it
    does not, the login file leaked into the build inputs, and the fix is to
    remove it — not to exclude the file from the search.
+
+omp has a second credential path that is easy to introduce by accident: it applies
+a `.env` file found in its own root, so a deployment that drops the credential
+there has created a plaintext credential on the mount without a login flow
+anywhere. The layer writes no `.env`, H-10's search includes one — in the image,
+where none may exist — and a deployment that wants the variable path keeps the
+value in the D-3 store, injected at boot, not in a file beside the configuration.
 
 The last point is the rule the procedure exists to protect: **the image is a
 function of the parameters, and none of the parameters is a credential.**

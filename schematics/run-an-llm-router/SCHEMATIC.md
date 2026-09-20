@@ -6,7 +6,7 @@ status: draft
 spec: 1
 description: A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.
 created: 2026-09-14
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # Schematic: Run an LLM Router
@@ -688,7 +688,9 @@ scripts/router-verify.sh
   `/v1/models`, `/v1/chat/completions`, and the protocol route of every client
   family the run declares in its `CLIENT_ARMS` input (default `claude,codex`;
   `/v1/messages` for a Claude-family client, `/v1/responses` for a Codex-family
-  one) answer `401`, and an unknown path answers `404`. So a router built for
+  one, `/v1/chat/completions` for the omp arm, whose route is the conformance
+  floor itself and which a run therefore declares without adding a requirement)
+  answer `401`, and an unknown path answers `404`. So a router built for
   one protocol FAILS for the family it does not serve — the failure this row
   exists to catch — while a router that serves that family and omits the rest of
   the table is reported, not failed. The `404` control is probed with `GET` as

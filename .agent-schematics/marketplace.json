@@ -441,6 +441,7 @@
         "harness",
         "claude-code",
         "codex",
+        "omp",
         "coding-agent",
         "cli",
         "layers",

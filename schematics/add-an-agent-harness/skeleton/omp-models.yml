@@ -1,0 +1,13 @@
+providers:
+  router:
+    baseUrl: "@HARNESS_ENDPOINT@"
+    api: openai-completions
+    apiKey: "@ROUTER_CREDENTIAL_ENV@"
+    authHeader: true
+    models:
+      - id: "@HARNESS_MODEL_ALIAS@"
+        name: "@HARNESS_MODEL_ALIAS@"
+        contextWindow: @HARNESS_CONTEXT_WINDOW@
+        maxTokens: @HARNESS_MAX_OUTPUT_TOKENS@
+      - id: "@HARNESS_FAST_ALIAS@"
+        name: "@HARNESS_FAST_ALIAS@"

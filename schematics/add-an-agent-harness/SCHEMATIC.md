@@ -1,11 +1,11 @@
 ---
 name: add-an-agent-harness
-version: 0.2.0
+version: 0.3.0
 status: draft
 spec: 1
 description: "An agent harness layer — the agent-host image plus exactly one coding-agent CLI and its configuration, wired to a local LLM router by model alias: the CLI becomes the container's process through the inherited entrypoint, its model ids come from the router's alias set with the context window and output limit the router does not report declared beside them, its version is resolved at build time and recorded in the image, and no credential exists anywhere in the image."
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # Schematic: Add an Agent Harness Layer
@@ -39,8 +39,10 @@ the base's entrypoint refuses when the variable names nothing.
   (`P-7`, `P-8`). Discovery: the operator's own knowledge of the models behind
   the aliases — the router's registry does not report them, which is why they are
   declared here (`modules/router-wiring.md`).
-- The CLI version installed. Discovery: the package registry at build time —
-  `npm view <package> version`. The build resolves it and records what it
+- The CLI version installed. Discovery: the channel the CLI publishes it through,
+  at build time — the package registry (`npm view <package> version`) for an arm
+  installed from a registry, the release host's own version query for an arm
+  installed from a release artifact. The build resolves it and records what it
   resolved; nothing in this package copies a version from documentation.
 
 **May assume** (with the risk if wrong):
@@ -50,7 +52,9 @@ the base's entrypoint refuses when the variable names nothing.
 - The router serves the wire protocol the CLI speaks. Codex CLI speaks the
   Responses API only (`model_providers.<id>.wire_api = "responses"`), so a router
   that serves chat completions alone will accept the configuration and fail at
-  the first request. Claude Code speaks the Anthropic Messages API.
+  the first request. Claude Code speaks the Anthropic Messages API. omp is wired
+  through its OpenAI-compatible client (`api: openai-completions`), so this layer
+  needs the router's chat-completions route to answer for it.
 - The harness account can write its configuration home. The base's account owns
   `HOME`, and the image writes the default configuration under it; a deployment
   that bind-mounts that home from the host must hand it to the same uid the base
@@ -88,8 +92,8 @@ the base's entrypoint refuses when the variable names nothing.
   boot by `encrypt-container-secrets`; nothing in this package holds one, and no
   credential-shaped file exists in the image it produces
   (`modules/credentials.md`).
-- **omp, OpenCode and Cursor CLI.** Named non-goals of this version. Adding one is
-  a mechanical procedure with a defined seam, not a stub (`modules/extension-path.md`).
+- **OpenCode and Cursor CLI.** Named non-goals of this version. Adding one is a
+  mechanical procedure with a defined seam, not a stub (`modules/extension-path.md`).
 - **A harness's own behaviour.** What the CLI does in the workspace, which model
   roles it uses, how it stores session state — its business, not this package's.
 - **Publishing.** The tag and registry a deployment publishes to are the
@@ -119,16 +123,21 @@ the base's entrypoint refuses when the variable names nothing.
   build with one line naming the value, and the value MUST NOT be able to produce
   an image that starts without a harness. The accepted values MUST each have a
   real implementation, not a placeholder branch.
-- **R-5**: The CLI version MUST be resolved from the package registry at build
-  time — never a floating tag, never a version copied from documentation — and the
-  version the build resolved MUST be recorded inside the image and readable
-  without starting the CLI.
+- **R-5**: The CLI version MUST be resolved from the channel the CLI publishes it
+  through — the package registry for a CLI distributed as a package, the release
+  host for a CLI distributed as a release artifact — at build time, never a
+  floating tag and never a version copied from documentation. An artifact fetched
+  from a release host MUST be checked against the checksum the same release
+  publishes. The version the build resolved MUST be recorded inside the image and
+  readable without starting the CLI.
 - **R-6**: The CLI MUST be wired to the router: the base URL, the name of the
   environment variable that carries the credential, and model ids drawn from the
   router's alias set, expressed in the CLI's own configuration shape. The context
   window and maximum output tokens MUST be declared per harness where the CLI
   supports declaring them, and the absence of a field MUST be stated rather than
-  faked (`modules/router-wiring.md`).
+  faked (`modules/router-wiring.md`). A CLI that splits its configuration across
+  more than one file has all of them written by this layer, and `modules/router-wiring.md`
+  names which file carries which fact.
 - **R-7**: For every model role the router serves, the configuration MUST name
   only an alias on that router. It MUST NOT contain a second provider, a fallback
   provider, or another provider's endpoint for those roles: wiring a harness to
@@ -144,14 +153,14 @@ the base's entrypoint refuses when the variable names nothing.
   harness is a foreground process in an outbound-only container.
 - **R-11**: Adding another harness MUST be a documented, mechanical procedure:
   the parameter gains a value, the install step gains an arm, the configuration
-  gains a template, and the acceptance table gains a row — with the file names
-  and the row named in `modules/extension-path.md`.
+  gains the template or templates its file layout needs, and the acceptance table
+  gains a row — with the file names and the row named in `modules/extension-path.md`.
 
 ## Design Principles Binding the Implementation
 
 1. **Vendor-agnostic** — implement with plain, portable components; no dependency
-   on any specific agent or harness. The package names two CLIs because a harness
-   layer must name one; nothing else in it assumes either.
+   on any specific agent or harness. The package names three CLIs because a harness
+   layer must name one; nothing else in it assumes any of them.
 2. **Portable** — no absolute paths or machine-specific values in the
    implementation; use the Parameters below. No registry, namespace or hostname
    of the author's appears anywhere: an image reference is a parameter, and so is
@@ -166,7 +175,7 @@ the base's entrypoint refuses when the variable names nothing.
    alias ids and the token metadata are parameters; nothing else varies.
 6. **Self-describing files** — the configuration templates ship with `.schema`
    companions, because a reader who does not know the CLI cannot tell a correct
-   `settings.json` from a plausible one.
+   `settings.json`, `config.toml` or `models.yml` from a plausible one.
 7. **Least privilege** — the install uses root inside a build layer; the produced
    image has the base's unprivileged account as its runtime identity, with no
    added group and no sudo. The CLI runs as that account.
@@ -184,27 +193,27 @@ the base's entrypoint refuses when the variable names nothing.
 | Id   | Kind      | What | Why needed | Discovery | Failure behaviour |
 |------|-----------|------|------------|-----------|-------------------|
 | D-1  | schematic | [run-multiplexed-agent-workspaces v0.2.1](https://github.com/cameri/schematics/blob/7dafa31ae8457969563acac703786ac42fb26654/schematics/run-multiplexed-agent-workspaces/SCHEMATIC.md) `sha256:8fed59d6c800a52c3cf8f86bee377f95b6398e4d83d5711f852e48e8e70451a6` | The image this layer is built on, and the contract an agent pane runs under: its account, entrypoint, working directory and `AGENT_*` names are inherited by R-1 and restated nowhere. That package's `P-17 AGENT_HARNESS` is exactly the parameter this layer sets, and its `D-1` carries the dev base image edge | Its acceptance script green, then this layer's acceptance script green against an image built from it | The layer cannot be built: there is no image to derive from. Nothing in this package substitutes for it |
-| D-2  | schematic | [run-an-llm-router v0.2.1](https://github.com/cameri/schematics/blob/545ec07f94d3c14a0bdaaf40a87d33f5c684d875/schematics/run-an-llm-router/SCHEMATIC.md) `sha256:095db6143e4b0a3594360a522e232d23a37c10d932d42c8d875a5e455a624e9c` | The inference endpoint the harness is wired to, by alias (R-6, R-7). Its own client-wiring document defines the wire contract this package's templates implement, and its `P-10 ALIAS_SET` is the only set of model ids a client may send | The protocol **this deployment's arm needs** answers on its endpoint within the container's network — `POST /v1/messages` for the Claude arm, `POST /v1/responses` for the Codex arm — and its `P-10 ALIAS_SET` is readable from its configuration and contains `P-5` and `P-6`. A reachable `/v1` alone is not enough: a router that serves chat completions only accepts this wiring and fails at the arm's first request, which is the failure this row exists to catch | The harness starts and every request fails at the client. That is the intended failure: R-7 forbids a fallback provider, so a router outage is visible rather than absorbed |
+| D-2  | schematic | [run-an-llm-router v0.2.1](https://github.com/cameri/schematics/blob/545ec07f94d3c14a0bdaaf40a87d33f5c684d875/schematics/run-an-llm-router/SCHEMATIC.md) `sha256:095db6143e4b0a3594360a522e232d23a37c10d932d42c8d875a5e455a624e9c` | The inference endpoint the harness is wired to, by alias (R-6, R-7). Its own client-wiring document defines the wire contract this package's templates implement, and its `P-10 ALIAS_SET` is the only set of model ids a client may send | The protocol **this deployment's arm needs** answers on its endpoint within the container's network — `POST /v1/messages` for the Claude arm, `POST /v1/responses` for the Codex arm, `POST /v1/chat/completions` for the omp arm — and its `P-10 ALIAS_SET` is readable from its configuration and contains `P-5` and `P-6`. A reachable `/v1` alone is not enough: a router that serves chat completions only accepts this wiring and fails at the arm's first request, which is the failure this row exists to catch | The harness starts and every request fails at the client. That is the intended failure: R-7 forbids a fallback provider, so a router outage is visible rather than absorbed |
 | D-3  | schematic | [encrypt-container-secrets v0.2.2](https://github.com/cameri/schematics/blob/da0ac2334dd997588daffd404570292d50d6dca6/schematics/encrypt-container-secrets/SCHEMATIC.md) `sha256:7b40f292571587b0c6a57460ab5611b2bb4104b1ea0cc6e6848dddea78a45d6a` | The credential path: the harness's credential is encrypted at rest and decrypted in memory at boot, exposed to the process as an environment variable. This package ships no credential (R-8) | Its phases green on the deployment, and a boot in which the credential variable is present in the harness's environment | The harness starts with no credential and fails its first request with the provider's own error; the CLI names the missing variable |
 | D-4  | system    | Docker Engine with Compose v2, and a builder that can build from the base image | Builds this layer's image and runs it for the acceptance rows | `docker compose version` exits 0; the base image is present locally or pullable | Hard fail at Phase 2: no image, no rows |
-| D-5  | system    | Network access to the package registry at build time | Resolves and installs the CLI version (R-5) | The install step's own output: `npm view <package> version` | Hard fail at the install step, naming the package it could not resolve. Do not substitute a mirror or a vendored copy of the CLI |
-| D-6  | system    | The distribution's package repository, when the base image carries no Node.js runtime | Installs `nodejs` and `npm` for a CLI that is distributed through npm | `command -v node` inside the base image | Hard fail at the runtime install step; the fix is a base image that carries the runtime, not a different CLI |
+| D-5  | system    | Network access to the channel the chosen arm is installed from at build time, and an HTTP client in the build layer for an arm installed from a release artifact | Resolves and installs the CLI version (R-5) | The install step's own output: `npm view <package> version` for a registry arm, the release host's version query plus the release's checksum file for a release arm; `command -v curl` (or `wget`) in the build layer for the latter | Hard fail at the install step, naming the package or the artifact it could not resolve. Do not substitute a mirror or a vendored copy of the CLI |
+| D-6  | system    | The distribution's package repository, when the chosen arm's CLI is distributed through npm and the base image carries no Node.js runtime | Installs `nodejs` and `npm` for such an arm. An arm installed from a release artifact brings its own runtime in the artifact and does not use this row | `command -v node` inside the base image | Hard fail at the runtime install step; the fix is a base image that carries the runtime, not a different CLI |
 
 ## Parameters
 
 | Id   | Name | Type | Default | Discovery | Effect |
 |------|------|------|---------|-----------|--------|
-| P-1  | `AGENT_HARNESS_ID` | enum: `claude` \| `codex` | *(required at build)* | The CLI this deployment's agents run. Each value is a real implementation; omp, OpenCode and Cursor CLI are non-goals with a documented extension procedure | Selects the CLI installed, the configuration template used, and the value of `AGENT_HARNESS` (R-2, R-4) |
+| P-1  | `AGENT_HARNESS_ID` | enum: `claude` \| `codex` \| `omp` | *(required at build)* | The CLI this deployment's agents run. Each value is a real implementation; OpenCode and Cursor CLI are non-goals with a documented extension procedure | Selects the CLI installed, the configuration templates used, and the value of `AGENT_HARNESS` (R-2, R-4) |
 | P-2  | `AGENT_BASE_REF` | string | *(required at build)* | The agent-host image: `name:tag` when it was built locally, `name@sha256:<manifest list digest>` when it was published. Discovery: the deployment's own build or pull step | The `FROM` reference of this layer, and therefore the whole inherited contract (R-1) |
-| P-3  | `ROUTER_BASE_URL` | URL | `http://llm-router:4000` | `run-an-llm-router`'s `P-13`, whose default is built from its `P-1 ROUTER_SERVICE_NAME` and `P-2 ROUTER_PORT`. This parameter is the router's **root**, with no path suffix: each CLI appends its own protocol path (`/v1/messages` for Claude Code, `/v1/responses` for Codex CLI), so the build derives the endpoint per arm and writes that into the configuration (`modules/router-wiring.md`). A value ending in `/v1` is refused at build time, because the Claude arm would then request `/v1/v1/messages` | The endpoint the harness sends inference requests to (R-6) |
-| P-4  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The name of the environment variable the deployment injects the router credential into. The *name* is configuration; the value comes from `encrypt-container-secrets` (D-3) | The variable name the configuration reads the credential from. No value is ever written to a file (R-6, R-8). **It has no effect for the `claude` harness**: that CLI reads its bearer token from `ANTHROPIC_AUTH_TOKEN` — a fixed name, because that variable is the one that sets the `Authorization: Bearer` header the router reads — so the install arm uses that name regardless of this parameter, and the deployment's secret store must carry the credential under it. The layer records which variable the harness it installed actually reads at `/usr/local/share/agent-harness/credential-env`; for the `codex` harness the value is this parameter |
+| P-3  | `ROUTER_BASE_URL` | URL | `http://llm-router:4000` | `run-an-llm-router`'s `P-13`, whose default is built from its `P-1 ROUTER_SERVICE_NAME` and `P-2 ROUTER_PORT`. This parameter is the router's **root**, with no path suffix: each CLI appends its own protocol path (`/v1/messages` for Claude Code, `/responses` under a `/v1` base for Codex CLI, `/chat/completions` under a `/v1` base for omp), so the build derives the endpoint per arm and writes that into the configuration (`modules/router-wiring.md`). A value ending in `/v1` is refused at build time, because the Claude arm would then request `/v1/v1/messages` | The endpoint the harness sends inference requests to (R-6) |
+| P-4  | `ROUTER_CREDENTIAL_ENV` | string | `ROUTER_API_KEY` | The name of the environment variable the deployment injects the router credential into. The *name* is configuration; the value comes from `encrypt-container-secrets` (D-3) | The variable name the configuration reads the credential from. No value is ever written to a file (R-6, R-8). **It has no effect for the `claude` harness**: that CLI reads its bearer token from `ANTHROPIC_AUTH_TOKEN` — a fixed name, because that variable is the one that sets the `Authorization: Bearer` header the router reads — so the install arm uses that name regardless of this parameter, and the deployment's secret store must carry the credential under it. The layer records which variable the harness it installed actually reads at `/usr/local/share/agent-harness/credential-env`; for the `codex` and `omp` harnesses the value is this parameter, which both name in their configuration |
 | P-5  | `HARNESS_MODEL_ALIAS` | string | *(required at build)* | An alias from the router's `P-10 ALIAS_SET` — what the router is configured to serve to this deployment | The model id the harness sends for its primary role. A value the router does not serve fails per request at the client (R-6, R-7) |
-| P-6  | `HARNESS_FAST_ALIAS` | string | *(required at build)* | A second alias from the same set, for the CLI's background/small-task role where the CLI has one | The model id the harness sends for background work. Required rather than optional: an unset small/fast role leaves the CLI pointing at a built-in model name the router probably does not serve, and the failure is a request that never reaches the router. Where the harness has no such role — the `codex` arm — the parameter is unused and no key is written |
+| P-6  | `HARNESS_FAST_ALIAS` | string | *(required at build)* | A second alias from the same set, for the CLI's background/small-task role where the CLI has one | The model id the harness sends for background work. Required rather than optional: an unset small/fast role leaves the CLI pointing at a built-in model name the router probably does not serve, and the failure is a request that never reaches the router. Where the harness has no such role — the `codex` arm — the parameter is unused and no key is written; the `omp` arm binds it to the role its own configuration calls `smol` |
 | P-7  | `HARNESS_CONTEXT_WINDOW` | integer | *(required at build)* | The context window, in tokens, of the model `P-5` resolves to. The router does not report it, so the operator declares it | Written into the CLI's configuration in the field that CLI uses, so its compaction heuristics match the real window |
-| P-8  | `HARNESS_MAX_OUTPUT_TOKENS` | integer | *(required at build)* | The maximum output tokens of the model `P-5` resolves to, where the operator's provider documents one | Written where the CLI supports it. The `codex` arm has no such key, so the parameter is unused there and the module says so rather than writing a plausible field the CLI would ignore |
-| P-9  | `HARNESS_HOME` | path (in-container) | the base account's home plus `.<cli>` — built as `/home/${AGENT_USER}/.<cli>` from the account the base declares | The directory the CLI keeps its configuration and session state in. The CLI's own relocation variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) is set to this value. The default is composed in the Containerfile from the base's own `AGENT_USER`, because `HOME` is not in the base image's `Config.Env`; a base whose account lives outside `/home` passes this parameter, and the build says so | Where the CLI reads its configuration, and what a deployment bind-mounts to keep session state across recreates. **One root per image, shared by every pane a deployment runs from it** (see "The configuration root is per image") |
+| P-8  | `HARNESS_MAX_OUTPUT_TOKENS` | integer | *(required at build)* | The maximum output tokens of the model `P-5` resolves to, where the operator's provider documents one | Written where the CLI supports it. The `codex` arm has no such key, so the parameter is unused there and the module says so rather than writing a plausible field the CLI would ignore. The `omp` arm declares it per model in `models.yml` |
+| P-9  | `HARNESS_HOME` | path (in-container) | the base account's home plus `.<cli>` — built as `/home/${AGENT_USER}/.<cli>` from the account the base declares | The directory the CLI keeps its configuration and session state in. The CLI's own relocation variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) is set to this value. The default is composed in the Containerfile from the base's own `AGENT_USER`, because `HOME` is not in the base image's `Config.Env`; a base whose account lives outside `/home` passes this parameter, and the build says so | Where the CLI reads its configuration, and what a deployment bind-mounts to keep session state across recreates. A CLI that reads its configuration from more than one file under this root has all of them written there. **One root per image, shared by every pane a deployment runs from it** (see "The configuration root is per image") |
 | P-11 | `HARNESS_VERIFY_ENDPOINT` | flag (empty \| `1`) | *(empty — no check)* | The deployment's choice: set it when the build runs where the router is reachable, and a build that cannot reach the endpoint this arm is wired to stops with a line naming it (exit `78`). Empty by default because a build may run where the router is not reachable — a CI runner, a laptop. **It checks reachability only**: no credential is sent, because a credential must never be a build argument (it would land in the image's history), so it cannot prove the alias is served. That check is the deployment's, before the panes start | A build that would produce an image wired to an endpoint nobody can reach fails at the build instead of at the harness's first request |
-| P-10 | `HARNESS_PACKAGE_VERSION` | string | *(empty — resolved at build)* | The exact version to install. Empty resolves it from the registry at build time (`npm view <package> version`); set it to reproduce an earlier build | Pins the CLI version. The resolved value is recorded in the image either way (R-5) |
+| P-10 | `HARNESS_PACKAGE_VERSION` | string | *(empty — resolved at build)* | The exact version to install. Empty resolves it at build time from the channel the arm's CLI is published through: `npm view <package> version` for a registry arm, the release host's latest-release query for a release arm. For a release arm the value is the release tag as the vendor publishes it. Set it to reproduce an earlier build | Pins the CLI version. The resolved value is recorded in the image either way (R-5) |
 
 ## Modules
 
@@ -245,8 +254,8 @@ the wording belongs to those packages.
 |---|---|
 | The base's contract | unchanged, verified by the acceptance table rather than asserted |
 | The harness CLI | installed at the version the build resolved, on `PATH`, runnable by the base's account without a credential |
-| `AGENT_HARNESS` | the CLI's name (`claude`, `codex`), so the entrypoint resolves it |
-| The CLI's configuration | in the CLI's own file shape, under `P-9`, naming the router (`P-3`) by alias (`P-5`) and the credential *variable* (`P-4`) |
+| `AGENT_HARNESS` | the CLI's name (`claude`, `codex`, `omp`), so the entrypoint resolves it |
+| The CLI's configuration | in the CLI's own file shape, under `P-9`, naming the router (`P-3`) by alias (`P-5`) and the credential *variable* (`P-4`) — one file for the Claude and Codex arms, a settings file plus a model-catalogue file for the `omp` arm |
 | The resolved version | recorded in a file inside the image (R-5) |
 | A credential | none (R-8) |
 
@@ -260,8 +269,9 @@ belongs to the router package's `client-wiring.md` (D-2).
 
 ### The configuration root is per image, and every pane shares it
 
-`P-9 HARNESS_HOME` is written into the image (`CLAUDE_CONFIG_DIR`/`CODEX_HOME`),
-and the deployment cannot vary it per pane: the multiplexer runs each agent with
+`P-9 HARNESS_HOME` is written into the image
+(`CLAUDE_CONFIG_DIR`/`CODEX_HOME`/`PI_CODING_AGENT_DIR`), and the deployment
+cannot vary it per pane: the multiplexer runs each agent with
 its own home under the tree, but `herdr` does not pass a workspace's `--env` values
 into a plugin pane — that package's own measured constraint. So every agent a
 deployment starts from one image reads the same configuration and writes its
@@ -322,10 +332,11 @@ Steps:
    ```
 
    The command above is the full set a Claude build needs, and it works as
-   written for either arm: `HARNESS_FAST_ALIAS` (`P-6`) and
-   `HARNESS_MAX_OUTPUT_TOKENS` (`P-8`) are the Claude arm's own roles, and the
-   Codex arm ignores them while requiring `ROUTER_CREDENTIAL_ENV` (`P-4`) to name
-   the variable its provider block reads. The build refuses an arm's own missing
+   written for any arm: `HARNESS_FAST_ALIAS` (`P-6`) and
+   `HARNESS_MAX_OUTPUT_TOKENS` (`P-8`) are the roles the Claude and omp arms
+   declare, and the Codex arm ignores them while requiring
+   `ROUTER_CREDENTIAL_ENV` (`P-4`) to name the variable its provider block reads —
+   as does the omp arm, for the same reason. The build refuses an arm's own missing
    argument with one line naming it (R-4's refusal code, `78`), and an empty one
    the same way. `ROUTER_BASE_URL`, `ROUTER_CREDENTIAL_ENV` and `HARNESS_HOME`
    carry the defaults the parameter table lists; `HARNESS_MODEL_ALIAS`,
@@ -420,16 +431,21 @@ row reads that line.
   it parses in the CLI's own format; it names `P-3` as the endpoint and `P-5` as
   the model for every role the configuration sets; and it carries the credential
   *variable* the harness it installed actually reads — `P-4` for the `codex`
-  arm, whose provider block names it as `env_key`, and for the `claude` arm a file
-  that names no credential at all, because that CLI reads `ANTHROPIC_AUTH_TOKEN`
-  from the environment. Which name applies is recorded in the image at
-  `/usr/local/share/agent-harness/credential-env`, and the row reads it there
-  rather than assuming one harness's answer for both. The row **compares values**,
-  not substrings: the endpoint in the file against the one this arm derives from
-  `P-3` (the root for `claude`, the root plus `/v1` for `codex`), the model against
-  `P-5`, and — where the file names it — `env_key` against the recorded variable.
+  arm, whose provider block names it as `env_key`, and for the `omp` arm, whose
+  model catalogue names it as its provider's `apiKey`; and for the `claude` arm a
+  file that names no credential at all, because that CLI reads
+  `ANTHROPIC_AUTH_TOKEN` from the environment. Which name applies is recorded in
+  the image at `/usr/local/share/agent-harness/credential-env`, and the row reads
+  it there rather than assuming one harness's answer for every arm. The row
+  **compares values**, not substrings: the endpoint in the file against the one
+  this arm derives from `P-3` (the root for `claude`, the root plus `/v1` for
+  `codex` and `omp`), the model against `P-5`, and — where the file names it —
+  `env_key` against the recorded variable.
   A substring search passes a doubled `/v1` path and an alias that only looks
-  right; the comparison does not.
+  right; the comparison does not. For the `omp` arm the row adds the CLI's own
+  reading of its settings — `config get modelRoles`, whose printed value is
+  compared with the roles the layer wrote — so the arm is covered both by the
+  file's text and by the harness parsing it.
 - **H-9** (covers R-7): the same file read as text. expected: no provider endpoint
   other than `P-3` appears, and no second provider block exists. A configuration
   that could fall back to another provider fails this row.
@@ -440,17 +456,19 @@ row reads that line.
   may not.
 - **H-11** (covers R-6): the same configuration, checked against the metadata the
   router does not report. expected: the context window is declared where the CLI
-  can declare it, and the module's statement about the field the CLI lacks matches
-  the file.
+  can declare it — for the `omp` arm that is the model entry in `models.yml`, whose
+  fast-model entry is checked to be present without the metadata `P-7`/`P-8`
+  describe for `P-5` rather than given a copy of it — and the module's statement
+  about the field the CLI lacks matches the file.
 - **H-12** (covers R-9): inspect the image. expected: the image's platform is
   the base's — reported as the platform that was actually built, not as a claim
   about the set. *(The listener half of R-10 is H-15, which reads a container
   rather than this file's text.)*
 - **H-14** (covers R-2, R-3): read the image's `Config.Env`. expected:
   `AGENT_HARNESS` is the CLI's name (`P-1`) and the CLI's config-root variable
-  (`CLAUDE_CONFIG_DIR` or `CODEX_HOME`, whichever this arm reads) is `P-9`. An
-  image whose `ENV` line names the wrong harness or the wrong root passes every
-  other row and fails in the pane.
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `PI_CODING_AGENT_DIR`, whichever this arm
+  reads) is `P-9`. An image whose `ENV` line names the wrong harness or the wrong
+  root passes every other row and fails in the pane.
 - **H-15** (covers R-10): inspect a container of this image, and the process
   inside it. expected: nothing published (no port bindings, no bound ports) and no
   listening socket in the container's network namespace (read from
@@ -462,9 +480,10 @@ row reads that line.
   composition's own probe uses it to prove the build refuses an unreachable
   router.)*
 - **H-13** (covers R-2): read the shipped `Containerfile` as text. expected: the
-  install step uses no pipe-to-shell (`curl … | sh`), and every downloaded or
+  install step uses no pipe-to-shell (`curl … | sh`), every downloaded or
   installed artifact is version-resolved (R-5) rather than fetched from a floating
-  tag.
+  tag, and an artifact fetched from a release host is compared against the checksum
+  file that release publishes before it is installed.
 
 **What this package does not prove.** No row proves that the router *serves* the
 aliases this image was built with: `P-11`'s check is reachability, because a
@@ -478,7 +497,11 @@ The platform claim is per-platform: a row reports the platform it ran on, and
 nothing here asserts a platform nobody built. And on a base image that already
 carries the same CLI on PATH, H-4 answers with *that* copy's version rather than
 the layer's install; the run says so, and the case of a base that ships no harness
-is stated rather than measured.
+is stated rather than measured. On the release channel, the checksum a build
+compares against comes from the same release as the artifact, so it proves the
+download arrived intact rather than that the release itself is trustworthy — the
+trust is placed in the vendor's release host by choosing that arm, and no row here
+moves it.
 
 ## Failure Modes and Rollback
 
@@ -486,6 +509,8 @@ is stated rather than measured.
 |---|---|---|---|
 | 2 | The base reference does not resolve | The build's first line: the `FROM` cannot be pulled or found locally | Correct `P-2`; nothing was produced |
 | 2 | The registry is unreachable | The install step's own error, naming the package | Fix the network or the registry mirror policy; do not vendor the CLI (D-5) |
+| 2 | The release host is unreachable, or the release tag does not exist | The fetch's own error, naming the URL it tried | Correct `P-10`, or wait out the outage; nothing else in this layer can install that CLI (D-5) |
+| 2 | The artifact does not match the release's checksum | The install step stops before the binary is installed, naming the artifact | Re-fetch; a mismatch that survives a retry means the download path is broken, not the layer |
 | 2 | The base image carries no Node.js runtime and the repository cannot supply one | The runtime install step fails | Build the base image so it carries the runtime (D-6); do not switch CLI |
 | 2 | An unknown `AGENT_HARNESS_ID` | The build stops with one line naming the value (H-6) | Use an implemented value, or follow `modules/extension-path.md` |
 | 3 | The alias is not in the router's set | Per-request error at the client, naming the alias; every other alias keeps serving | Add the alias to the router's map (`run-an-llm-router`'s own phase), then rebuild the layer with the corrected `P-5` |
@@ -587,6 +612,48 @@ Decisions:
   published yet; a script that refused to run without a published base would
   produce no evidence at all, and one that silently substituted a different image
   would produce dishonest evidence.
+
+- 2026-09-19 — **omp is a third arm along `R-11`'s seam, not a fourth package.**
+  A parallel package duplicating the harness layer drifts from the layer it
+  copies, and this package already names the seam: `P-1` gains a value, the install
+  step gains an arm, the configuration gains its templates, the acceptance table
+  gains rows. What the addition could not inherit is recorded here rather than
+  worked around — one wording (R-5's channel) and one new file pair.
+- 2026-09-19 — **`R-5` is a channel rule, not a registry rule.** omp publishes a
+  release artifact on its own release host and also an npm entry, but the npm entry
+  is a bundle built for the Bun runtime and declares `engines: bun >=1.3.14`, so
+  installing it that way adds a second runtime to the image — precisely what this
+  layer's one-CLI rule is for. The arm therefore installs the release artifact, and
+  the requirement was widened to name the channel rather than the registry: still
+  resolved at build time, still never a floating tag, still recorded in the image,
+  and now also checked against the checksum file the release publishes. The
+  checksum is not a trust anchor — it comes from the same release — and that limit
+  is stated in the acceptance section rather than implied.
+- 2026-09-19 — **The omp arm writes two files, because the CLI reads two.** Its
+  settings file holds the model roles (`modelRoles.default`, `modelRoles.smol`),
+  and its model catalogue (`models.yml`) holds the provider — base URL, the
+  credential variable's name, the wire API — and the per-model context window and
+  maximum output tokens, which exist nowhere else. Writing them as one file would
+  put them where the CLI does not read them; writing the catalogue without the
+  metadata would silently lose `P-7`/`P-8`. `R-6` and `R-11` were widened to say
+  "template or templates" so the requirement covers the layout rather than the
+  common case.
+- 2026-09-19 — **The omp arm is wired through the chat-completions route.** The
+  CLI speaks both the OpenAI-compatible and the Anthropic Messages APIs, and one
+  parameter cannot express both protocols: the Anthropic route would take the
+  router root verbatim, the OpenAI-compatible route takes the root plus `/v1`,
+  which is the same derivation the Codex arm already uses. The OpenAI-compatible
+  route is chosen because it is the router's own conformance floor — every router
+  that serves anything serves `/v1/chat/completions` — so an omp deployment does
+  not depend on a router configured for a second client family. The provider entry
+  sets `authHeader: true`, because the router reads a bearer credential and omp's
+  default for a custom provider is not to add one.
+- 2026-09-19 — **The fast alias is declared without token metadata.**
+  `P-7`/`P-8` describe the model `P-5` resolves to, and the layer has no second
+  pair of numbers for `P-6`'s model. The catalogue entry for the fast alias is
+  written with its id and nothing else, and the acceptance row checks that it is
+  present and carries no copy of the primary's numbers: a plausible pair of numbers
+  for a different model is the thing `P-8`'s precedent forbids.
 
 Open questions:
 

@@ -33,11 +33,13 @@
 #                        (default: /run/secrets/router-secrets.env)
 #   SKIP_COMPLETIONS     set to 1 to skip every token-spending check
 #   CLIENT_ARMS          comma-separated coding-agent client families this
-#                        deployment wires, from: claude, codex
+#                        deployment wires, from: claude, codex, omp
 #                        (default: claude,codex — the reference deployment's)
 #                        A-14 asserts the conformance floor only: the two routes
 #                        every router must serve, plus the protocol route of each
-#                        family named here. Every other row of the reference
+#                        family named here. The omp family's route is the
+#                        chat-completions floor itself, so naming it adds no
+#                        requirement. Every other row of the reference
 #                        table is probed and REPORTED, never failed, because a
 #                        router that serves a narrower surface is conformant
 #   TIMEOUT              per-request timeout in seconds (default: 30)
@@ -401,6 +403,10 @@ FLOOR = [
 FAMILIES = {
     "claude": ("POST", "/v1/messages"),
     "codex": ("POST", "/v1/responses"),
+    # The omp arm's client speaks OpenAI chat completions, which the floor above
+    # already carries: naming it here adds no requirement, it lets a deployment
+    # that wires that arm declare it instead of being refused as unknown.
+    "omp": ("POST", "/v1/chat/completions"),
 }
 # The rest of the reference table (SCHEMATIC.md § Interfaces and Contracts):
 # probed, reported, never failed.

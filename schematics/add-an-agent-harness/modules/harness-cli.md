@@ -24,8 +24,8 @@ The install step dispatches on the value and refuses anything else:
 
 ```
 RUN case "${AGENT_HARNESS_ID}" in
-      claude|codex) ;;
-      *) echo "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex" >&2
+      claude|codex|omp) ;;
+      *) echo "add-an-agent-harness: AGENT_HARNESS_ID '${AGENT_HARNESS_ID}' is not one of: claude codex omp" >&2
          exit 78 ;;
     esac
 ```
@@ -48,21 +48,38 @@ it reports a typo.
 ## The version is resolved, not copied
 
 `P-10 HARNESS_PACKAGE_VERSION` is empty by default. The build then asks the
-registry what the current version is and installs exactly that:
+channel the chosen CLI publishes it through what the current version is, and
+installs exactly that. There are two channels, and an arm declares which one it
+uses:
 
-```
-npm view <package> version      # the resolved version, printed by the build
-npm install --global <package>@<resolved>
-```
-
-The resolved value is then written inside the image:
+| Channel | Arm | Version query | Install |
+|---|---|---|---|
+| Package registry | `claude`, `codex` | `npm view <package> version` | `npm install --global <package>@<resolved>` |
+| Release host | `omp` | the release host's latest-release query, which returns the tag | fetch `<release>/<artifact>` for this platform, compare it against the release's checksum file, install the binary |
 
 ```
 /usr/local/share/agent-harness/version
 ```
 
-so the acceptance table can read what was installed without starting the CLI, and
-so an image can be inspected long after its build log is gone (R-5, row H-7).
+The resolved value is then written inside the image, so the acceptance table can
+read what was installed without starting the CLI, and so an image can be inspected
+long after its build log is gone (R-5, row H-7). For a release arm the recorded
+value is the release tag as published.
+
+The release channel has two properties worth naming:
+
+- **Nothing is piped into a shell.** The artifact is fetched to a file, checked
+  against the checksum the same release publishes, and only then installed. An
+  installer *script* — the vendor's own `curl … | sh` entry point — is still
+  forbidden (`R-5`, row H-13): it resolves a version at run time and its content is
+  not the artifact the checksum covers.
+- **The release host is the vendor's, and it is a dependency.** The build needs an
+  HTTP client in the layer (`curl`, or `wget`) and a platform/architecture pair the
+  vendor publishes an artifact for; the arm refuses with one line naming what it
+  could not fetch rather than falling back to another channel (D-5's failure
+  behaviour). A musl-based base also needs the C++ runtime the vendor's own
+  installer names for its musl build, which the arm's smoke test surfaces as a
+  binary that downloads and does not start.
 
 Why this shape rather than a version in the spec:
 
@@ -100,25 +117,27 @@ preference: an `ENTRYPOINT` would replace the base's, and the base's is what rea
 with its own code. A harness layer that took the entrypoint over would have to
 reimplement all of it, and the copy would drift.
 
-`AGENT_HARNESS` is set to the CLI's own name (`claude`, `codex`) rather than an
+`AGENT_HARNESS` is set to the CLI's own name (`claude`, `codex`, `omp`) rather than an
 absolute path, so the value is portable across a base image that relocates its
 binaries. Nothing in this layer needs to know where the package manager puts them.
 
 ## The runtime
 
-Both CLIs are distributed through a Node.js package registry, so the install step
-needs `node` and `npm`. The base image may already carry them; where it does not,
-the step installs the distribution's `nodejs` and `npm` packages (D-6) before it
-resolves the CLI version.
+A CLI installed from a package registry is a JavaScript program, so that arm's
+install step needs `node` and `npm`. The base image may already carry them; where
+it does not, the step installs the distribution's `nodejs` and `npm` packages (D-6)
+before it resolves the CLI version. A CLI installed from a release artifact brings
+its own runtime inside the artifact, so its arm installs no runtime at all — it
+needs an HTTP client (`curl`, or `wget`) and nothing else (D-5).
 
-If the distribution cannot supply them, that is a decision about the **base
+If the distribution cannot supply the runtime, that is a decision about the **base
 image**, not about the harness: the fix is a base that carries the runtime (D-6's
 failure behaviour). Installing a runtime from a vendor's install script instead
 would break R-9 — a piped install script is architecture-specific, unverified and
 unpinnable.
 
-Two things bite a current npm, and both are why the install step is written the
-way it is:
+For the registry arms, two things bite a current npm, and both are why the install
+step is written the way it is:
 
 - A global install does **not** run the package's own install script on a current
   npm unless it is allowed, and for these CLIs that script is what places the
@@ -139,13 +158,44 @@ way it is:
 
 | Forbidden | Why |
 |---|---|
-| `curl … \| sh`, or any downloaded installer script | Unpinned, unverifiable, and architecture-specific; the registry path is version-resolved instead (R-5, row H-13) |
+| `curl … \| sh`, or any downloaded installer script | The script resolves a version when it runs and its content is not the artifact a checksum covers — unpinned, unverifiable, and architecture-specific. A versioned artifact fetched to a file and checked against the release's own checksum file is the release channel's path (R-5, row H-13), not this one |
 | A floating tag (`latest`, a major-version range) | The image would differ between two builds from the same source |
 | Writing a credential, a token, or a login file | The image must contain none, and a credential in a layer is a credential in every container started from it (R-8, row H-10) |
 | Declaring `ENTRYPOINT`, `CMD` or `WORKDIR` | They are the base's, and the layer's whole job is to sit under them (R-1, R-3) |
 | Adding a second CLI "so the image is flexible" | R-2. A layer with two harnesses has two configurations, two version resolutions and two upgrade paths, and the multiplexer can still only set `AGENT_HARNESS` to one value |
 | Leaving the package manager's cache in the image | Build weight with no runtime value; the install step clears it in the same layer that created it |
 | Adding a healthcheck that reports on the CLI | The base declares none and the multiplexer supervises the pane; a CLI that answers `--version` says nothing about the agent (Open question Q-2) |
+
+## What a harness reads that this layer did not write
+
+Every CLI in the enum reads more than the file this layer writes. For `omp` that is
+not a detail, because what it reads in addition is **another coding agent's
+configuration**, and it reads it by default:
+
+| Read by that CLI, with no setting to enable it | Effect on a host that also runs the Claude arm |
+|---|---|
+| `<workspace>/.claude/.mcp.json` and `<workspace>/.claude/mcp.json`, plus the user scope `~/.claude.json` and `~/.claude/mcp.json` | Each entry is started as an MCP client of that CLI. A **singleton** MCP server therefore gains a second consumer, and which of the two holds the connection is a race |
+| `skills.enableClaudeProject` and `commands.enableClaudeProject`, both defaulting to enabled | The workspace's Claude-format skills and slash commands load into a CLI that is not Claude |
+| A non-empty `CLAUDE_CONFIG_DIR`, which the Claude arm's own harness home sets | The Claude **user** scope is force-enabled, so that arm's user-level configuration is read too |
+
+Instruction files are a separate provider and are not affected: a workspace `CLAUDE.md`
+is read whether the harness id is `claude` or `omp`, so none of the above buys
+isolation of instructions — it is only the configuration and MCP surfaces that move.
+
+Measured on the CLI's own published source and documentation, which is what this
+section is: `claude-paths.ts` resolves Claude Code's user paths from
+`CLAUDE_CONFIG_DIR`, `capability/index.ts` force-enables the `claude` provider when
+that variable is non-empty, the settings schema defaults `skills.enableClaudeProject`
+to `true`, `discovery/claude.ts` loads MCP servers from `.claude.json` and
+`.claude/mcp.json`, and the CLI's `docs/context-files.md` documents
+`disabledProviders` as a whole-provider switch over one shared id namespace.
+
+The switch is the config key `disabledProviders`, which the discovery registry consults
+before it loads that provider — every foreign provider is on by default. This layer writes
+**no list**. Which providers a deployment is willing to share is a decision about
+that deployment, so the layer states the behaviour and the key, and a deployment
+that must not share its MCP servers disables the providers it does not want in its
+own configuration (R-6, R-8).
 
 ## Verifying the install by hand
 

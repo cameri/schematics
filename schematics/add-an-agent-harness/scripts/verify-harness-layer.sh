@@ -64,7 +64,9 @@
 #   HARNESS              P-1: the CLI to build and check (default: claude)
 #   ROUTER_BASE_URL      P-3 (default: http://llm-router:4000) — the router
 #                        ROOT. The script derives this arm's endpoint from it
-#                        (the root for claude, the root plus /v1 for codex).
+#                        (the root for claude, the root plus /v1 for codex and
+#                        for omp, whose OpenAI-compatible client appends
+#                        /chat/completions to a base that ends in /v1).
 #   ROUTER_CREDENTIAL_ENV P-4 (default: ROUTER_API_KEY)
 #   HARNESS_MODEL_ALIAS  P-5 (default: check-model)
 #   HARNESS_FAST_ALIAS   P-6 (default: check-fast-model)
@@ -98,10 +100,11 @@
 #   KEEP                 1 = keep the built image and the output directory
 #
 # The driver derives one more value for the body: the endpoint this arm's CLI is
-# expected to call (the router root for claude, the root plus /v1 for codex), and
-# passes it as CHECK_ENDPOINT. The body compares the configuration's own value
-# against it — a comparison, not a substring search, because a doubled /v1 path
-# passes a substring search and fails the request.
+# expected to call (the router root for claude, the root plus /v1 for codex and for
+# omp), and passes it as CHECK_ENDPOINT, together with the name of the arm's second
+# configuration file where it has one (CHECK_MODELS). The body compares the
+# configuration's own value against it — a comparison, not a substring search,
+# because a doubled /v1 path passes a substring search and fails the request.
 #
 # Exit status: 0 when every executed check passed; 1 when any failed; 2 on a
 # usage or precondition error.
@@ -241,7 +244,91 @@ body() {
             else
                 bp "H-8 no unsubstituted parameter remains"
             fi
-        else
+        elif [ "$CHECK_HARNESS" = "omp" ]; then
+            # omp: two YAML files. The settings file carries the roles, the model
+            # catalogue carries the provider and the per-model metadata.
+            MODELS="${HARNESS_HOME:-}/$CHECK_MODELS"
+            if [ ! -r "$MODELS" ]; then
+                bf "H-8 no readable model catalogue at ${MODELS:-<unset>}"
+            else
+                cp "$MODELS" "$OUT/models.copy" 2>/dev/null || true
+                if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
+                    if python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1])); yaml.safe_load(open(sys.argv[2]))' "$CONF" "$MODELS" 2>/dev/null; then
+                        bp "H-8 both configuration files parse as YAML"
+                    else
+                        bf "H-8 the configuration does not parse as YAML"
+                    fi
+                else
+                    bs "H-8 YAML parse check skipped: no python3 with the yaml module in the image"
+                fi
+                # The roles name the provider this layer writes, and the alias.
+                ROLE_DEFAULT="$(sed -n 's/^[[:space:]]*default:[[:space:]]*"\{0,1\}router\/\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$CONF" | head -1)"
+                ROLE_SMOL="$(sed -n 's/^[[:space:]]*smol:[[:space:]]*"\{0,1\}router\/\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$CONF" | head -1)"
+                URL="$(sed -n 's/^[[:space:]]*baseUrl:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$MODELS" | head -1)"
+                MODEL="$ROLE_DEFAULT"
+                ENVKEY="$(sed -n 's/^[[:space:]]*apiKey:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$MODELS" | head -1)"
+                emit config_url "$URL"
+                emit config_model "$MODEL"
+                emit config_env_key "$ENVKEY"
+                if [ "$ROLE_SMOL" = "$HARNESS_FAST_ALIAS" ]; then
+                    bp "H-8 the fast role names the second alias: $ROLE_SMOL"
+                else
+                    bf "H-8 the fast role names '${ROLE_SMOL:-<none>}' but P-6 is $HARNESS_FAST_ALIAS"
+                fi
+                # H-11: the metadata the router does not report, in the only place
+                # this CLI accepts it — the model entry. The primary alias carries
+                # the numbers, and the fast alias carries none: P-7/P-8 describe
+                # the model P-5 resolves to, and a copy of them here would be a
+                # declaration about a different model.
+                PRIMARY="$(sed -n "/^[[:space:]]*-[[:space:]]*id:[[:space:]]*\"\{0,1\}${HARNESS_MODEL_ALIAS}\"\{0,1\}[[:space:]]*\$/,/^[[:space:]]*-[[:space:]]*id:/p" "$MODELS")"
+                FAST="$(sed -n "/^[[:space:]]*-[[:space:]]*id:[[:space:]]*\"\{0,1\}${HARNESS_FAST_ALIAS}\"\{0,1\}[[:space:]]*\$/,/^[[:space:]]*-[[:space:]]*id:/p" "$MODELS")"
+                if printf '%s' "$PRIMARY" | grep -qE "^[[:space:]]*contextWindow:[[:space:]]*${HARNESS_CONTEXT_WINDOW}[[:space:]]*$"; then
+                    bp "H-11 the primary alias's model entry declares P-7: $HARNESS_CONTEXT_WINDOW"
+                else
+                    bf "H-11 the primary alias's model entry does not declare P-7 ($HARNESS_CONTEXT_WINDOW)"
+                fi
+                if [ -n "${HARNESS_MAX_OUTPUT_TOKENS:-}" ] && printf '%s' "$PRIMARY" | grep -qE "^[[:space:]]*maxTokens:[[:space:]]*${HARNESS_MAX_OUTPUT_TOKENS}[[:space:]]*$"; then
+                    bp "H-11 the primary alias's model entry declares P-8: $HARNESS_MAX_OUTPUT_TOKENS"
+                else
+                    bf "H-11 the primary alias's model entry does not declare P-8 (${HARNESS_MAX_OUTPUT_TOKENS:-<unset>})"
+                fi
+                if printf '%s' "$FAST" | grep -qE '^[[:space:]]*(contextWindow|maxTokens):'; then
+                    bf "H-11 the fast alias's model entry carries token metadata the layer was not given"
+                else
+                    bp "H-11 the fast alias's model entry declares no token metadata, as the module states"
+                fi
+                if [ "$(grep -c '^[[:space:]]*baseUrl:' "$MODELS")" -eq 1 ]; then
+                    bp "H-9 exactly one provider endpoint exists"
+                else
+                    bf "H-9 the catalogue declares $(grep -c '^[[:space:]]*baseUrl:' "$MODELS") provider endpoints"
+                fi
+                # H-9, settings side: a fallback chain is a second provider.
+                if grep -qE '^[[:space:]]*fallbackChains:' "$CONF"; then
+                    bf "H-9 the settings file declares a fallback chain, which R-7 forbids"
+                else
+                    bp "H-9 the settings file declares no fallback chain"
+                fi
+            fi
+            if grep -q '@[A-Z_]*@' "$CONF" || grep -q '@[A-Z_]*@' "$MODELS"; then
+                bf "H-8 a configuration file still carries an unsubstituted parameter"
+            else
+                bp "H-8 no unsubstituted parameter remains in either file"
+            fi
+            # The CLI's own reading of the settings file this layer wrote: this row
+            # is the harness resolving the roles, not the script parsing them. The
+            # value it prints is what the row reports, so a deployment that selects
+            # a named profile — which moves the root the CLI reads — fails here with
+            # the roles it actually resolved.
+            ROLES="$("$CHECK_CMD" config get modelRoles 2>/dev/null)"
+            if [ -z "$ROLES" ]; then
+                bs "H-8 the CLI's own config read produced nothing (${CHECK_CMD} config get modelRoles)"
+            elif printf '%s' "$ROLES" | grep -q "\"default\":\"router/${HARNESS_MODEL_ALIAS}\"" \
+              && printf '%s' "$ROLES" | grep -q "\"smol\":\"router/${HARNESS_FAST_ALIAS}\""; then
+                bp "H-8 the CLI itself resolves both roles from the file this layer wrote: $ROLES"
+            else
+                bf "H-8 the CLI resolves '${ROLES}' while the layer wrote router/${HARNESS_MODEL_ALIAS} and router/${HARNESS_FAST_ALIAS}"
+            fi
+        elif [ "$CHECK_HARNESS" = "codex" ]; then
             # Codex CLI: TOML, one provider block, a top-level window key.
             if grep -q '^model_context_window' "$CONF"; then
                 bp "H-11 the context window is a top-level key"
@@ -309,18 +396,40 @@ body() {
             bs "H-15 listener check skipped: no awk in the image"
         fi
 
-        # H-9: only the router's endpoint, and no credential value.
-        OTHER="$(grep -oE 'https?://[^"]+' "$CONF" | grep -vxF "${CHECK_ENDPOINT:-$ROUTER_BASE_URL}" || true)"
-        if [ -z "$OTHER" ]; then
-            bp "H-9 no endpoint other than the router's appears"
-        else
-            bf "H-9 the configuration names another endpoint: $OTHER"
-        fi
-        if grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]|api[_-]?key"?[[:space:]]*[:=][[:space:]]*"[^"]+)' "$CONF"; then
-            bf "H-10 the configuration carries a credential-shaped value"
-        else
-            bp "H-10 the configuration carries the credential's name, not a value"
-        fi
+        # H-9: only the router's endpoint, and no credential value. The arms that
+        # read two files are checked in both: the endpoint and the credential's
+        # name live in the arm's own file, and a rule that only reads the settings
+        # file would pass an arm whose catalogue named another provider.
+        for f in "$CONF" ${MODELS:-}; do
+            OTHER="$(grep -oE 'https?://[^"]+' "$f" | grep -vxF "${CHECK_ENDPOINT:-$ROUTER_BASE_URL}" || true)"
+            if [ -z "$OTHER" ]; then
+                bp "H-9 no endpoint other than the router's appears in $(basename "$f")"
+            else
+                bf "H-9 $(basename "$f") names another endpoint: $OTHER"
+            fi
+            # H-10: a credential field names a variable; a credential *value*
+            # may not appear in a file (R-8). The rule is shape, not spelling: a
+            # legal variable name is [A-Za-z_][A-Za-z0-9_]*, which is what keeps
+            # a camel-cased or digit-bearing name quiet — omp's own field is
+            # `apiKey`, and P-4 is free-form, so `RouterApiKey` and `ROUTER_CRED_2`
+            # are valid input a build must accept — while `sk-…`, `Bearer …`, and
+            # any value carrying a character a variable name cannot (`topsecret!`,
+            # `a/b`) are not. A literal that is itself identifier-shaped passes
+            # here and is caught by H-8, which compares the field against the
+            # variable the image records; this row cannot make that comparison,
+            # because it must also hold for the arm whose settings file names no
+            # credential at all. An empty value is not a value and is left to H-8.
+            NAMED="$(grep -oE '(api[_-]?[Kk]ey|env_key)"?[[:space:]]*[:=][[:space:]]*"[^"]*"' "$f" \
+                     | sed -n 's/.*"\([^"]*\)"$/\1/p' \
+                     | grep -vE '^([A-Za-z_][A-Za-z0-9_]*)?$' || true)"
+            if [ -n "$NAMED" ]; then
+                bf "H-10 $(basename "$f") names a value where a credential variable belongs: $NAMED"
+            elif grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9])' "$f"; then
+                bf "H-10 $(basename "$f") carries a credential-shaped value"
+            else
+                bp "H-10 $(basename "$f") carries the credential's name, not a value"
+            fi
+        done
     fi
 
     # --- no credential-shaped file where the layer could have put one (H-10)
@@ -362,6 +471,11 @@ command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || usage_error "no $CONTAINER_RU
 [ -n "$IMAGE" ] && [ -z "$BASE_IMAGE" ] && usage_error "BASE_IMAGE is required when IMAGE is supplied: the inherited-contract rows and the enum probe compare against the base image, and H-6 builds over it"
 CHECK_CONF="settings.json"
 [ "$HARNESS" = "claude" ] || CHECK_CONF="config.toml"
+[ "$HARNESS" = "omp" ] && CHECK_CONF="config.yml"
+# The omp arm's second file: the roles live in the settings file and the provider
+# and its model metadata live in the catalogue. The other arms read one file.
+CHECK_MODELS=""
+[ "$HARNESS" = "omp" ] && CHECK_MODELS="models.yml"
 CHECK_CMD="$HARNESS"
 : "${RUN_HOST_DIR:=$PACKAGE_HOST_DIR/.verify-run}"
 : "${RUN_LOCAL_DIR:=$RUN_HOST_DIR}"
@@ -408,7 +522,9 @@ CHECK_ENDPOINT="${ROUTER_BASE_URL%/}"
 case "$CHECK_ENDPOINT" in
     */v1) CHECK_ENDPOINT="${CHECK_ENDPOINT%/v1}" ;;
 esac
-[ "$HARNESS" = "codex" ] && CHECK_ENDPOINT="$CHECK_ENDPOINT/v1"
+case "$HARNESS" in
+    codex|omp) CHECK_ENDPOINT="$CHECK_ENDPOINT/v1" ;;
+esac
 export CHECK_ENDPOINT
 
 printf 'verify-harness-layer: harness=%s base=%s\n' "$HARNESS" "$BASE_IMAGE"
@@ -424,10 +540,18 @@ static_rows() {
     fi
     if grep -qE 'npm install[^;]*@latest' "$SKELETON/Containerfile"; then
         fail "H-13 the Containerfile installs a floating tag"
-    elif grep -q '\${PKG}@\${V}' "$SKELETON/Containerfile"; then
+    elif grep -q '\${PKG}@\${V}' "$SKELETON/Containerfile" || grep -q 'releases/download/\${V}' "$SKELETON/Containerfile"; then
         pass "H-13 the install is version-resolved"
     else
         fail "H-13 no version-resolved install line found"
+    fi
+    # A release arm must verify what it downloaded. The row reads the file, so it
+    # holds for any arm that installs from a release host rather than only for the
+    # one that exists today.
+    if grep -q 'releases/download/\${V}' "$SKELETON/Containerfile" && ! grep -q 'SHA256SUMS' "$SKELETON/Containerfile"; then
+        fail "H-13 a release arm installs an artifact without its release's checksum"
+    else
+        pass "H-13 a release arm compares the artifact against the release's checksum"
     fi
     if grep -qE '^[[:space:]]*(ENTRYPOINT|CMD|WORKDIR)' "$SKELETON/Containerfile"; then
         fail "H-13 the layer declares an ENTRYPOINT, CMD or WORKDIR"
@@ -611,6 +735,7 @@ else
     fi
     ROOTVAR="CLAUDE_CONFIG_DIR"
     [ "$HARNESS" = "codex" ] && ROOTVAR="CODEX_HOME"
+    [ "$HARNESS" = "omp" ] && ROOTVAR="PI_CODING_AGENT_DIR"
     if printf '%s' "$ENVJSON" | grep -q "\"$ROOTVAR=$HARNESS_HOME\""; then
         pass "H-14 the image's $ROOTVAR is P-9: $HARNESS_HOME"
     else
@@ -629,9 +754,11 @@ run_container() {
         -v "$PACKAGE_HOST_DIR:/verify-pkg:ro" \
         -v "$RUN_HOST/out:/verify-out" \
         -e "CHECK_HARNESS=$HARNESS" -e "HARNESS_HOME=$HARNESS_HOME" \
-        -e "CHECK_CONF=$CHECK_CONF" -e "CHECK_CMD=$CHECK_CMD" \
+        -e "CHECK_CONF=$CHECK_CONF" -e "CHECK_MODELS=$CHECK_MODELS" -e "CHECK_CMD=$CHECK_CMD" \
         -e "ROUTER_BASE_URL=$ROUTER_BASE_URL" -e "HARNESS_MODEL_ALIAS=$HARNESS_MODEL_ALIAS" \
         -e "HARNESS_CONTEXT_WINDOW=$HARNESS_CONTEXT_WINDOW" \
+        -e "HARNESS_FAST_ALIAS=$HARNESS_FAST_ALIAS" \
+        -e "HARNESS_MAX_OUTPUT_TOKENS=$HARNESS_MAX_OUTPUT_TOKENS" \
         -e "AGENT_HARNESS=$h" \
         -e "CHECK_ENDPOINT=${CHECK_ENDPOINT:-}" \
         -e "BODY_EXIT=${RUN_BODY_EXIT:-}" \
@@ -734,7 +861,7 @@ if run_container hl-body "/verify-pkg/scripts/verify-harness-layer.sh" --inside 
             *) skip "H-5 could not read PID 1's command line inside the container (pid1='${PID1:-}')" ;;
         esac
         RV="$(sed -n 's/^recorded_version=//p' "$E")"
-        BUILDV="$(grep -E '^add-an-agent-harness: installing .*@[0-9]' "$BUILD_LOG" | tail -1 | sed 's/.*@//;s/ as.*//')"
+        BUILDV="$(grep -E '^add-an-agent-harness: installing .*@v?[0-9]' "$BUILD_LOG" | tail -1 | sed 's/.*@//;s/ as.*//')"
         if [ -n "$RV" ]; then
             if [ -n "$BUILDV" ]; then
                 [ "$RV" = "$BUILDV" ] \
