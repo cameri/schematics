@@ -182,8 +182,16 @@ Instruction files are a separate provider and are not affected: a workspace `CLA
 is read whether the harness id is `claude` or `omp`, so none of the above buys
 isolation of instructions — it is only the configuration and MCP surfaces that move.
 
-The switch is the config key `disabledProviders`, which that CLI consults **before**
-it loads anything else; every foreign provider is on by default. This layer writes
+Measured on the CLI's own published source and documentation, which is what this
+section is: `claude-paths.ts` resolves Claude Code's user paths from
+`CLAUDE_CONFIG_DIR`, `capability/index.ts` force-enables the `claude` provider when
+that variable is non-empty, the settings schema defaults `skills.enableClaudeProject`
+to `true`, `discovery/claude.ts` loads MCP servers from `.claude.json` and
+`.claude/mcp.json`, and the CLI's `docs/context-files.md` documents
+`disabledProviders` as a whole-provider switch over one shared id namespace.
+
+The switch is the config key `disabledProviders`, which the discovery registry consults
+before it loads that provider — every foreign provider is on by default. This layer writes
 **no list**. Which providers a deployment is willing to share is a decision about
 that deployment, so the layer states the behaviour and the key, and a deployment
 that must not share its MCP servers disables the providers it does not want in its
