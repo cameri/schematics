@@ -5,7 +5,7 @@ status: draft
 spec: 1
 description: "The composition package for the sandboxed-agent set: the deployment order with the reason for every edge, the isolation rules between the parts, the shared contracts, and one end-to-end acceptance test that proves the chain — the base image, the agent host, the harness layer and their neighbours — rather than the parts."
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # Schematic: Assemble a Sandboxed Agent Set

@@ -5,7 +5,7 @@ status: draft
 spec: 1
 description: "An agent harness layer — the agent-host image plus exactly one coding-agent CLI and its configuration, wired to a local LLM router by model alias: the CLI becomes the container's process through the inherited entrypoint, its model ids come from the router's alias set with the context window and output limit the router does not report declared beside them, its version is resolved at build time and recorded in the image, and no credential exists anywhere in the image."
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # Schematic: Add an Agent Harness Layer
