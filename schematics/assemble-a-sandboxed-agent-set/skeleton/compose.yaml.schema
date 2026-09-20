@@ -103,8 +103,7 @@
 # credential variable name, and that name is a property of the image rather than
 # of this file: `/usr/local/share/agent-harness/credential-env` inside the layer
 # records `ANTHROPIC_AUTH_TOKEN` for `HARNESS_ID=claude` and the layer's
-# `ROUTER_CREDENTIAL_ENV` (default `ROUTER_API_KEY`) for `HARNESS_ID=codex` and
-# `HARNESS_ID=omp`. One
+# `ROUTER_CREDENTIAL_ENV` (default `ROUTER_API_KEY`) for `HARNESS_ID=codex`. One
 # name — the built arm's. A store carrying both names a variable no CLI reads.
 #
 # ## The host-fragment contract (`P-15` → `DOCKER_HOST`)

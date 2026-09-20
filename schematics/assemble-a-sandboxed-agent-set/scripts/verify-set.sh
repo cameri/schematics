@@ -25,19 +25,17 @@
 #   AGENT_HOST_IMAGE      the host image reference                 (no default)
 #   HARNESS_IMAGE         the harness layer image reference        (no default)
 #   HARNESS_ID            the single CLI the layer installs        (no default)
-#   HARNESS_CONFIG_PATH   the CLI's configuration file(s) inside the container,
-#                         absolute paths, space-separated: the omp arm's endpoint
-#                         and its roles live in two files and every named file is
-#                         read, the other arms name one           (no default)
+#   HARNESS_CONFIG_PATH   the CLI's configuration file inside the
+#                         container, absolute path                 (no default)
 #   ROUTER_BASE_URL       the router ROOT, no /v1: the harness layer
 #                         derives each arm's path from it (the root for
-#                         claude, root plus /v1 for codex and omp), so the
+#                         claude, root plus /v1 for codex), so the
 #                         models endpoint is read at <root>/v1/models
 #                                                                  (no default)
 #   ROUTER_CREDENTIAL_ENV name of the variable carrying the router
 #                         credential; the name actually checked is derived from
 #                         HARNESS_ID (ANTHROPIC_AUTH_TOKEN for claude, this
-#                         name for codex and omp)   (default: ROUTER_API_KEY)
+#                         name for codex)               (default: ROUTER_API_KEY)
 #   ROUTER_ALIAS          the model alias the harness sends        (no default)
 #   ROUTER_ALIAS_SET      space-separated ids the router serves    (no default)
 #   DOCKER_PROXY_URL      the Docker-access endpoint consumers use, as a
@@ -169,7 +167,6 @@ is_socket_mount() {  # is_socket_mount SOURCE DESTINATION
 cfg_value() {  # cfg_value CONFIG KEY
     case "$HARNESS_ID" in
         claude) printf '%s' "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1 ;;
-        omp)    printf '%s' "$1" | sed -n "s/^[[:space:]]*$2:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1 ;;
         *)      printf '%s' "$1" | sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1 ;;
     esac
 }
@@ -200,8 +197,7 @@ AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-}"
 # /usr/local/share/agent-harness/credential-env: ANTHROPIC_AUTH_TOKEN for the
 # Claude arm, whose settings.json carries no credential because the process
 # environment does, and ROUTER_CREDENTIAL_ENV for the Codex arm, whose
-# config.toml names it as env_key — and for the omp arm, whose provider block
-# names it the same way. One name is derived here and used by every
+# config.toml names it as env_key. One name is derived here and used by every
 # row that reads it — A-10, A-11 and A-15 — so a deployment cannot pass by
 # populating a variable no CLI reads.
 case "$HARNESS_ID" in
@@ -440,9 +436,7 @@ else
         skip "A-4 no harness layer build context (set LAYER_BUILD_CONTEXT to the directory holding its Containerfile)"
     else
         arm_args="--build-arg HARNESS_MODEL_ALIAS=$ROUTER_ALIAS --build-arg HARNESS_CONTEXT_WINDOW=${HARNESS_CONTEXT_WINDOW:-200000}"
-        case "$HARNESS_ID" in
-            claude|omp) arm_args="$arm_args --build-arg HARNESS_FAST_ALIAS=${ROUTER_FAST_ALIAS:-$ROUTER_ALIAS} --build-arg HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS:-32000}" ;;
-        esac
+        [ "$HARNESS_ID" = "claude" ] && arm_args="$arm_args --build-arg HARNESS_FAST_ALIAS=${ROUTER_FAST_ALIAS:-$ROUTER_ALIAS} --build-arg HARNESS_MAX_OUTPUT_TOKENS=${HARNESS_MAX_OUTPUT_TOKENS:-32000}"
         [ -n "${HARNESS_HOME:-}" ] && arm_args="$arm_args --build-arg HARNESS_HOME=$HARNESS_HOME"
         # shellcheck disable=SC2086
         out="$(docker build -f "$LAYER_CTX/Containerfile" -t "$PROBE_TAG" \
@@ -849,17 +843,9 @@ else
                 note "A-10 the pane's process carries no ROUTER_BASE_URL; this composition's endpoint lives in the CLI's own configuration instead, read below"
             fi
         fi
-        # P-7 may name more than one file: the omp arm's layout splits the roles
-        # from the endpoint and the model metadata. Every named path is read, into
-        # one blob, which is what the per-arm key readers below scan.
-        cfg=""
-        for _p in $HARNESS_CONFIG_PATH; do
-            _c="$(docker exec "$HOST_CONTAINER" cat "$_p" 2>/dev/null)"
-            [ -n "$_c" ] && cfg="$cfg
-$_c"
-        done
+        cfg="$(docker exec "$HOST_CONTAINER" cat "$HARNESS_CONFIG_PATH" 2>/dev/null)"
         if [ -z "$cfg" ]; then
-            skip "A-10 configuration check: none of $HARNESS_CONFIG_PATH is readable"
+            skip "A-10 configuration check: $HARNESS_CONFIG_PATH is unreadable or absent"
         else
             forbidden="$(printf '%s' "$cfg" | grep -oE '(sk-[A-Za-z0-9_-]{8,}|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY)' | head -1)"
             if [ -n "$forbidden" ]; then
@@ -870,33 +856,23 @@ $_c"
             # P-8 against the arm's own keys, and P-10/P-11/P-12 for every model
             # it names. The keys differ per arm because the layer writes the
             # arm's own file: Claude Code's settings.json under `env`, Codex's
-            # config.toml as TOML keys, the omp arm's YAML across the two files
-            # P-7 names.
-            # model_prefix is the spelling the arm's roles take inside its file:
-            # the omp arm's role values read `router/<alias>`, so the compares
-            # below carry the prefix and the alias-set check strips it.
-            model_prefix=""
+            # config.toml as TOML keys.
             case "$HARNESS_ID" in
                 claude) ep_key="ANTHROPIC_BASE_URL"; model_key="ANTHROPIC_MODEL"; fast_key="ANTHROPIC_DEFAULT_HAIKU_MODEL"; cred_key=""; want_endpoint="$ROUTER_ROOT" ;;
-                omp)    ep_key="baseUrl"; model_key="default"; fast_key="smol"; cred_key="apiKey"; want_endpoint="$ROUTER_ROOT/v1"; model_prefix="router/" ;;
                 *)      ep_key="base_url"; model_key="model"; fast_key=""; cred_key="env_key"; want_endpoint="$ROUTER_ROOT/v1" ;;
             esac
             got_endpoint="$(cfg_value "$cfg" "$ep_key")"
             [ "$got_endpoint" = "$want_endpoint" ] \
                 && pass "A-10 the harness configuration's $ep_key is $want_endpoint, the endpoint P-8 fixes for this arm" \
                 || fail "A-10 the harness configuration's $ep_key is '${got_endpoint:-absent}', not the endpoint P-8 fixes for this arm ($want_endpoint): the pane is wired elsewhere"
-            want_model="${model_prefix}$ROUTER_ALIAS"
             got_model="$(cfg_value "$cfg" "$model_key")"
-            [ "$got_model" = "$want_model" ] \
-                && pass "A-10 the harness configuration's $model_key is $want_model, P-10's alias" \
-                || fail "A-10 the harness configuration's $model_key is '${got_model:-absent}', not P-10's alias $want_model"
+            [ "$got_model" = "$ROUTER_ALIAS" ] \
+                && pass "A-10 the harness configuration's $model_key is $ROUTER_ALIAS, P-10's alias" \
+                || fail "A-10 the harness configuration's $model_key is '${got_model:-absent}', not P-10's alias $ROUTER_ALIAS"
             alias_bad=""
             for key in "$model_key" $fast_key; do
                 val="$(cfg_value "$cfg" "$key")"
                 [ -n "$val" ] || continue
-                # The alias-set check sees the alias itself, not the file's
-                # spelling of it: the omp arm writes `router/<alias>`.
-                case "$val" in "$model_prefix"*) val="${val#"$model_prefix"}" ;; esac
                 case " $ALIAS_SET_LIST " in
                     *" $val "*) ;;
                     *) alias_bad="$alias_bad $key=$val" ;;
@@ -907,8 +883,8 @@ $_c"
                 || fail "A-10 the harness configuration names model(s) outside ROUTER_ALIAS_SET:$alias_bad"
             if [ -n "$fast_key" ] && [ -n "${ROUTER_FAST_ALIAS:-}" ]; then
                 got_fast="$(cfg_value "$cfg" "$fast_key")"
-                [ "$got_fast" = "${model_prefix}$ROUTER_FAST_ALIAS" ] \
-                    && pass "A-10 the harness configuration's $fast_key is ${model_prefix}$ROUTER_FAST_ALIAS, P-12's alias" \
+                [ "$got_fast" = "$ROUTER_FAST_ALIAS" ] \
+                    && pass "A-10 the harness configuration's $fast_key is $ROUTER_FAST_ALIAS, P-12's alias" \
                     || fail "A-10 the harness configuration's $fast_key is '${got_fast:-absent}', not P-12's alias $ROUTER_FAST_ALIAS"
             fi
             if [ -n "$cred_key" ]; then

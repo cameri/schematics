@@ -45,12 +45,12 @@
 # | `HARNESS_IMAGE` | `P-6` | *(none — required)* | the harness layer reference to build or find |
 # | `HARNESS_ID` | `P-7` | *(none — required for step 8)* | the single CLI the layer installs |
 # | `ROUTER_BASE_URL` | `P-8` | `http://llm-router:4000` | the router **root**, e.g. `http://<router-service>:<port>` — with no `/v1`, because the harness layer derives each arm's protocol path from it; the model list is read here at `<root>/v1/models` |
-# | `ROUTER_CREDENTIAL_ENV` | `P-9` | *derived from `HARNESS_ID`*: `ANTHROPIC_AUTH_TOKEN` for `claude`, `ROUTER_API_KEY` for `codex` and for `omp` | the variable name the CLI the layer installed reads its router credential from — the layer's record at `/usr/local/share/agent-harness/credential-env` inside the image is the authority. The `claude` arm reads a fixed name and ignores this input; the `codex` and `omp` arms' provider blocks name it, so for those arms this input is the name. One derived name is passed to the build and is the name the host's encrypted store must carry the credential under |
+# | `ROUTER_CREDENTIAL_ENV` | `P-9` | *derived from `HARNESS_ID`*: `ANTHROPIC_AUTH_TOKEN` for `claude`, `ROUTER_API_KEY` for `codex` | the variable name the CLI the layer installed reads its router credential from — the layer's record at `/usr/local/share/agent-harness/credential-env` inside the image is the authority. The `claude` arm reads a fixed name and ignores this input; one derived name is passed to the build and is the name the host's encrypted store must carry the credential under |
 # | `ROUTER_ALIAS` | `P-10` | *(none — required)* | a model **id** the router serves |
 # | `ROUTER_ALIAS_SET` | `P-11` | *(none — required)* | the served ids, space-separated |
-# | `ROUTER_FAST_ALIAS` | `P-12` | *(empty — the `claude` and `omp` arms require it)* | the secondary role's alias, where that arm has one |
+# | `ROUTER_FAST_ALIAS` | `P-12` | *(empty — the `claude` arm requires it)* | the secondary role's alias, where that arm has one |
 # | `HARNESS_CONTEXT_WINDOW` | `P-13` | *(none — required for step 8)* | tokens for the chosen alias |
-# | `HARNESS_MAX_OUTPUT_TOKENS` | `P-14` | *(empty — the `claude` and `omp` arms require it)* | tokens for the chosen alias; an arm whose configuration carries no max-output field is not asked for it |
+# | `HARNESS_MAX_OUTPUT_TOKENS` | `P-14` | *(empty — the `claude` arm requires it)* | tokens for the chosen alias; the arm whose configuration carries no max-output field is not asked for it |
 # | `SECRETS_KEY_DIR` | `P-17` | `$HOME/sops/age` | host directory holding each service's dedicated key |
 # | `SECRETS_STORE_DIR` | `P-18` | *(none — required)* | host directory holding each service's `.env.encrypted` |
 # | `ROUTER_SECRETS_SERVICE` | `P-19` | `llm-router` | the store service for the router's provider keys; it must differ from `P-20`, because one name would make both containers decrypt one file with one key |
