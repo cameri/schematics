@@ -33,17 +33,18 @@
 #                                  which is ANTHROPIC_AUTH_TOKEN for the claude
 #                                  arm (that CLI reads a fixed name) and this
 #                                  variable (default ROUTER_API_KEY) for the codex
-#                                  arm, whose provider block names it as env_key.
-#                                  The same derived name is the one the host's
-#                                  encrypted store must carry the credential
+#                                  and omp arms, whose provider blocks name the
+#                                  variable. The same derived name is the one the
+#                                  host's encrypted store must carry the credential
 #                                  under.
 #   ROUTER_ALIAS             P-10  the model alias the harness sends
 #   ROUTER_ALIAS_SET         P-11  ids the router serves (space-separated)
-#   ROUTER_FAST_ALIAS        P-12  the harness's secondary role (the arm that has
-#                                  one requires it; the other ignores it)
+#   ROUTER_FAST_ALIAS        P-12  the harness's secondary role (the claude and omp
+#                                  arms require it; the codex arm has none)
 #   HARNESS_CONTEXT_WINDOW   P-13  tokens, written into the harness config
 #   HARNESS_MAX_OUTPUT_TOKENS P-14 tokens, written into the harness config (the
-#                                  field only the claude arm's configuration has)
+#                                  claude and omp arms' configuration carries such
+#                                  a field; the codex arm's does not)
 #   SECRETS_KEY_DIR          P-17  host directory holding the age keys
 #                                  (default $HOME/sops/age)
 #   SECRETS_STORE_DIR        P-18  host directory holding each service's store
@@ -341,9 +342,10 @@ else
         # are required of the build rather than invented here: an argument filled
         # in with a plausible number would write metadata unrelated to the alias
         # the set names, and nothing downstream would notice. P-14 and P-12 are
-        # the claude arm's own fields — the layer requires both for that arm, and
-        # the codex arm's configuration carries neither — so for an arm that does
-        # not require them the value is forwarded only when it was supplied.
+        # the claude and omp arms' own fields — the layer requires both for those
+        # arms, and the codex arm's configuration carries neither — so for an arm
+        # that does not require them the value is forwarded only when it was
+        # supplied.
         need HARNESS_CONTEXT_WINDOW "${HARNESS_CONTEXT_WINDOW:-}"
         max_arg=""
         [ -n "${HARNESS_MAX_OUTPUT_TOKENS:-}" ] && max_arg="--build-arg HARNESS_MAX_OUTPUT_TOKENS=$HARNESS_MAX_OUTPUT_TOKENS"
@@ -356,13 +358,19 @@ else
         # encrypted store has to carry the credential under.
         case "$HARNESS_ID" in
             claude)
-                # This arm reads ANTHROPIC_AUTH_TOKEN whatever P-9 says, and its
-                # configuration carries a second role and a max-output field.
-                CREDENTIAL_ENV=ANTHROPIC_AUTH_TOKEN
-                need ROUTER_FAST_ALIAS "${ROUTER_FAST_ALIAS:-}"
-                need HARNESS_MAX_OUTPUT_TOKENS "${HARNESS_MAX_OUTPUT_TOKENS:-}" ;;
+                # This arm reads ANTHROPIC_AUTH_TOKEN whatever P-9 says.
+                CREDENTIAL_ENV=ANTHROPIC_AUTH_TOKEN ;;
             *)
                 CREDENTIAL_ENV="$ROUTER_CREDENTIAL_ENV" ;;
+        esac
+        case "$HARNESS_ID" in
+            claude|omp)
+                # Both arms' configuration carries a second role and a max-output
+                # field — Claude Code's settings.json a key of its own, the omp
+                # arm its catalogue entry for the primary alias — so both are
+                # required here rather than defaulted.
+                need ROUTER_FAST_ALIAS "${ROUTER_FAST_ALIAS:-}"
+                need HARNESS_MAX_OUTPUT_TOKENS "${HARNESS_MAX_OUTPUT_TOKENS:-}" ;;
         esac
         # HARNESS_HOME is passed only when set: the layer has the same default for
         # it (the base account's home plus the CLI's name), and an explicit EMPTY
