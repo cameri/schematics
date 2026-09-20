@@ -412,8 +412,14 @@ body() {
             # `api[_-]?key` never matched, so a literal written into its models
             # file passed this row. The value class below is what separates the
             # two: `apiKey: "ROUTER_API_KEY"` is name-shaped and stays quiet,
-            # `apiKey: "topsecret"` is not and does not. An all-uppercase
-            # literal is indistinguishable from a name and is not caught.
+            # `apiKey: "topsecret"` is not and does not. Both edges are open by
+            # construction, and they are not equally bad: an ALL-UPPERCASE
+            # literal (`"MYPRODKEY"`) is indistinguishable from a name and
+            # passes — that is the direction this row exists to catch, missed —
+            # while a lower-case NAME (`"router_key"`) carries no character
+            # outside [A-Z_] and is flagged. The second fails a file this layer
+            # never writes, since the template emits a parameter-derived
+            # variable name, so it is left as the conservative direction.
             if grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]|api[_-]?[Kk]ey"?[[:space:]]*[:=][[:space:]]*"[^"]*[^A-Z_"][^"]*")' "$f"; then
                 bf "H-10 $(basename "$f") carries a credential-shaped value"
             else
