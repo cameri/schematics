@@ -407,20 +407,24 @@ body() {
             else
                 bf "H-9 $(basename "$f") names another endpoint: $OTHER"
             fi
-            # A credential field must NAME a variable, not carry a value — and
-            # omp's own spelling is camel-cased, which a case-sensitive
-            # `api[_-]?key` never matched, so a literal written into its models
-            # file passed this row. The value class below is what separates the
-            # two: `apiKey: "ROUTER_API_KEY"` is name-shaped and stays quiet,
-            # `apiKey: "topsecret"` is not and does not. Both edges are open by
-            # construction, and they are not equally bad: an ALL-UPPERCASE
-            # literal (`"MYPRODKEY"`) is indistinguishable from a name and
-            # passes — that is the direction this row exists to catch, missed —
-            # while a lower-case NAME (`"router_key"`) carries no character
-            # outside [A-Z_] and is flagged. The second fails a file this layer
-            # never writes, since the template emits a parameter-derived
-            # variable name, so it is left as the conservative direction.
-            if grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]|api[_-]?[Kk]ey"?[[:space:]]*[:=][[:space:]]*"[^"]*[^A-Z_"][^"]*")' "$f"; then
+            # H-10: a credential field names a variable; a credential *value*
+            # may not appear in a file (R-8). The rule is shape, not spelling: a
+            # legal variable name is [A-Za-z_][A-Za-z0-9_]*, which is what keeps
+            # a camel-cased or digit-bearing name quiet — omp's own field is
+            # `apiKey`, and P-4 is free-form, so `RouterApiKey` and `ROUTER_CRED_2`
+            # are valid input a build must accept — while `sk-…`, `Bearer …`, and
+            # any value carrying a character a variable name cannot (`topsecret!`,
+            # `a/b`) are not. A literal that is itself identifier-shaped passes
+            # here and is caught by H-8, which compares the field against the
+            # variable the image records; this row cannot make that comparison,
+            # because it must also hold for the arm whose settings file names no
+            # credential at all. An empty value is not a value and is left to H-8.
+            NAMED="$(grep -oE '(api[_-]?[Kk]ey|env_key)"?[[:space:]]*[:=][[:space:]]*"[^"]*"' "$f" \
+                     | sed -n 's/.*"\([^"]*\)"$/\1/p' \
+                     | grep -vE '^([A-Za-z_][A-Za-z0-9_]*)?$' || true)"
+            if [ -n "$NAMED" ]; then
+                bf "H-10 $(basename "$f") names a value where a credential variable belongs: $NAMED"
+            elif grep -qE '(sk-[A-Za-z0-9]|Bearer [A-Za-z0-9])' "$f"; then
                 bf "H-10 $(basename "$f") carries a credential-shaped value"
             else
                 bp "H-10 $(basename "$f") carries the credential's name, not a value"
