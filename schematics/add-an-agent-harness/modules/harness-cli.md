@@ -166,6 +166,29 @@ step is written the way it is:
 | Leaving the package manager's cache in the image | Build weight with no runtime value; the install step clears it in the same layer that created it |
 | Adding a healthcheck that reports on the CLI | The base declares none and the multiplexer supervises the pane; a CLI that answers `--version` says nothing about the agent (Open question Q-2) |
 
+## What a harness reads that this layer did not write
+
+Every CLI in the enum reads more than the file this layer writes. For `omp` that is
+not a detail, because what it reads in addition is **another coding agent's
+configuration**, and it reads it by default:
+
+| Read by that CLI, with no setting to enable it | Effect on a host that also runs the Claude arm |
+|---|---|
+| `<workspace>/.claude/.mcp.json` and `<workspace>/.claude/mcp.json`, plus the user scope `~/.claude.json` and `~/.claude/mcp.json` | Each entry is started as an MCP client of that CLI. A **singleton** MCP server therefore gains a second consumer, and which of the two holds the connection is a race |
+| `skills.enableClaudeProject` and `commands.enableClaudeProject`, both defaulting to enabled | The workspace's Claude-format skills and slash commands load into a CLI that is not Claude |
+| A non-empty `CLAUDE_CONFIG_DIR`, which the Claude arm's own harness home sets | The Claude **user** scope is force-enabled, so that arm's user-level configuration is read too |
+
+Instruction files are a separate provider and are not affected: a workspace `CLAUDE.md`
+is read whether the harness id is `claude` or `omp`, so none of the above buys
+isolation of instructions — it is only the configuration and MCP surfaces that move.
+
+The switch is the config key `disabledProviders`, which that CLI consults **before**
+it loads anything else; every foreign provider is on by default. This layer writes
+**no list**. Which providers a deployment is willing to share is a decision about
+that deployment, so the layer states the behaviour and the key, and a deployment
+that must not share its MCP servers disables the providers it does not want in its
+own configuration (R-6, R-8).
+
 ## Verifying the install by hand
 
 Inside a container started from the built image:
