@@ -45,7 +45,7 @@ ARG HERDR_SHA256_ARM64=9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029
 ARG IMAGE_VERSION=0.0.0
 ARG GIT_COMMIT=unknown
 ARG IMAGE_SOURCE=https://example.invalid/agent-host
-ARG TARGETARCH
+ARG TARGETARCH=
 
 # Installing needs root; running never does (R-1 of the base). The section ends
 # by switching back to the inherited account, so the image's runtime identity is
