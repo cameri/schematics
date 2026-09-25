@@ -1,11 +1,11 @@
 ---
 name: encrypt-shared-host-secrets
-version: 0.1.0
+version: 0.1.1
 status: draft
 spec: 1
 description: Encrypt one shared host secret store with SOPS + age and serve it to many unlike consumers — classify which can decrypt, wrap those that can, bound the plaintext for the one that cannot (the compose parser resolves interpolation before any container exists), ship per-consumer projections so a key unlocks only what its consumer reads, and rotate across every consumer without a rebuild.
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-25
 ---
 
 # Schematic: One Shared Secret Store, Served to Many Consumers
@@ -465,7 +465,11 @@ Steps:
    (the stack directory, plus any repository or tooling directory that names
    it), adding `--exclude <dir>` for every directory the host's tooling keeps
    session transcripts or logs in — they discuss the variable, they do not
-   consume it, and one of them will hold the value. Skip if the inventory
+   consume it, and one of them will hold the value. Feed the value as well, on
+   stdin (`--value-stdin`, one value per line) or exported as `<VAR>` in the
+   invocation's environment: with it, an occurrence that carries no name in
+   front of it — an auth header, a JSON body — is redacted like `NAME=value`
+   is; without it, only the name-keyed shapes are. Skip if the inventory
    already carries a row for that variable and its reference count.
 2. Assign each reference a class from `modules/consumer-taxonomy.md`
    (wrappable, path-reading, parse-time, or non-consumer) and the remedy
