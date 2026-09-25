@@ -58,7 +58,7 @@
 # transcripts or logs in its own directories adds them with `--exclude`, which
 # repeats: those directories hold conversations about the variable, not
 # consumers of it, and one of them will contain the value itself. `--all`
-# searches everything except this script's own scratch directory.
+# searches everything except the one scratch directory this run created.
 #
 # Exit status: 0 when at least one reference was found, 1 when none was, 2 on a
 # usage error. The summary goes to stderr; only rows go to stdout.
@@ -104,16 +104,19 @@ if [ "$#" -eq 0 ]; then
     set -- .
 fi
 
-# Scratch lives in a private directory of its own, and the scan skips that
-# directory by name: the sed program it holds carries the variable's own name,
-# so a scratch file the search could reach would come back as a row about
-# itself. The fixed prefix is what makes the skip possible, and it also covers a
-# stale directory left by an interrupted run. `mktemp -d` creates it 0700, and
-# the umask below keeps the files inside it 0600, which matters — the redaction
-# program holds every value the caller supplied.
+# Scratch lives in a private directory of its own, and the scan skips that one
+# directory by its exact name: the sed program it holds carries the variable's
+# own name, so a scratch file the search could reach would come back as a row
+# about itself. Matching the name `mktemp -d` returned — not the prefix the
+# template shares with it — is what keeps the skip from hiding a real directory
+# that happens to be called `find-consumers.<something>`: an inventory that
+# silently drops a consumer is worse than one that reports the tool's own file.
+# `mktemp -d` creates the directory 0700, and the umask below keeps the files
+# inside it 0600, which matters — the redaction program holds every value the
+# caller supplied.
 umask 077
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/find-consumers.XXXXXXXX")"
-TMPSKIP='find-consumers.*'
+TMPSKIP="$(basename "$TMPD")"
 ROWS="$TMPD/rows"
 SEDSCRIPT="$TMPD/sed"
 trap 'rm -f "$ROWS" "$SEDSCRIPT"; rmdir "$TMPD" 2>/dev/null || true' EXIT INT TERM HUP PIPE QUIT
@@ -190,14 +193,9 @@ for ROOT in "$@"; do
     fi
     # `--`-terminated file list piped to grep: no recursion, no argv limits, and
     # /dev/null keeps grep from ever reading stdin when the list is empty.
-    # `set -f` for the scan alone: PRUNE carries a name pattern and `$EXCLUDES`
-    # carries names the operator typed, and neither should be expanded by this
-    # shell on the way to find, which does its own matching.
-    set -f
     # shellcheck disable=SC2086  # PRUNE is a deliberate fragment of the find expression
     find "$ROOT" $PRUNE -type f -size "-${MAXSIZE}c" -print0 2>/dev/null \
         | xargs -0 grep -nIH -F -- "$VAR" /dev/null 2>/dev/null >> "$ROWS" || true
-    set +f
 done
 
 redact() {
