@@ -86,11 +86,10 @@ say_database() {
     printf '\n== A-2 database image and vector extension (R-2)\n'
     ext=$(compose exec -T database psql -U "$DB_USERNAME" -d "$DB_DATABASE_NAME" -tAc \
         "SELECT name FROM pg_available_extensions WHERE name IN ('vectorchord','vector') ORDER BY name" 2>/dev/null | tr -d '\r' | tr '\n' ' ')
-    if [ -n "${ext// /}" ]; then
-        pass "vector extension available: $ext"
-    else
-        fail "no vector extension visible - the database image is probably not the Immich-maintained one"
-    fi
+    case "$ext" in
+        *[![:space:]]*) pass "vector extension available: $ext" ;;
+        *) fail "no vector extension visible - the database image is probably not the Immich-maintained one" ;;
+    esac
     img=$(docker inspect --format '{{index .Config.Image}}' immich_postgres 2>/dev/null || true)
     case "$img" in
         */immich-app/postgres*) pass "database runs the Immich-maintained image" ;;
@@ -173,12 +172,14 @@ say_backup() {
 say_setup_closed() {
     printf '\n== A-7 first administrator (R-10)\n'
     if have curl; then
-        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${IMMICH_URL%/}/auth/admin-sign-up" 2>/dev/null || echo 000)
-        case "$code" in
-            000) note "sign-up endpoint unreachable from here" ;;
-            2*) note "sign-up endpoint answered $code - open only while no administrator exists" ;;
-            *) pass "sign-up endpoint refused with $code" ;;
-        esac
+        if code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${IMMICH_URL%/}/auth/admin-sign-up" 2>/dev/null); then
+            case "$code" in
+                2*) note "sign-up endpoint answered $code - open only while no administrator exists" ;;
+                *) pass "sign-up endpoint refused with $code" ;;
+            esac
+        else
+            note "sign-up endpoint unreachable from here (${IMMICH_URL%/})"
+        fi
     else
         note "curl not available; check IMMICH_ALLOW_SETUP in .env and the administration settings"
     fi
