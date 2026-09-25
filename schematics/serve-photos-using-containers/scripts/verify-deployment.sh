@@ -16,11 +16,26 @@
 #   UPLOAD_LOCATION   host path mounted at /data
 #   DB_DATA_LOCATION  host path holding the cluster
 #   BACKUP_TARGET     where the operator's backup is written
-#   ML_CPU_LIMIT      recorded accepted ceiling, reported only
+#   ML_CPU_LIMIT      CPU ceiling the operator recorded (0 or empty = none)
+#
+# Values are taken from the environment first; any that remain unset are read
+# from $COMPOSE_DIR/.env, so the checks see the deployment's own settings.
 
 set -u
 
 COMPOSE_DIR=${1:-${COMPOSE_DIR:-.}}
+
+if [ -f "$COMPOSE_DIR/.env" ]; then
+    for k in HTTP_PORT EXPOSURE DB_USERNAME DB_DATABASE_NAME UPLOAD_LOCATION \
+             DB_DATA_LOCATION BACKUP_TARGET ML_CPU_LIMIT; do
+        eval "cur=\${$k:-}"
+        if [ -z "$cur" ]; then
+            v=$(sed -n "s/^${k}=//p" "$COMPOSE_DIR/.env" 2>/dev/null | head -1)
+            if [ -n "$v" ]; then eval "$k=\$v"; fi
+        fi
+    done
+fi
+
 HTTP_PORT=${HTTP_PORT:-2283}
 EXPOSURE=${EXPOSURE:-private}
 DB_USERNAME=${DB_USERNAME:-postgres}
@@ -43,6 +58,7 @@ if ! have docker; then
 fi
 
 compose() { (cd "$COMPOSE_DIR" && docker compose "$@"); }
+cid() { compose ps -q "$1" 2>/dev/null | head -1; }
 
 say_services() {
     printf '\n== A-1 services (R-1)\n'
@@ -57,9 +73,17 @@ say_services() {
     published=$(compose port immich-server "$HTTP_PORT" 2>/dev/null || true)
     case "$EXPOSURE" in
         localhost)
-            if [ -n "$published" ]; then pass "server port published: $published"; else fail "EXPOSURE=localhost but nothing is published on $HTTP_PORT"; fi ;;
+            case "$published" in
+                127.0.0.1:*|\[::1\]:*) pass "server published on the loopback interface: $published" ;;
+                "") fail "EXPOSURE=localhost but nothing is published on $HTTP_PORT" ;;
+                *) fail "published on $published - expected the loopback interface only" ;;
+            esac ;;
         *)
-            if [ -n "$published" ]; then note "server port published: $published"; else pass "no published port (EXPOSURE=$EXPOSURE)"; fi ;;
+            if [ -n "$published" ]; then
+                fail "the server publishes $published while EXPOSURE=$EXPOSURE - the library is reachable outside its intended network"
+            else
+                pass "no published port (EXPOSURE=$EXPOSURE)"
+            fi ;;
     esac
     for svc in database redis immich-machine-learning; do
         p=$(compose port "$svc" 2>/dev/null || true)
@@ -69,15 +93,17 @@ say_services() {
 
 say_digests() {
     printf '\n== A-4 digest pins (R-4)\n'
-    for name in immich_server immich_machine_learning immich_postgres immich_redis; do
-        ref=$(docker inspect --format '{{index .Config.Image}}' "$name" 2>/dev/null || true)
-        if [ -z "$ref" ]; then
-            note "$name: container not found (name it as the skeleton does, or skip)"
+    for svc in immich-server immich-machine-learning database redis; do
+        id=$(cid "$svc")
+        if [ -z "$id" ]; then
+            fail "$svc has no container - its image pin cannot be verified"
             continue
         fi
+        ref=$(docker inspect --format '{{index .Config.Image}}' "$id" 2>/dev/null || true)
         case "$ref" in
-            *@sha256:*) pass "$name pinned: ${ref%%,*}" ;;
-            *) fail "$name is not digest-pinned: $ref" ;;
+            *@sha256:*) pass "$svc pinned: ${ref%%,*}" ;;
+            "") fail "$svc: the image reference could not be read" ;;
+            *) fail "$svc is not digest-pinned: $ref" ;;
         esac
     done
 }
@@ -90,10 +116,10 @@ say_database() {
         *[![:space:]]*) pass "vector extension available: $ext" ;;
         *) fail "no vector extension visible - the database image is probably not the Immich-maintained one" ;;
     esac
-    img=$(docker inspect --format '{{index .Config.Image}}' immich_postgres 2>/dev/null || true)
+    img=$(docker inspect --format '{{index .Config.Image}}' "$(cid database)" 2>/dev/null || true)
     case "$img" in
         */immich-app/postgres*) pass "database runs the Immich-maintained image" ;;
-        "") note "immich_postgres not found; image check skipped" ;;
+        "") note "the database container was not found; image check skipped" ;;
         *) fail "database image is not the Immich-maintained one: $img" ;;
     esac
 }
@@ -125,31 +151,42 @@ say_server() {
     else
         note "curl not available; probing through the container's health status instead"
     fi
-    health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' immich_server 2>/dev/null || true)
+    health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(cid immich-server)" 2>/dev/null || true)
     case "$health" in
-        healthy) pass "immich_server healthcheck: healthy" ;;
-        none|"") note "immich_server has no healthcheck or was not found" ;;
-        *) fail "immich_server healthcheck: $health" ;;
+        healthy) pass "the server's healthcheck: healthy" ;;
+        none|"") note "the server has no healthcheck or was not found" ;;
+        *) fail "the server's healthcheck: $health" ;;
     esac
-    for c in immich_postgres immich_redis; do
-        h=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c" 2>/dev/null || true)
+    for svc in database redis; do
+        h=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(cid "$svc")" 2>/dev/null || true)
         case "$h" in
-            healthy) pass "$c healthcheck: healthy" ;;
-            none|"") note "$c has no healthcheck" ;;
-            *) fail "$c healthcheck: $h" ;;
+            healthy) pass "$svc healthcheck: healthy" ;;
+            none|"") note "$svc has no healthcheck" ;;
+            *) fail "$svc healthcheck: $h" ;;
         esac
     done
 }
 
 say_ml() {
     printf '\n== A-5/A-9 machine learning (R-5, R-7, R-8)\n'
-    if docker inspect immich_machine_learning >/dev/null 2>&1; then
-        pass "immich_machine_learning container present"
-        note "cache: $(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/cache"}}{{.Name}}{{end}}{{end}}' immich_machine_learning 2>/dev/null || echo unknown)"
-        note "cpu ceiling recorded by the operator: ${ML_CPU_LIMIT:-unset}"
+    id=$(cid immich-machine-learning)
+    if [ -n "$id" ]; then
+        pass "immich-machine-learning container present"
+        note "cache volume: $(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/cache"}}{{.Name}}{{end}}{{end}}' "$id" 2>/dev/null || echo unknown)"
+        nano=$(docker inspect --format '{{.HostConfig.NanoCpus}}' "$id" 2>/dev/null || echo 0)
+        case "${ML_CPU_LIMIT:-0}" in
+            0|"")
+                note "no CPU ceiling is set (ML_CPU_LIMIT=${ML_CPU_LIMIT:-unset}): the first index may use the whole machine, which must be the operator's recorded decision" ;;
+            *)
+                if [ "${nano:-0}" -gt 0 ] 2>/dev/null; then
+                    pass "CPU ceiling in force: HostConfig.NanoCpus=$nano for ML_CPU_LIMIT=$ML_CPU_LIMIT"
+                else
+                    fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is recorded but the container carries no CPU ceiling"
+                fi ;;
+        esac
         note "provider evidence: docker compose logs immich-machine-learning | grep -i 'provider\\|loaded'"
     else
-        fail "immich_machine_learning container not found"
+        fail "immich-machine-learning has no container"
     fi
 }
 
@@ -174,7 +211,7 @@ say_setup_closed() {
     if have curl; then
         if code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${IMMICH_URL%/}/auth/admin-sign-up" 2>/dev/null); then
             case "$code" in
-                2*) note "sign-up endpoint answered $code - open only while no administrator exists" ;;
+                2*) fail "the sign-up endpoint answered $code - an administrator exists, so it must be closed (set IMMICH_ALLOW_SETUP=false)" ;;
                 *) pass "sign-up endpoint refused with $code" ;;
             esac
         else

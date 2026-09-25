@@ -234,7 +234,7 @@ Every environment-specific value lives here and nowhere else.
 | P-3 | DB_USERNAME | string | `postgres` | Upstream default | Database role |
 | P-4 | DB_PASSWORD | secret | (required) | Generate with `openssl rand -hex 24`; letters and digits only | Database password for that role |
 | P-5 | DB_DATABASE_NAME | string | `immich` | Upstream default | Database name |
-| P-6 | DB_STORAGE_TYPE | enum | `SSD` | `findmnt -no FSTYPE`/physical medium | Postgres IO tuning: `SSD` for concurrent IO, `HDD` for sequential |
+| P-6 | DB_STORAGE_TYPE | enum | `SSD` | `findmnt -no FSTYPE`/physical medium | Postgres IO tuning: `SSD` for concurrent IO, `HDD` for sequential. The database service passes it to the container directly, since it loads no `env_file` |
 | P-7 | IMMICH_VERSION | string | `release` | Upstream release tag, or a fixed version such as `v3` | Tag half of the three Immich image references |
 | P-8 | SERVER_DIGEST | string | (required) | `docker buildx imagetools inspect ghcr.io/immich-app/immich-server:${P-7}` | Digest half of the server image reference |
 | P-9 | ML_DIGEST | string | (required) | Same command against the machine-learning image, tag suffixed per P-11 | Digest half of the machine-learning image reference |
@@ -248,7 +248,7 @@ Every environment-specific value lives here and nowhere else.
 | P-17 | MACHINE_LEARNING_REQUEST_THREADS | int | (unset = all cores) | `nproc` | Machine-learning request thread pool; the upstream documentation names this the first knob to tune |
 | P-18 | MACHINE_LEARNING_WORKERS | int | `1` | `free -h` | Machine-learning worker processes; each duplicates models in memory |
 | P-19 | MACHINE_LEARNING_MODEL_TTL | int | `300` | Operator choice | Seconds of inactivity before a model unloads, and the memory it frees |
-| P-20 | ML_CPU_LIMIT | string | (unset) | `nproc` | Compose CPU ceiling for the machine-learning container, e.g. `"4.0"` |
+| P-20 | ML_CPU_LIMIT | string | `0` (no ceiling) | `nproc` | Compose CPU ceiling for the machine-learning container, e.g. `4.0`, applied as its `deploy.resources.limits.cpus`; `0` leaves it unrestricted, and the acceptance runner fails when a recorded value is not in force |
 | P-21 | STORAGE_OWNER | string | (discovered) | `stat -c '%u:%g' ${P-1}` | Owner the container must be able to write as; on a mismatch, grant group access |
 | P-22 | BACKUP_TARGET | path | (required for A-8) | Operator choice, ideally another device | Where the database dump and the originals' copy are written |
 | P-23 | EXTERNAL_LIBRARY_PATHS | list | (empty) | Directories the operator already owns | Read-only mounts offered to external libraries, colon-separated `host:container` pairs |

@@ -59,10 +59,13 @@ runs.
 - **A backup of one half only.** A database restored without its files references
   assets that are absent, and files restored without their database appear as an
   empty library with the bytes still on disk. Both halves are required, and the
-  order matters: with the server stopped the pair is consistent by construction;
-  without stopping it, the database goes first, so the worst case is files the
-  database has not yet heard of rather than a database pointing at files that
-  never made it into the copy.
+  order matters: with the server stopped the pair is consistent by construction.
+  With the instance live, the database goes first so that a file uploaded
+  mid-copy is an extra the database has not recorded yet - harmless - but that
+  order does not make the pair consistent. A photo deleted or moved between the
+  dump and the file copy leaves a row pointing at an original the copy never
+  held, which is a lost photo rather than a stray one. Quiesce writes for the
+  window, or accept that a live backup can lose exactly those.
 - **External library mounted read-write by accident.** A mount without the
   read-only marker lets the application delete files the operator never uploaded
   into it. The mount is the guard; there is no setting that substitutes for it.

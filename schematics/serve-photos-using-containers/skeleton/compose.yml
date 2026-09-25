@@ -47,12 +47,12 @@ services:
     restart: always
     healthcheck:
       disable: false
-    # Bound the first indexing pass if the host has no thermal headroom.
-    # Leave the whole block out to let the container use the machine.
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: "4.0"
+    # Bound the first indexing pass. 0 means no limit, so an unset ML_CPU_LIMIT
+    # leaves the container the whole machine; a value such as 4.0 caps it.
+    deploy:
+      resources:
+        limits:
+          cpus: "${ML_CPU_LIMIT:-0}"
 
   redis:
     container_name: immich_redis
@@ -74,8 +74,10 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
       POSTGRES_INITDB_ARGS: '--data-checksums'
-      # Uncomment when the cluster does not live on SSDs.
-      # DB_STORAGE_TYPE: 'HDD'
+      # Read by the Immich-maintained Postgres image: SSD tunes for concurrent
+      # IO, HDD for spinning disks. The database service loads no env_file, so
+      # this line is what carries P-6 into the container.
+      DB_STORAGE_TYPE: ${DB_STORAGE_TYPE:-SSD}
     volumes:
       - ${DB_DATA_LOCATION:?set DB_DATA_LOCATION in .env}:/var/lib/postgresql/data
     shm_size: 128mb

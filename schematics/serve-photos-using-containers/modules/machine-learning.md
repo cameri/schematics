@@ -17,6 +17,8 @@ found.
   pinned by `ML_DIGEST`.
 - `MACHINE_LEARNING_REQUEST_THREADS`, `MACHINE_LEARNING_WORKERS`,
   `MACHINE_LEARNING_MODEL_TTL`, `ML_CPU_LIMIT` from the Parameters table.
+  `ML_CPU_LIMIT` reaches the container as its Compose CPU limit; `0` means no
+  ceiling, and the acceptance runner fails when a recorded value is not in force.
 - The model-cache volume from `media-storage`.
 - Requests from the server: embeddings for smart search, face and object
   detections during indexing.
