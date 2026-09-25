@@ -1,0 +1,17 @@
+# Optional relay overrides — copy to ${DEPLOY_ROOT}/.nostr/settings.yaml when needed.
+# Omit entirely to use defaults from the container image.
+
+info:
+  relay_url: wss://relay.example.com
+  name: relay.example.com
+  description: A Nostr relay powered by nostream.
+  contact: mailto:operator@example.com
+
+# admin:
+#   enabled: false
+
+# payments:
+#   enabled: false
+
+# nip66:
+#   enabled: false
