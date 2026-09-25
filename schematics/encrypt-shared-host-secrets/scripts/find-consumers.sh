@@ -3,16 +3,36 @@
 # find-consumers.sh - inventory every consumer of a variable, with its mechanism.
 #
 # Usage:
-#   find-consumers.sh [--all] [--max-size <bytes>] [--exclude <dir>]… <VAR> [<search-root> ...]
+#   find-consumers.sh [--all] [--max-size <bytes>] [--exclude <dir>]… \
+#                     [--value-stdin] <VAR> [<search-root> ...]
 #
 # Prints one tab-separated row per reference:
 #
 #   <path>:<line>   <mechanism>   <text>
 #
-# The text has the value redacted (`NAME=[redacted]`), because the file being
-# searched routinely holds the secret itself and an inventory that prints it
-# would be a second copy of the secret — in a terminal, a log, or a report.
-# Only the name and the shape of the line are useful for classification.
+# The text has every occurrence of the value redacted (`NAME=[redacted]`),
+# because the file being searched routinely holds the secret itself and an
+# inventory that prints it would be a second copy of the secret — in a terminal,
+# a log, or a report. Only the name and the shape of the line are useful for
+# classification.
+#
+# Redaction covers the shapes a value is written in, and the second one needs
+# the value itself, not only the name:
+#
+#   NAME=<value>        bare, quoted with `"…"` or `'…'`, or spaced around the
+#                       separator: all become `NAME=[redacted]`
+#   the value inlined   the value's own bytes anywhere on the line, with no name
+#                       in front of it — an auth header, a JSON body, a
+#                       trailing comment
+#
+# The inlined shape carries no syntax to match on, so only its bytes catch it:
+# supply the value with `--value-stdin` (one value per line, read from stdin so
+# it never reaches argv or the shell history — the route `sops set
+# --value-stdin` already uses), or have it set in this script's own environment
+# as `$VAR`, or both. With neither, redaction is name-keyed only and an inlined
+# occurrence prints in the clear. A supplied value may carry one layer of
+# surrounding quotes: they are stripped, so the bare bytes match everywhere. An
+# empty or whitespace-only value is ignored.
 #
 # Mechanisms:
 #   compose-interpolation      `${VAR}` (or `$VAR`) in a YAML file: the Compose
@@ -38,7 +58,7 @@
 # transcripts or logs in its own directories adds them with `--exclude`, which
 # repeats: those directories hold conversations about the variable, not
 # consumers of it, and one of them will contain the value itself. `--all`
-# searches everything.
+# searches everything except this script's own scratch directory.
 #
 # Exit status: 0 when at least one reference was found, 1 when none was, 2 on a
 # usage error. The summary goes to stderr; only rows go to stdout.
@@ -58,15 +78,17 @@ usage() {
 ALL=0
 MAXSIZE=1048576
 EXCLUDES=""
+VALUES_IN=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --all)      ALL=1; shift ;;
-        --max-size) [ "$#" -ge 2 ] || usage; MAXSIZE="$2"; shift 2 ;;
-        --exclude)  [ "$#" -ge 2 ] || usage; EXCLUDES="$EXCLUDES $2"; shift 2 ;;
-        -h|--help)  usage ;;
-        --)         shift; break ;;
-        -*)         echo "find-consumers: unknown option: $1" >&2; usage ;;
-        *)          break ;;
+        --all)          ALL=1; shift ;;
+        --max-size)     [ "$#" -ge 2 ] || usage; MAXSIZE="$2"; shift 2 ;;
+        --exclude)      [ "$#" -ge 2 ] || usage; EXCLUDES="$EXCLUDES $2"; shift 2 ;;
+        --value-stdin)  VALUES_IN=1; shift ;;
+        -h|--help)      usage ;;
+        --)             shift; break ;;
+        -*)             echo "find-consumers: unknown option: $1" >&2; usage ;;
+        *)              break ;;
     esac
 done
 
@@ -82,8 +104,75 @@ if [ "$#" -eq 0 ]; then
     set -- .
 fi
 
-ROWS="$(mktemp)"
-trap 'rm -f "$ROWS"' EXIT INT TERM
+# Scratch lives in a private directory of its own, and the scan skips that
+# directory by name: the sed program it holds carries the variable's own name,
+# so a scratch file the search could reach would come back as a row about
+# itself. The fixed prefix is what makes the skip possible, and it also covers a
+# stale directory left by an interrupted run. `mktemp -d` creates it 0700, and
+# the umask below keeps the files inside it 0600, which matters — the redaction
+# program holds every value the caller supplied.
+umask 077
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/find-consumers.XXXXXXXX")"
+TMPSKIP='find-consumers.*'
+ROWS="$TMPD/rows"
+SEDSCRIPT="$TMPD/sed"
+trap 'rm -f "$ROWS" "$SEDSCRIPT"; rmdir "$TMPD" 2>/dev/null || true' EXIT INT TERM HUP PIPE QUIT
+
+escape_literal() {
+    # $1 is a value; every ERE metacharacter and the delimiter is escaped so the
+    # expression matches exactly its own bytes and nothing else.
+    printf '%s' "$1" | sed -e 's/[][\\/.^$*+?(){}|]/\\&/g'
+}
+
+strip_quotes() {
+    # $1 is a value read out of a dotenv file, which may still carry the quotes
+    # it was written with; the bytes inside them are what must match.
+    sv="$1"
+    case "$sv" in
+        \"*\") sv="${sv#\"}"; sv="${sv%\"}" ;;
+        \'*\') sv="${sv#\'}"; sv="${sv%\'}" ;;
+    esac
+    printf '%s' "$sv"
+}
+
+add_value() {
+    # $1 is a candidate value. Anything without a non-blank character is
+    # dropped: an empty pattern matches everywhere and would redact every line
+    # whole, which destroys the output instead of protecting it.
+    sv="$(strip_quotes "$1")"
+    case "$sv" in
+        *[![:space:]]*) ;;
+        *) return 0 ;;
+    esac
+    printf 's/%s/[redacted]/g\n' "$(escape_literal "$sv")" >> "$SEDSCRIPT"
+}
+
+# The name-keyed shape first: `NAME` or `"NAME"`, optional space, `=` or `:`,
+# then a value that is double-quoted, single-quoted, or bare. The quoted forms
+# come first so a value containing a space is taken whole, and each is replaced
+# together with its quotes — which is the `NAME=[redacted]` the header promises.
+# A bare value stops at whitespace, so a trailing comment still classifies.
+SQ="'[^']*'"
+printf 's/("?%s"?[[:space:]]*[=:][[:space:]]*)("[^"]*"|%s|[^[:space:]]+)/\\1[redacted]/g\n' \
+    "$VAR" "$SQ" >> "$SEDSCRIPT"
+
+# The inlined shape: the value's own bytes, wherever a line that matched the
+# name happens to carry them.
+if [ "$VALUES_IN" -eq 1 ]; then
+    # tr: a dotenv file written on another platform may carry carriage returns.
+    tr -d '\r' | while IFS= read -r VLINE || [ -n "$VLINE" ]; do
+        add_value "$VLINE"
+    done
+fi
+
+# The caller usually holds the value already, so `$VAR` in this script's own
+# environment is redacted as a literal too. Building the reference into the
+# `eval` is the portable form of an indirect expansion, and it is safe because
+# VAR was validated as a bare name above. Over-redaction is the safe direction:
+# a missed occurrence is a secret in a transcript.
+ENVVAL=""
+eval "ENVVAL=\${$VAR-}"
+add_value "$ENVVAL"
 
 for ROOT in "$@"; do
     if [ ! -e "$ROOT" ]; then
@@ -91,26 +180,32 @@ for ROOT in "$@"; do
         continue
     fi
     if [ "$ALL" -eq 1 ]; then
-        PRUNE=""
+        PRUNE="( -name $TMPSKIP ) -prune -o"
     else
         PRUNE='( -name .git -o -name node_modules -o -name vendor -o -name .venv -o -name site-packages'
         for X in $EXCLUDES; do
             PRUNE="$PRUNE -o -name $X"
         done
-        PRUNE="$PRUNE ) -prune -o"
+        PRUNE="$PRUNE -o -name $TMPSKIP ) -prune -o"
     fi
     # `--`-terminated file list piped to grep: no recursion, no argv limits, and
     # /dev/null keeps grep from ever reading stdin when the list is empty.
+    # `set -f` for the scan alone: PRUNE carries a name pattern and `$EXCLUDES`
+    # carries names the operator typed, and neither should be expanded by this
+    # shell on the way to find, which does its own matching.
+    set -f
     # shellcheck disable=SC2086  # PRUNE is a deliberate fragment of the find expression
     find "$ROOT" $PRUNE -type f -size "-${MAXSIZE}c" -print0 2>/dev/null \
         | xargs -0 grep -nIH -F -- "$VAR" /dev/null 2>/dev/null >> "$ROWS" || true
+    set +f
 done
 
 redact() {
-    # $1 is the line, $2 the variable name. Any value-looking tail after
-    # NAME=/NAME:/NAME<space> is replaced: the value is never useful for
-    # classification and must not be reproduced.
-    printf '%s' "$1" | sed -E "s/(\"?$2\"?[[:space:]]*[=:][[:space:]]*)\"[^\"]*\"/\\1\"[redacted]\"/g; s/(\"?$2\"?[[:space:]]*[=:][[:space:]]*)[^[:space:]\"',]+/\\1[redacted]/g"
+    # $1 is the line. Every expression was built into $SEDSCRIPT before the
+    # scan began: the name-keyed shapes, then one literal expression per known
+    # value. A value is never useful for classification and must not be
+    # reproduced.
+    printf '%s' "$1" | sed -E -f "$SEDSCRIPT"
 }
 
 classify() {
@@ -151,7 +246,7 @@ while IFS= read -r ROW; do
     case "$LINE" in
         ''|*[!0-9]*) continue ;;
     esac
-    printf '%s\t%s\t%s\n' "$LOC:$LINE" "$(classify "$LOC" "$TEXT")" "$(redact "$TEXT" "$VAR")"
+    printf '%s\t%s\t%s\n' "$LOC:$LINE" "$(classify "$LOC" "$TEXT")" "$(redact "$TEXT")"
     COUNT=$((COUNT + 1))
 done < "$ROWS"
 
