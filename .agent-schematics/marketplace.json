@@ -480,6 +480,26 @@
         "pinned-dependencies",
         "infrastructure"
       ]
+    },
+    {
+      "name": "serve-photos-using-containers",
+      "description": "Serving a self-hosted private photo and video library with Immich - its own Postgres carrying a vector extension and its own Valkey cache, a separate machine-learning service whose first index saturates a CPU, hardware acceleration as a parameter, tailnet-first exposure, and one backup contract that keeps the database and the originals in sync.",
+      "source": "./schematics/serve-photos-using-containers",
+      "category": "media",
+      "featured": false,
+      "author": {
+        "name": "Ricardo Arturo Cabral Mejía",
+        "email": "me@ricardocabral.io"
+      },
+      "keywords": [
+        "immich",
+        "photos",
+        "videos",
+        "library",
+        "machine-learning",
+        "postgres",
+        "media"
+      ]
     }
   ]
 }
