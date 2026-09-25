@@ -1,0 +1,62 @@
+# Device passthrough and limits for hardware-accelerated inference.
+#
+# This file is the second half of the acceleration parameter: the machine
+# learning service's image tag carries the backend's runtime, and the service
+# named here, selected with `extends:` in the Compose file, grants the device.
+# The names of the services and the paths they carry are the interface the
+# machine learning image expects; adapt paths only if your driver differs.
+#
+# Platforms that cannot use a second Compose file can inline the block for the
+# chosen backend into the service in compose.yml instead.
+
+services:
+  cpu: {}
+
+  armnn:
+    devices:
+      - /dev/mali0:/dev/mali0
+    volumes:
+      # The closed-source userspace driver for your chipset.
+      - /usr/lib/libmali.so:/usr/lib/libmali.so:ro
+      # Vendor firmware; not every driver requires it.
+      - /lib/firmware/mali_csffw.bin:/lib/firmware/mali_csffw.bin:ro
+
+  cuda:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+
+  rocm:
+    group_add:
+      - video
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+
+  openvino:
+    device_cgroup_rules:
+      - 'c 189:* rmw'
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+
+  openvino-wsl:
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/dxg:/dev/dxg
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - /usr/lib/wsl:/usr/lib/wsl
+
+  rknn:
+    security_opt:
+      - systempaths=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/dri:/dev/dri
