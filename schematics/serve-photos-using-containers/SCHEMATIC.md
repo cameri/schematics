@@ -255,6 +255,7 @@ Every environment-specific value lives here and nowhere else.
 | P-24 | DB_IMAGE_TAG | string | (required) | The tag the release's compose file names for its Postgres image | Tag half of the database image reference; the tag carries the vector extension |
 | P-25 | CACHE_VERSION | string | (required) | The major version the release's compose file names for Valkey | Tag half of the cache image reference |
 | P-26 | IMMICH_ALLOW_SETUP | enum | `true` | Operator choice | `false` closes the admin sign-up endpoint; set it once the first administrator exists |
+| P-27 | REDIS_PASSWORD | secret | (empty) | Generate with `openssl rand -hex 24` | Password for the cache. Leave it empty: the cache runs without authentication and is reachable only inside the project network, and the server sends no `AUTH` when this is empty. The cache image ignores this variable, so a password takes three edits — a `command: --requirepass <value>` on the cache service, the cache's healthcheck (which would otherwise fail with `NOAUTH`), and this value |
 
 ## Modules
 

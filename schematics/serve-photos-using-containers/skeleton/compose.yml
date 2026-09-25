@@ -60,8 +60,11 @@ services:
     healthcheck:
       test: redis-cli ping | grep -q PONG || exit 1
     restart: always
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    # No authentication by default: the cache is reachable only inside the
+    # project network and the server reaches it by service name. This image
+    # ignores REDIS_PASSWORD, so a password takes three edits, not one: a
+    # `command: --requirepass <value>` here, REDIS_PASSWORD in .env, and the
+    # healthcheck above, which would otherwise fail with NOAUTH.
 
   database:
     container_name: immich_postgres
