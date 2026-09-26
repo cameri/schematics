@@ -1,11 +1,10 @@
 # Nostream production stack — see SCHEMATIC.md for parameters.
-# Copy to ${DEPLOY_ROOT}/docker-compose.yml and set NOSTREAM_IMAGE in .env or shell.
+# Paths are relative to this file (${DEPLOY_ROOT}); run compose from ${DEPLOY_ROOT}.
 
 services:
   nostream:
     image: ${NOSTREAM_IMAGE:-ghcr.io/cameri/nostream:main}
     pull_policy: ${PULL_POLICY:-never}
-    container_name: nostream
     env_file: .env
     environment:
       RELAY_PORT: ${RELAY_PORT:-8008}
@@ -26,7 +25,7 @@ services:
       WORKER_COUNT: ${WORKER_COUNT:-2}
     user: node:node
     volumes:
-      - ${PWD}/.nostr:/home/node/.nostr
+      - ./.nostr:/home/node/.nostr
     ports:
       - 127.0.0.1:${RELAY_PORT:-8008}:${RELAY_PORT:-8008}
     depends_on:
@@ -41,15 +40,14 @@ services:
 
   nostream-db:
     image: postgres:15
-    container_name: nostream-db
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - ${PWD}/.nostr/data:/var/lib/postgresql/data
-      - ${PWD}/.nostr/db-logs:/var/log/postgresql
-      - ${PWD}/postgresql.conf:/postgresql.conf:ro
+      - ./.nostr/data:/var/lib/postgresql/data
+      - ./.nostr/db-logs:/var/log/postgresql
+      - ./postgresql.conf:/postgresql.conf:ro
     command: postgres -c 'config_file=/postgresql.conf'
     restart: always
     healthcheck:
@@ -61,7 +59,6 @@ services:
 
   nostream-cache:
     image: redis:7.0.5-alpine3.16
-    container_name: nostream-cache
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
@@ -77,7 +74,6 @@ services:
   nostream-migrate:
     image: ${NOSTREAM_IMAGE:-ghcr.io/cameri/nostream:main}
     pull_policy: ${PULL_POLICY:-never}
-    container_name: nostream-migrate
     user: node:node
     command: ['node_modules/.bin/knex', 'migrate:latest']
     environment:

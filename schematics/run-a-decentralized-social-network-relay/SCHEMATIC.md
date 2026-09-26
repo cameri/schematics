@@ -6,7 +6,7 @@ status: draft
 spec: 1
 description: A production Nostr relay (nostream) on Docker — host prep, Postgres and Redis, GHCR image pinning, migrations-before-start, loopback HTTP, reverse-proxy sketches, NIP-11 and /readyz probes, optional settings and tailnet exposure.
 created: 2026-09-26
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 
 # Schematic: Run a Decentralized Social Network Relay
@@ -155,7 +155,7 @@ artefacts and *(observed)* checks where noted):
 |-----|----------|
 | R-1 | `deploy/docker-compose.prod.yml`: `nostream` `depends_on` `nostream-migrate` with `condition: service_completed_successfully` *(observed in compose)* |
 | R-2 | Same file: `nostream` and `nostream-migrate` share one image reference (`ghcr.io/cameri/nostream:main` or `${NOSTREAM_IMAGE}`) *(observed in compose)* |
-| R-3 | Postgres bind mount `${PWD}/.nostr/data:/var/lib/postgresql/data`; Redis uses named volume `cache` *(observed in compose)* |
+| R-3 | Postgres bind mount `./.nostr/data` (relative to `${DEPLOY_ROOT}` compose file); Redis uses named volume `cache` *(observed in skeleton compose)* |
 | R-4 | `deploy/README.md`: `.env` secrets on host only; bootstrap creates `.env` mode 600 |
 | R-5 | Prod compose publishes `127.0.0.1:8008:8008` only *(observed in compose)* |
 | R-6 | `deploy/README.md`: `/healthz` liveness — 200 while process runs, no DB check |
@@ -207,7 +207,7 @@ Implementation-specific binding notes:
 
 | Id  | Kind | What | Why | If declined |
 |-----|------|------|-----|-------------|
-| R-1 | schematic | [expose-container-services-privately v0.1.0](https://github.com/cameri/schematics/blob/37547e445759b652e4ad55364b0ed3b96240894e/schematics/expose-container-services-privately/SCHEMATIC.md) `sha256:ffd08754870e4aeb5ea9d375609ab7cf596795b3ae3b1ed06c97721f3425ea87` | Tailnet hostname to loopback upstream without a public port | Use nginx/Caddy/Cloudflare in Phase 7 instead |
+| D-5 | schematic | [expose-container-services-privately v0.1.0](https://github.com/cameri/schematics/blob/37547e445759b652e4ad55364b0ed3b96240894e/schematics/expose-container-services-privately/SCHEMATIC.md) `sha256:ffd08754870e4aeb5ea9d375609ab7cf596795b3ae3b1ed06c97721f3425ea87` | Tailnet hostname to loopback upstream without a public port | Use nginx/Caddy/Cloudflare in Phase 7 instead |
 
 ## Parameters
 
@@ -391,11 +391,10 @@ Manual or scripted (run from **`P-1`** after `docker compose up -d` unless noted
 - **A-5** (R-2): Migrate and relay share one image:
   `cd ${P-1} && docker compose config --format json | jq -r '.services | ."nostream".image, ."nostream-migrate".image'`
   → two identical lines.
-- **A-6** (R-1): Migrate succeeded before relay start:
-  `docker inspect nostream-migrate --format '{{.State.ExitCode}}'` → `0`;
-  relay `StartedAt` after migrate `FinishedAt` (compare
-  `docker inspect -f '{{.State.StartedAt}}' nostream` vs
-  `docker inspect -f '{{.State.FinishedAt}}' nostream-migrate`).
+- **A-6** (R-1): Migrate succeeded before relay start (from **`P-1`**):
+  `cd ${P-1} && docker compose ps -a --format json nostream-migrate | jq -e '.ExitCode == 0'`;
+  relay `StartedAt` after migrate `FinishedAt` (compare IDs from
+  `docker compose ps -aq nostream` and `docker compose ps -aq nostream-migrate`).
 - **A-7** (R-3): Postgres data on host path:
   `test -d ${P-1}/.nostr/data && stat -c '%F' ${P-1}/.nostr/data` → `directory`.
   Optional persistence: insert a marker row or note, `docker compose down &&
@@ -408,7 +407,7 @@ Manual or scripted (run from **`P-1`** after `docker compose up -d` unless noted
   `docker image inspect "$(grep -E '^NOSTREAM_IMAGE=' ${P-1}/.env | cut -d= -f2-)" --format '{{index .RepoDigests 0}}'`
   → non-empty when pulled from GHCR (digest pin proof).
 - **A-10** (R-9): Graceful drain — connect a WebSocket client, run
-  `docker stop -t 45 nostream`; while stopping, `/readyz` → 503 with
+  `cd ${P-1} && docker compose stop -t 45 nostream`; while stopping, `/readyz` → 503 with
   `"status":"draining"` *(observed per deploy README)*; container exits before
   `stop_grace_period` elapses after drain timeout (default 30s vs 45s grace).
 - **A-11** (R-8, R-6, R-7, R-5): Run `scripts/relay-verify.sh` — aggregates A-1–A-3.

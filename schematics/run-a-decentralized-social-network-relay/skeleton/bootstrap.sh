@@ -28,16 +28,23 @@ mkdir -p "$TARGET/.nostr/data" "$TARGET/.nostr/db-logs"
 
 install -m 644 "$SCRIPT_DIR/compose.yml" "$TARGET/docker-compose.yml"
 
-if [[ -f "$PKG_ROOT/postgresql.conf" ]]; then
-  install -m 644 "$PKG_ROOT/postgresql.conf" "$TARGET/postgresql.conf"
-elif [[ -f "$SCRIPT_DIR/postgresql.conf" ]]; then
+if [[ -f "$SCRIPT_DIR/postgresql.conf" ]]; then
   install -m 644 "$SCRIPT_DIR/postgresql.conf" "$TARGET/postgresql.conf"
+elif [[ -f "$PKG_ROOT/postgresql.conf" ]]; then
+  install -m 644 "$PKG_ROOT/postgresql.conf" "$TARGET/postgresql.conf"
+elif [[ "${NOSTREAM_BOOTSTRAP_OFFLINE:-}" = "1" ]]; then
+  echo "error: offline bootstrap requires skeleton/postgresql.conf in this package" >&2
+  exit 1
 else
   echo "Fetching postgresql.conf from cameri/nostream@${NOSTREAM_GITHUB_REF}..."
-  curl -fsSL \
+  if ! curl -fsSL \
     "https://raw.githubusercontent.com/cameri/nostream/${NOSTREAM_GITHUB_REF}/postgresql.conf" \
-    -o "$TARGET/postgresql.conf"
+    -o "$TARGET/postgresql.conf"; then
+    echo "error: fetch failed — use bundled skeleton/postgresql.conf or set NOSTREAM_BOOTSTRAP_OFFLINE=1 with a local file" >&2
+    exit 1
+  fi
 fi
+require_file "$TARGET/postgresql.conf"
 
 if [[ ! -f "$TARGET/.env" ]]; then
   install -m 600 "$SCRIPT_DIR/.env.example" "$TARGET/.env"

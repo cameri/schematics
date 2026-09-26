@@ -58,10 +58,12 @@ Typical rolling upgrade:
 4. Send SIGTERM to blue; wait until blue **`/readyz`** is 503 and connections drain.
 5. Decommission blue or repoint it for the next release.
 
-Each instance needs its own **`DEPLOY_ROOT`** or compose project name, Postgres
-(if not shared), and Redis (if not shared). **Shared Postgres across blue/green
-on one host** is an advanced operator choice — not part of the reference
-four-service stack.
+Each instance needs its own **`DEPLOY_ROOT`** and a distinct Compose project name
+(for example `docker compose -p nostream-green up -d`). The skeleton omits
+fixed `container_name` values so two stacks can coexist on one host. Postgres
+(if not shared), and Redis (if not shared) stay per instance. **Shared Postgres
+across blue/green on one host** is an advanced operator choice — not part of the
+reference four-service stack.
 
 ## Relation to upstream fleet layouts
 

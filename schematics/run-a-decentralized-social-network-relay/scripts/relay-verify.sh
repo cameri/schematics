@@ -58,19 +58,18 @@ nip11_ok() {
 
 loopback_bind_ok() {
   if ! command -v docker >/dev/null 2>&1; then
-    return 0
+    return 1
   fi
 
-  compose_dir="${DEPLOY_ROOT:-}"
-  if [ -z "$compose_dir" ] || [ ! -f "${compose_dir}/docker-compose.yml" ]; then
-    return 0
+  if [ -z "$DEPLOY_ROOT" ] || [ ! -f "${DEPLOY_ROOT}/docker-compose.yml" ]; then
+    return 1
   fi
 
-  if ! ( cd "$compose_dir" && docker compose ps nostream 2>/dev/null | grep -q running ); then
-    return 0
+  if ! ( cd "$DEPLOY_ROOT" && docker compose ps --status running nostream 2>/dev/null | grep -q nostream ); then
+    return 1
   fi
 
-  published="$( cd "$compose_dir" && docker compose port nostream "$RELAY_PORT" 2>/dev/null )" || published=""
+  published="$( cd "$DEPLOY_ROOT" && docker compose port nostream "$RELAY_PORT" 2>/dev/null )" || published=""
   if [ -z "$published" ]; then
     return 1
   fi
