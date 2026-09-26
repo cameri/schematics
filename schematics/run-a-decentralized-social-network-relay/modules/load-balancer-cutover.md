@@ -5,6 +5,18 @@ HAProxy fronts multiple relay backends. This module does **not** ship a full
 blue/green compose file — it documents the **readiness contract** nostream
 exposes so fleet layouts can be built separately.
 
+## Inputs
+
+- Two or more relay instances, load balancer using **`/readyz`**, **`P-2`**, **`P-3`**.
+
+## Outputs
+
+- Traffic shifted to healthy backend; draining backend returns 503 on **`/readyz`**.
+
+## Idempotency
+
+Cutover steps may be repeated per release; each instance keeps its own **`P-1`**.
+
 ## When this applies
 
 - Two or more relay instances behind HAProxy, nginx upstream groups, or cloud LB.
@@ -51,11 +63,13 @@ Each instance needs its own **`DEPLOY_ROOT`** or compose project name, Postgres
 on one host** is an advanced operator choice — not part of the reference
 four-service stack.
 
-## Relation to upstream HAProxy compose
+## Relation to upstream fleet layouts
 
-Nostream may publish a separate **`docker-compose.haproxy.yml`** for fleet
-operators. Treat that file as an optional extension: the probes and drain
-behaviour in this module still apply.
+Upstream nostream documents HAProxy blue/green cutover and probe timeouts in
+**[`deploy/README.md` — Health checks](https://github.com/cameri/nostream/blob/main/deploy/README.md#health-checks)**.
+The repository also ships **`docker-compose.nginx.yml`** at the repo root as an
+optional nginx front-end example. This module states the **`/readyz`** contract
+those layouts rely on; it does not duplicate their compose files.
 
 ## Parameters used
 

@@ -4,6 +4,19 @@ Responsibility: terminate TLS and forward HTTP + WebSocket to the relay on
 `http://127.0.0.1:${P-2}` without publishing the relay on `0.0.0.0`. Use when
 **`P-12=proxy`**.
 
+## Inputs
+
+- Relay on loopback **`P-2`**, public hostname **`P-10`**, **`P-11`** `info.relay_url`.
+
+## Outputs
+
+- TLS-terminated `https://` / `wss://` on one hostname forwarding to the relay.
+
+## Idempotency
+
+Proxy config reloads are safe; changing **`P-10`** requires updating **`P-11`** and
+recreating the relay container.
+
 ## Hard rules
 
 1. **One public hostname** for NIP-11 and WebSocket — must match **`P-10`**

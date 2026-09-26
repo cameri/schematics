@@ -2,6 +2,22 @@
 
 Responsibility: the four Compose services, startup order, and volume layout.
 
+## Inputs
+
+- **`P-1`**, **`P-3`**, **`P-4`**, **`P-5`**, **`P-6`**, **`P-2`**, **`P-7`**, **`P-9`**
+- `${DEPLOY_ROOT}/docker-compose.yml` (from skeleton), `.env`, bundled or fetched
+  `postgresql.conf`.
+
+## Outputs
+
+- Running containers: `nostream-db`, `nostream-cache`, `nostream-migrate` (exited 0),
+  `nostream` (listening on **`P-2`** inside the relay container).
+
+## Idempotency
+
+Re-running `docker compose up -d` is safe; migrate re-applies only pending
+migrations; Postgres and Redis data persist on host paths.
+
 ## Services
 
 | Service | Image | Role |
@@ -46,8 +62,8 @@ Postgres data and relay settings share the `.nostr` parent directory but
 ## Process identity
 
 Reference image runs relay and migrate as **`node`** (uid **1000**). Postgres
-and Redis use their upstream image users. Do not run the relay as root (R-12
-analogue in preservation list).
+and Redis use their upstream image users. Match the reference image:
+**`user: node:node`** (uid 1000) for relay and migrate — not root.
 
 ## Restart policy
 

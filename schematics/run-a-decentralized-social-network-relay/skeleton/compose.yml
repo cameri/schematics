@@ -49,7 +49,7 @@ services:
     volumes:
       - ${PWD}/.nostr/data:/var/lib/postgresql/data
       - ${PWD}/.nostr/db-logs:/var/log/postgresql
-      - ${PWD}/postgresql.conf:/postgresql.conf
+      - ${PWD}/postgresql.conf:/postgresql.conf:ro
     command: postgres -c 'config_file=/postgresql.conf'
     restart: always
     healthcheck:

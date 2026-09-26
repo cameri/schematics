@@ -94,8 +94,9 @@ exposure to the Internet is an explicit, separate decision.
 **Out of scope / non-goals:**
 
 - Building nostream from source on the host (use **`P-3`** image).
-- HAProxy blue/green fleet layouts (see upstream `deploy/docker-compose.haproxy.yml`
-  as a separate advanced path).
+- Full HAProxy blue/green fleet compose (probe and drain contract is in
+  `modules/load-balancer-cutover.md`; upstream [`deploy/README.md` — Health checks](https://github.com/cameri/nostream/blob/main/deploy/README.md#health-checks)
+  and optional `docker-compose.nginx.yml` at the nostream repo root).
 - Prometheus/Grafana/OTEL stacks (optional upstream compose overlays).
 - Content moderation policy — configured via settings, not repeated here.
 - Federated mirroring, DVM workers, and Tor/I2P overlays unless enabled in
@@ -147,15 +148,51 @@ exposure to the Internet is an explicit, separate decision.
 - **R-10**: Image reference **`P-3`** MUST be pinned to a deliberate tag or
   digest; floating `latest` without operator intent is discouraged.
 
+**Evidence** (source of each requirement, from nostream production deploy
+artefacts and *(observed)* checks where noted):
+
+| Req | Evidence |
+|-----|----------|
+| R-1 | `deploy/docker-compose.prod.yml`: `nostream` `depends_on` `nostream-migrate` with `condition: service_completed_successfully` *(observed in compose)* |
+| R-2 | Same file: `nostream` and `nostream-migrate` share one image reference (`ghcr.io/cameri/nostream:main` or `${NOSTREAM_IMAGE}`) *(observed in compose)* |
+| R-3 | Postgres bind mount `${PWD}/.nostr/data:/var/lib/postgresql/data`; Redis uses named volume `cache` *(observed in compose)* |
+| R-4 | `deploy/README.md`: `.env` secrets on host only; bootstrap creates `.env` mode 600 |
+| R-5 | Prod compose publishes `127.0.0.1:8008:8008` only *(observed in compose)* |
+| R-6 | `deploy/README.md`: `/healthz` liveness — 200 while process runs, no DB check |
+| R-7 | `deploy/README.md`: `/readyz` readiness — Postgres + Redis; 503 when draining on SIGTERM *(observed: `/readyz` JSON when stack healthy)* |
+| R-8 | NIP-11 over `GET /` with `Accept: application/nostr+json` *(observed on dev stack)* |
+| R-9 | `deploy/README.md`: drain via `WS_DRAIN_TIMEOUT_MS` (default 30s); compose `stop_grace_period: 45s` *(observed in prod compose)* |
+| R-10 | `deploy/README.md` + `docs/DEPLOYMENT.md`: deliberate GHCR tag (`main` or `sha-<commit>`), not anonymous `latest` |
+
 ## Design Principles Binding the Implementation
 
-Keep the catalog principles verbatim (see template). Implementation bindings:
+1. **Vendor-agnostic**: implement with plain, portable components; no
+   dependency on any specific agent or harness.
+2. **Portable**: no absolute paths or machine-specific values in the
+   implementation; use the Parameters below.
+3. **Self-contained**: the implementation needs nothing outside this package
+   and the declared Dependencies.
+4. **Predictable, intuitive, ergonomic**: the installed capability behaves
+   exactly as this document describes; no surprise behaviours.
+5. **Idempotent and deterministic**: every phase is safe to re-run; checks
+   give the same verdict every time.
+6. **Parameterized and modular**: all tunables flow from the Parameters
+   table; concerns are separated per the Modules section.
+7. **Dependencies called out**: implement the declared failure behaviour for
+   every Dependency.
+8. **Applicable context respected**: discover what Must discover locally
+   says; do not silently assume beyond May assume.
+9. **Configuration flexibility**: behaviour differences come from
+   configuration, never source edits.
+10. **Pluggable**: implement the attach/remove seams defined in Modules and
+    Removal.
 
-- **Portable**: `${DEPLOY_ROOT}`, `${P-2}`, `${P-3}` — no `/opt/nostream`
-  hardcoded in compose committed to git; bootstrap accepts target path.
-- **Self-contained**: skeleton ships compose, env example, bootstrap, settings
-  example; Postgres tuning file fetched from nostream release matching **`P-3`**.
-- **Parameterized**: exposure mode, worker count, pool sizes — configuration only.
+Implementation-specific binding notes:
+
+- **Portable**: `${DEPLOY_ROOT}`, `${P-2}`, `${P-3}` — bootstrap accepts target path.
+- **Self-contained**: skeleton ships compose, env example, bootstrap, bundled
+  `postgresql.conf`, and settings example.
+- **Parameterized**: exposure mode, worker count, pool sizes, secrets — `.env` only.
 
 ## Dependencies
 
@@ -188,6 +225,16 @@ Keep the catalog principles verbatim (see template). Implementation bindings:
 | P-10 | `RELAY_PUBLIC_URL` | string | *(operator)* | DNS + TLS plan | `info.relay_url` in settings (`wss://…`) |
 | P-11 | `SETTINGS_OVERRIDES` | path | `${NOSTR_DATA_DIR}/settings.yaml` | Optional file | Deep-merged overrides |
 | P-12 | `EXPOSURE_MODE` | enum | `loopback` | `loopback` \| `proxy` \| `tailnet` | Whether Phase 7 runs |
+| P-13 | `SECRET` | string | *(generated)* | `openssl rand -hex 128` in `.env` | Relay signing/crypto; never commit |
+| P-14 | `DB_PASSWORD` | string | *(generated)* | `openssl rand -hex 32` in `.env` | Postgres password |
+| P-15 | `REDIS_PASSWORD` | string | *(generated)* | `openssl rand -hex 32` in `.env` | Redis AUTH |
+| P-16 | `DB_MIN_POOL_SIZE` | integer | `16` | `.env` | Knex pool minimum |
+| P-17 | `DB_MAX_POOL_SIZE` | integer | `64` | `.env` | Knex pool maximum |
+| P-18 | `DB_ACQUIRE_CONNECTION_TIMEOUT` | integer ms | `60000` | `.env` | Pool acquire timeout |
+
+Compose sets **`DB_HOST`**, **`DB_PORT`**, **`REDIS_HOST`**, **`REDIS_PORT`**, and
+**`NOSTR_CONFIG_DIR`** in `skeleton/compose.yml`; operators normally do not tune
+those separately from the skeleton (see `skeleton/.env.example`).
 
 ## Modules
 
@@ -250,8 +297,8 @@ Goal: confirm port and image availability per `modules/image-delivery-and-pinnin
 Steps:
 1. Choose `DEPLOY_ROOT`, `P-3`, and `P-10`.
 2. Pull or load `P-3`; set `PULL_POLICY` accordingly.
-3. Download `postgresql.conf` from nostream at `P-8`:
-   `https://raw.githubusercontent.com/cameri/nostream/${P-8}/postgresql.conf`
+3. Prefer bundled `skeleton/postgresql.conf` via bootstrap; optional fetch from
+   nostream at `P-8` when refreshing tuning for a new release.
 
 Verify: `docker image inspect ${P-3}` succeeds; port `P-2` is free on host.
 
@@ -286,7 +333,7 @@ Steps:
 1. Copy `skeleton/compose.yml` to `${DEPLOY_ROOT}/docker-compose.yml`; set `P-3`, paths.
 2. `cd ${DEPLOY_ROOT} && docker compose up -d`.
 
-Verify: `nostream-migrate` exited 0; `docker compose ps` shows relay up; A-2 passes.
+Verify: A-6 (migrate before relay); `docker compose ps` shows relay up; A-2 passes.
 
 ### Phase 5: Verify relay surface
 
@@ -321,23 +368,52 @@ Steps:
 4. Set **`P-11`** `info.relay_url` to **`P-10`**; recreate relay if already running.
 5. TLS terminates at proxy or tailnet edge; WebSocket upgrade forwarded.
 
-Verify: external client loads NIP-11 from public URL; A-4.
+Verify: external client loads NIP-11 from public URL; A-12.
 
 ## Verification and Acceptance
+
+Automated (from schematic package):
 
 ```
 DEPLOY_ROOT=${P-1} RELAY_BASE=http://127.0.0.1:${P-2} /path/to/schematic/scripts/relay-verify.sh
 ```
 
-- **A-1** (R-8): NIP-11 `GET /` with `Accept: application/nostr+json` returns
-  JSON with `name` or `description`. expected: HTTP 200, valid JSON.
-- **A-2** (R-6, R-7): `/healthz` → 200; `/readyz` → 200 with `"status":"ok"` or
-  equivalent when dependencies up. expected: both 200 when stack healthy.
-- **A-3** (R-5): Published port is loopback-only in default skeleton.
-  `docker compose port nostream ${P-2}` shows `127.0.0.1`. expected: not `0.0.0.0`.
-- **A-4** (R-10, conditional): Public `P-10` serves NIP-11 over HTTPS when Phase 7 done.
-- **A-5** (R-1): With Postgres stopped, `/readyz` fails while `/healthz` may still pass;
-  restore Postgres, recreate relay, `/readyz` recovers.
+Manual or scripted (run from **`P-1`** after `docker compose up -d` unless noted):
+
+- **A-1** (R-8): NIP-11 — script checks JSON with `name` or `description` (HTTP 200).
+- **A-2** (R-6, R-7): `/healthz` → 200; `/readyz` → 200 when dependencies up (script).
+- **A-3** (R-5): Loopback bind — `docker compose port nostream ${P-2}` → `127.0.0.1:*`,
+  not `0.0.0.0` (script when `DEPLOY_ROOT` set).
+- **A-4** (R-4): `.env` exists only on host: `stat -c '%a' ${P-1}/.env` → `600`.
+  Grep this schematic package (not `${P-1}`) for committed secrets:
+  `grep -rE '^SECRET=|^DB_PASSWORD=|^REDIS_PASSWORD=' schematics/run-a-decentralized-social-network-relay/skeleton/`
+  → matches only placeholders in `.env.example`, never live values.
+- **A-5** (R-2): Migrate and relay share one image:
+  `cd ${P-1} && docker compose config --format json | jq -r '.services | ."nostream".image, ."nostream-migrate".image'`
+  → two identical lines.
+- **A-6** (R-1): Migrate succeeded before relay start:
+  `docker inspect nostream-migrate --format '{{.State.ExitCode}}'` → `0`;
+  relay `StartedAt` after migrate `FinishedAt` (compare
+  `docker inspect -f '{{.State.StartedAt}}' nostream` vs
+  `docker inspect -f '{{.State.FinishedAt}}' nostream-migrate`).
+- **A-7** (R-3): Postgres data on host path:
+  `test -d ${P-1}/.nostr/data && stat -c '%F' ${P-1}/.nostr/data` → `directory`.
+  Optional persistence: insert a marker row or note, `docker compose down &&
+  docker compose up -d`, confirm data still present.
+- **A-8** (R-7): With Postgres stopped (`docker compose stop nostream-db`),
+  `/readyz` → non-200 while `/healthz` may still → 200; restore DB and relay,
+  `/readyz` recovers.
+- **A-9** (R-10): Deliberate image pin recorded:
+  `grep -E '^NOSTREAM_IMAGE=' ${P-1}/.env` shows a non-empty tag or digest;
+  `docker image inspect "$(grep -E '^NOSTREAM_IMAGE=' ${P-1}/.env | cut -d= -f2-)" --format '{{index .RepoDigests 0}}'`
+  → non-empty when pulled from GHCR (digest pin proof).
+- **A-10** (R-9): Graceful drain — connect a WebSocket client, run
+  `docker stop -t 45 nostream`; while stopping, `/readyz` → 503 with
+  `"status":"draining"` *(observed per deploy README)*; container exits before
+  `stop_grace_period` elapses after drain timeout (default 30s vs 45s grace).
+- **A-11** (R-8, R-6, R-7, R-5): Run `scripts/relay-verify.sh` — aggregates A-1–A-3.
+- **A-12** (conditional, Phase 7): Public **`P-10`** serves NIP-11 over HTTPS
+  (`curl -sS -H 'Accept: application/nostr+json' https://<host>/`).
 
 ## Failure Modes and Rollback
 
@@ -375,5 +451,6 @@ Open questions:
 
 - **Q-1**: Pin by digest vs `:main` tag? **Default**: tag matching release process;
   digest pin for highest reproducibility.
-- **Q-2**: Single-host vs HAProxy blue/green? **Default**: single host here;
-  fleet cutover is a separate schematic or upstream HAProxy doc.
+- **Q-2**: Single-host vs fleet LB cutover? **Default**: single host here;
+  fleet behaviour uses `modules/load-balancer-cutover.md` and upstream
+  `deploy/README.md` health-check section.

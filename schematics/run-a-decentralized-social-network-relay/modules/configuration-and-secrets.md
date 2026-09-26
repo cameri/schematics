@@ -2,6 +2,19 @@
 
 Responsibility: `.env` secrets, relay tuning, and optional YAML overrides.
 
+## Inputs
+
+- **`P-13`**–**`P-18`**, **`P-5`**, **`P-6`**, **`P-7`**, **`P-2`**, **`P-11`**, **`P-10`**.
+
+## Outputs
+
+- `${DEPLOY_ROOT}/.env` (mode 600); optional **`P-11`** overrides merged at relay start.
+
+## Idempotency
+
+Re-editing `.env` and `docker compose up -d --force-recreate nostream` applies
+new secrets; rotating **`P-13`** may invalidate admin sessions.
+
 ## `.env` (host only, mode 600)
 
 Required keys (see `skeleton/.env.example`):

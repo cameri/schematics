@@ -3,6 +3,19 @@
 Responsibility: get **`P-3`** on the host, pin a deliberate version, and refresh
 release-managed files without clobbering secrets.
 
+## Inputs
+
+- Registry access or image tarballs, **`P-3`**, **`P-9`**, **`P-8`**, bootstrap package.
+
+## Outputs
+
+- Images present locally; `${DEPLOY_ROOT}` release-managed files match target release.
+
+## Idempotency
+
+`docker pull`, `docker load`, and `bootstrap.sh` may be repeated; operator `.env`
+is preserved.
+
 ## Where images come from
 
 The reference relay image is published to GHCR as **`ghcr.io/cameri/nostream`**.

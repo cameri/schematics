@@ -2,6 +2,19 @@
 
 Responsibility: who can reach the relay HTTP/WebSocket port and how probes behave.
 
+## Inputs
+
+- Relay listening on **`P-2`** (loopback publish), optional **`P-12`**, **`P-10`**.
+
+## Outputs
+
+- Probe URLs `/healthz` and `/readyz`; exposure path for Phase 7 when not loopback.
+
+## Idempotency
+
+Changing **`P-12`** adds or removes proxy/tunnel config on the host; relay compose
+unchanged unless port mapping is edited deliberately.
+
 ## Default posture (R-5)
 
 Skeleton publishes:

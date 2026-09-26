@@ -4,6 +4,18 @@ Responsibility: prepare a Linux host before bootstrap — engine, disk, firewall
 and reboot behaviour. The relay stack assumes this module is satisfied or
 deferred explicitly (for example a managed host that already runs Docker).
 
+## Inputs
+
+- Linux host, operator SSH access, chosen **`P-1`**, planned **`P-12`**.
+
+## Outputs
+
+- Docker Engine + Compose v2 enabled; firewall aligned with loopback relay posture.
+
+## Idempotency
+
+Re-running package installs or `ufw` rules is safe; verify `docker info` after changes.
+
 ## Target environment
 
 | Assumption | Discovery | If wrong |

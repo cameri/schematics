@@ -4,6 +4,20 @@ Responsibility: upgrades, bootstrap refresh, and backups. Image transfer and
 pinning live in `modules/image-delivery-and-pinning.md`; public hostname setup
 in `modules/reverse-proxy-sketch.md`.
 
+## Inputs
+
+- Running stack at **`P-1`**, **`P-3`** / `NOSTREAM_IMAGE` in `.env`, schematic
+  package path for verification scripts.
+
+## Outputs
+
+- Upgraded containers, refreshed release-managed files, backup artefacts per operator schedule.
+
+## Idempotency
+
+`docker compose up -d` and bootstrap refresh are safe to re-run; bootstrap never
+overwrites existing `.env` or `settings.yaml`.
+
 ## First start
 
 ```bash
