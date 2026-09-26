@@ -7,7 +7,7 @@ set -euo pipefail
 #   ./bootstrap.sh [/opt/nostream]
 #
 # Requires: skeleton/compose.yml, skeleton/.env.example, and postgresql.conf
-# either in SCHEMATIC_PKG/postgresql.conf or fetch via NOSTREAM_GITHUB_REF.
+# `skeleton/postgresql.conf` (bundled, air-gap safe) or fetch via NOSTREAM_GITHUB_REF.
 
 TARGET="${1:-/opt/nostream}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,7 +59,7 @@ Next steps:
   1. Edit $TARGET/.env (SECRET, DB_PASSWORD, REDIS_PASSWORD, NOSTREAM_IMAGE)
   2. Load or pull the nostream image on this host
   3. cd $TARGET && docker compose up -d
-  4. RELAY_BASE=http://127.0.0.1:\${RELAY_PORT:-8008} $PKG_ROOT/scripts/relay-verify.sh
+  4. DEPLOY_ROOT=$TARGET RELAY_BASE=http://127.0.0.1:\${RELAY_PORT:-8008} $PKG_ROOT/scripts/relay-verify.sh
 
 Optional overrides:
   cp $SCRIPT_DIR/settings.yaml.example $TARGET/.nostr/settings.yaml

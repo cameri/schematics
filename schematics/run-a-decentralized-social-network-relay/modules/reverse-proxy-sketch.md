@@ -8,9 +8,11 @@ Responsibility: terminate TLS and forward HTTP + WebSocket to the relay on
 
 1. **One public hostname** for NIP-11 and WebSocket — must match **`P-10`**
    (`info.relay_url` uses `wss://…`; HTTP NIP-11 uses the same host over HTTPS).
-2. **Upstream** is always loopback: `127.0.0.1:${P-2}`, not the container name
-   (the proxy runs on the host or in a container with `network_mode: host` / host
-   gateway access to loopback).
+2. **Upstream** is the relay on the **host** loopback: `127.0.0.1:${P-2}`, not
+   the Docker service name. If the proxy runs **on the host**, use that address.
+   If the proxy runs **in another container**, `127.0.0.1` inside that container
+   is not the host — use `host.docker.internal:${P-2}` (Linux: add
+   `extra_hosts: ["host.docker.internal:host-gateway"]`) or `network_mode: host`.
 3. **WebSocket upgrade** must pass through; Nostr clients use `wss://` on `/`.
 4. **Probe path** for load balancers: `GET /readyz` on the upstream (see
    `modules/exposure-and-health.md`), timeout ≥ 5s.
@@ -24,13 +26,13 @@ Install Caddy on the host. Example `Caddyfile`:
 
 ```caddy
 relay.example.com {
-    reverse_proxy 127.0.0.1:8008
+    reverse_proxy 127.0.0.1:${RELAY_PORT:-8008}
 }
 ```
 
-Caddy handles TLS (Let's Encrypt) and WebSocket upgrades by default.
-
-Set **`P-2`** in `.env` if not `8008` and change the upstream port accordingly.
+Caddy handles TLS (Let's Encrypt) and WebSocket upgrades by default. Match the
+port to **`P-2`** / `RELAY_PORT` in `${DEPLOY_ROOT}/.env` (substitute the
+numeric port in the Caddyfile — Caddy does not read compose `.env` automatically).
 
 Verify:
 
@@ -57,7 +59,7 @@ server {
     ssl_certificate_key /path/to/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8008;
+        proxy_pass http://127.0.0.1:${RELAY_PORT:-8008};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -88,7 +90,9 @@ external network (acceptance **A-4**).
 
 For **`P-12=tailnet`**, prefer schematic
 **expose-container-services-privately** instead of a public reverse proxy.
-Clients use `https://<name>.<tailnet>`; keep the relay on loopback upstream.
+Clients use **`wss://<name>.<tailnet>`** for Nostr WebSocket and
+**`https://<name>.<tailnet>`** for NIP-11 over HTTP; set **`P-10`** /
+`info.relay_url` to the `wss://` form. Keep the relay on loopback upstream.
 
 ## Common failures
 

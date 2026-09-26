@@ -6,7 +6,7 @@ status: draft
 spec: 1
 description: A production Nostr relay (nostream) on Docker — host prep, Postgres and Redis, GHCR image pinning, migrations-before-start, loopback HTTP, reverse-proxy sketches, NIP-11 and /readyz probes, optional settings and tailnet exposure.
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # Schematic: Run a Decentralized Social Network Relay
@@ -293,7 +293,9 @@ Verify: `nostream-migrate` exited 0; `docker compose ps` shows relay up; A-2 pas
 Goal: NIP-11 and readiness.
 
 Steps:
-1. Run `scripts/relay-verify.sh` with `RELAY_BASE=http://127.0.0.1:${P-2}`.
+1. Run `scripts/relay-verify.sh` from the schematic package with
+   `DEPLOY_ROOT=${P-1}` and `RELAY_BASE=http://127.0.0.1:${P-2}` (see
+   `modules/operations.md`).
 
 Verify: A-1, A-2, A-3 pass.
 
@@ -324,7 +326,7 @@ Verify: external client loads NIP-11 from public URL; A-4.
 ## Verification and Acceptance
 
 ```
-RELAY_BASE=http://127.0.0.1:${P-2} scripts/relay-verify.sh
+DEPLOY_ROOT=${P-1} RELAY_BASE=http://127.0.0.1:${P-2} /path/to/schematic/scripts/relay-verify.sh
 ```
 
 - **A-1** (R-8): NIP-11 `GET /` with `Accept: application/nostr+json` returns

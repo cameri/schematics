@@ -8,7 +8,7 @@ Skeleton publishes:
 
 ```yaml
 ports:
-  - 127.0.0.1:${RELAY_PORT:-8008}:8008
+  - 127.0.0.1:${RELAY_PORT:-8008}:${RELAY_PORT:-8008}
 ```
 
 Only local processes and reverse proxies on the same host can connect. Public

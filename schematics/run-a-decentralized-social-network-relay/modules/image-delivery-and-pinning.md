@@ -80,11 +80,21 @@ Bootstrap and refresh copy **only** files that track upstream releases:
 Re-run `skeleton/bootstrap.sh ${DEPLOY_ROOT}` after a nostream release when
 compose or Postgres tuning changed. Existing `.env` and settings are preserved.
 
+**Air-gapped bootstrap:** this package ships `skeleton/postgresql.conf` (matched
+to upstream nostream at authoring time). Bootstrap installs it without GitHub
+access; refresh the bundled file when rebasing the schematic on a new nostream
+release.
+
 ## Upgrade sequence
+
+Use the image tag from **`.env`** (`NOSTREAM_IMAGE`, same as **`P-3`** in the
+schematic). Compose reads `.env` for `${NOSTREAM_IMAGE}`; a bare shell variable
+`${P-3}` is schematic notation only and will not pull the right image.
 
 ```bash
 cd "${DEPLOY_ROOT}"
-docker pull "${P-3}"    # or docker load
+NOSTREAM_IMAGE="$(grep -E '^NOSTREAM_IMAGE=' .env | tail -1 | cut -d= -f2- | tr -d " \t\r\"'")"
+docker pull "${NOSTREAM_IMAGE}"    # or docker load
 docker compose up -d
 ```
 

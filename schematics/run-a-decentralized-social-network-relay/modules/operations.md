@@ -18,7 +18,9 @@ docker compose ps
 See `modules/image-delivery-and-pinning.md` for pull vs save/load.
 
 ```bash
-docker pull ${P-3}   # or docker load
+cd "${DEPLOY_ROOT}"
+NOSTREAM_IMAGE="$(grep -E '^NOSTREAM_IMAGE=' .env | tail -1 | cut -d= -f2- | tr -d " \t\r\"'")"
+docker pull "${NOSTREAM_IMAGE}"   # or docker load the same tag
 docker compose up -d
 ```
 
@@ -52,6 +54,17 @@ docker compose logs nostream-migrate
 
 ## Local verification
 
+Run from **`P-1`** after the stack is up. The verify script lives in the
+schematic package, not in the deploy root (bootstrap does not copy it).
+
 ```bash
-RELAY_BASE=http://127.0.0.1:${RELAY_PORT:-8008} ./scripts/relay-verify.sh
+cd "${DEPLOY_ROOT}"
+RELAY_PORT="$(grep -E '^RELAY_PORT=' .env | tail -1 | cut -d= -f2- | tr -d " \t\r\"'")"
+RELAY_PORT="${RELAY_PORT:-8008}"
+DEPLOY_ROOT="${DEPLOY_ROOT}" RELAY_BASE="http://127.0.0.1:${RELAY_PORT}" \
+  "${SCHEMATIC_PKG}/scripts/relay-verify.sh"
 ```
+
+Set **`SCHEMATIC_PKG`** to the checkout path of this schematic (the directory
+that contains `scripts/` and `SCHEMATIC.md`). Bootstrap prints the same
+invocation using its package root.
