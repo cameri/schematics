@@ -73,12 +73,29 @@ schematic package, not in the deploy root (bootstrap does not copy it).
 
 ```bash
 cd "${DEPLOY_ROOT}"
-RELAY_PORT="$(grep -E '^RELAY_PORT=' .env | tail -1 | cut -d= -f2- | tr -d " \t\r\"'")"
-RELAY_PORT="${RELAY_PORT:-8008}"
-DEPLOY_ROOT="${DEPLOY_ROOT}" RELAY_BASE="http://127.0.0.1:${RELAY_PORT}" \
+DEPLOY_ROOT="${DEPLOY_ROOT}" \
+  COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}" \
   "${SCHEMATIC_PKG}/scripts/relay-verify.sh"
 ```
 
 Set **`SCHEMATIC_PKG`** to the checkout path of this schematic (the directory
-that contains `scripts/` and `SCHEMATIC.md`). Bootstrap prints the same
-invocation using its package root.
+that contains `scripts/` and `SCHEMATIC.md`). The script reads **`RELAY_PORT`**
+from `${DEPLOY_ROOT}/.env`; do not set **`RELAY_BASE`** unless overriding that.
+For blue/green stacks, set **`COMPOSE_PROJECT_NAME`** (**`P-20`**) to match
+`docker compose -p`. Bootstrap prints the same invocation using its package root.
+
+## Failure behaviour
+
+Upgrade or migrate failure leaves the previous relay image running if recreate
+was not forced; a failed migrate exit blocks the relay from starting (R-1).
+
+## Removal notes
+
+Follow schematic **Removal** — this module does not delete `${DEPLOY_ROOT}` data;
+`docker compose down -v` drops the Redis named volume only when explicitly requested.
+
+## Pull policy
+
+Online hosts may set `PULL_POLICY=missing` in `.env` instead of `never`; see
+`modules/image-delivery-and-pinning.md`. Air-gapped hosts keep `never` after
+`docker load`.

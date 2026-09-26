@@ -16,6 +16,16 @@ deferred explicitly (for example a managed host that already runs Docker).
 
 Re-running package installs or `ufw` rules is safe; verify `docker info` after changes.
 
+## Failure behaviour
+
+Insufficient disk or RAM prevents Postgres from starting; Docker not enabled at
+boot leaves the stack down after reboot until `docker compose up -d` runs again.
+
+## Removal notes
+
+Disabling firewall rules or removing Docker does not delete **`P-4`** data; data
+removal is schematic **Removal**.
+
 ## Target environment
 
 | Assumption | Discovery | If wrong |
@@ -51,6 +61,11 @@ Verify the daemon survives reboot: reboot once in a maintenance window, then
 | `${DEPLOY_ROOT}/.nostr/data` | Stored Nostr events | Start with tens of GB free; monitor weekly |
 | `${DEPLOY_ROOT}/.nostr/db-logs` | Postgres logging | Rotate or truncate per your log policy |
 | Redis named volume `cache` | Cache keys | Usually smaller than Postgres; rebuildable |
+
+**Memory:** plan at least **2 GiB RAM** free for Postgres + Redis + relay on a
+small relay (more for higher **`P-7`** / pool sizes). Postgres OOM or heavy
+swapping shows up as slow `/readyz` or pool timeouts — raise RAM or lower
+`DB_MAX_POOL_SIZE` / `WORKER_COUNT`.
 
 Discovery:
 

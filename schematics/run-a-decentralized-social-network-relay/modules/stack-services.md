@@ -56,8 +56,9 @@ depends_on:
 | `cache` (named volume) | redis | rw | Redis AOF/RDB |
 | `${DEPLOY_ROOT}/.nostr` → `/home/node/.nostr` | relay | rw | Settings, backups, audit log |
 
-Postgres data and relay settings share the `.nostr` parent directory but
-**different subpaths** — bootstrap creates both.
+Postgres data and relay settings share **`P-4`** (`.nostr` under **`P-1`**) but
+**different subpaths** — bootstrap creates **`${P-4}/data`** and **`${P-4}/db-logs`**
+(relay settings file is optional later).
 
 ## Process identity
 
@@ -70,6 +71,17 @@ and Redis use their upstream image users. Match the reference image:
 - Postgres, Redis: `always` or `unless-stopped`.
 - Relay: `on-failure` with `stop_grace_period` ≥ 45s (R-9).
 - Migrate: no restart — exits after one run.
+
+## Failure behaviour
+
+If `nostream-db` or `nostream-cache` fails healthchecks, migrate and relay do not
+start (`depends_on` conditions stay unmet). If migrate exits non-zero, the relay
+must not start (R-1). If the relay starts without Redis/Postgres, `/readyz` fails (R-7).
+
+## Removal notes
+
+`docker compose down` stops containers; Postgres files remain under **`P-4`/data**
+until the operator deletes them (see schematic Removal).
 
 ## Parameters used
 

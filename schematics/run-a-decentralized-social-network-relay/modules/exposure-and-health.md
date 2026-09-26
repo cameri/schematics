@@ -15,6 +15,17 @@ Responsibility: who can reach the relay HTTP/WebSocket port and how probes behav
 Changing **`P-12`** adds or removes proxy/tunnel config on the host; relay compose
 unchanged unless port mapping is edited deliberately.
 
+## Failure behaviour
+
+Publishing **`P-2`** on `0.0.0.0` bypasses the default R-5 posture. Load balancers
+that probe `/healthz` instead of `/readyz` may route traffic to draining or
+dependency-down relays.
+
+## Removal notes
+
+Remove proxy/tunnel hostnames before stopping the relay; loopback publish needs
+no extra teardown beyond compose down.
+
 ## Default posture (R-5)
 
 Skeleton publishes:
@@ -38,8 +49,8 @@ Configure upstream probe timeout **above** dependency ping timeout (~3s default)
 so slow-but-healthy backends do not flap.
 
 On **SIGTERM**, relay may return `/readyz` **503** with `"status":"draining"`
-while finishing WebSocket drain (`WS_DRAIN_TIMEOUT_MS`, default 30s). Compose
-`stop_grace_period` must exceed drain (reference: 45s).
+while finishing WebSocket drain (**`P-19`** / `WS_DRAIN_TIMEOUT_MS`, default
+30000 ms). Compose `stop_grace_period` must exceed drain (reference: 45s).
 
 ## Exposure patterns (`P-12`)
 
@@ -58,4 +69,5 @@ NIP-11 and WebSocket must share the **same public hostname** clients use
 ## Admin and metrics
 
 `/admin` and Prometheus endpoints are optional settings features — not part of
-default acceptance. Keep admin off until `SECRET` and `ADMIN_PASSWORD` are set.
+default acceptance. Keep admin off until `SECRET` is set and admin credentials
+are configured in settings overrides (`admin` block), not in `.env`.

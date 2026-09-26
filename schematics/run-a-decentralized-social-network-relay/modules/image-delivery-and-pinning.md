@@ -16,6 +16,16 @@ release-managed files without clobbering secrets.
 `docker pull`, `docker load`, and `bootstrap.sh` may be repeated; operator `.env`
 is preserved.
 
+## Failure behaviour
+
+With **`P-9=never`**, missing images cause `docker compose up` to fail immediately.
+Wrong tag in `.env` pulls or loads an unintended schema version — migrate may fail.
+
+## Removal notes
+
+Removing loaded images from the host does not delete **`P-4`**; reload from tar or
+registry before the next `compose up`.
+
 ## Where images come from
 
 The reference relay image is published to GHCR as **`ghcr.io/cameri/nostream`**.

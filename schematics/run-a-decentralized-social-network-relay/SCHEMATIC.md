@@ -6,7 +6,7 @@ status: draft
 spec: 1
 description: A production Nostr relay (nostream) on Docker — host prep, Postgres and Redis, GHCR image pinning, migrations-before-start, loopback HTTP, reverse-proxy sketches, NIP-11 and /readyz probes, optional settings and tailnet exposure.
 created: 2026-09-26
-updated: 2026-09-28
+updated: 2026-09-26
 ---
 
 # Schematic: Run a Decentralized Social Network Relay
@@ -14,9 +14,8 @@ updated: 2026-09-28
 > **Reverse-engineered** from the [nostream](https://github.com/cameri/nostream)
 > production deploy path (`deploy/docker-compose.prod.yml`, `deploy/bootstrap.sh`,
 > `deploy/README.md`). Behaviour was reconstructed from the published compose
-> contract, operator docs, and the relay's HTTP/Nostr surfaces. Items marked
-> *(observed)* were checked against a running dev stack; others follow upstream
-> documentation.
+> contract, operator docs, and the relay's HTTP/Nostr surfaces. *(observed)*
+> marks behaviour verified on a running relay; other evidence cites deploy artefacts.
 
 After implementing this schematic, the host runs **one Nostr relay** that
 speaks the WebSocket protocol clients expect, persists events in **PostgreSQL**,
@@ -111,7 +110,7 @@ exposure to the Internet is an explicit, separate decision.
 - Relay and migrate use the **same image reference** (`P-3`).
 - Relay listens on **`P-2`** inside the container; default publish is
   **`127.0.0.1:P-2`** only (R-5).
-- Settings defaults come from the **image**; overrides merge shallowly from
+- Settings defaults come from the **image**; overrides **deep-merge** from
   `.nostr/settings.yaml` when present.
 - Relay process runs as **non-root** (`node`, uid 1000) in the reference image.
 - **`/healthz`** liveness and **`/readyz`** readiness are distinct (R-6, R-7).
@@ -153,15 +152,15 @@ artefacts and *(observed)* checks where noted):
 
 | Req | Evidence |
 |-----|----------|
-| R-1 | `deploy/docker-compose.prod.yml`: `nostream` `depends_on` `nostream-migrate` with `condition: service_completed_successfully` *(observed in compose)* |
-| R-2 | Same file: `nostream` and `nostream-migrate` share one image reference (`ghcr.io/cameri/nostream:main` or `${NOSTREAM_IMAGE}`) *(observed in compose)* |
-| R-3 | Postgres bind mount `./.nostr/data` (relative to `${DEPLOY_ROOT}` compose file); Redis uses named volume `cache` *(observed in skeleton compose)* |
+| R-1 | `deploy/docker-compose.prod.yml`: `nostream` `depends_on` `nostream-migrate` with `condition: service_completed_successfully` |
+| R-2 | Same file: `nostream` and `nostream-migrate` share one image reference (`ghcr.io/cameri/nostream:main` or `${NOSTREAM_IMAGE}`) |
+| R-3 | Postgres bind mount `./.nostr/data` (relative to `${DEPLOY_ROOT}` compose file); Redis uses named volume `cache` |
 | R-4 | `deploy/README.md`: `.env` secrets on host only; bootstrap creates `.env` mode 600 |
-| R-5 | Prod compose publishes `127.0.0.1:8008:8008` only *(observed in compose)* |
+| R-5 | Prod compose publishes `127.0.0.1:8008:8008` only |
 | R-6 | `deploy/README.md`: `/healthz` liveness — 200 while process runs, no DB check |
 | R-7 | `deploy/README.md`: `/readyz` readiness — Postgres + Redis; 503 when draining on SIGTERM *(observed: `/readyz` JSON when stack healthy)* |
 | R-8 | NIP-11 over `GET /` with `Accept: application/nostr+json` *(observed on dev stack)* |
-| R-9 | `deploy/README.md`: drain via `WS_DRAIN_TIMEOUT_MS` (default 30s); compose `stop_grace_period: 45s` *(observed in prod compose)* |
+| R-9 | `deploy/README.md`: drain via `WS_DRAIN_TIMEOUT_MS` (default 30s); compose `stop_grace_period: 45s` |
 | R-10 | `deploy/README.md` + `docs/DEPLOYMENT.md`: deliberate GHCR tag (`main` or `sha-<commit>`), not anonymous `latest` |
 
 ## Design Principles Binding the Implementation
@@ -176,16 +175,15 @@ artefacts and *(observed)* checks where noted):
    exactly as this document describes; no surprise behaviours.
 5. **Idempotent and deterministic**: every phase is safe to re-run; checks
    give the same verdict every time.
-6. **Parameterized and modular**: all tunables flow from the Parameters
-   table; concerns are separated per the Modules section.
-7. **Dependencies called out**: implement the declared failure behaviour for
-   every Dependency.
-8. **Applicable context respected**: discover what Must discover locally
-   says; do not silently assume beyond May assume.
-9. **Configuration flexibility**: behaviour differences come from
-   configuration, never source edits.
-10. **Pluggable**: implement the attach/remove seams defined in Modules and
-    Removal.
+6. **Parameterized and modular**: every tunable in one table, every concern a
+   module; behaviour differences are configuration, never code edits.
+7. **Dependencies called out**: with discovery and failure behaviour.
+8. **Composable in kind**: a dependency may be another schematic, pinned to a
+   commit and a content hash (see **D-5**).
+9. **Applicable context stated**: discover vs assume vs don't-change (Applicable
+   Context section).
+10. **Pluggable**: clean seams and a stated removal procedure (Modules +
+    Removal).
 
 Implementation-specific binding notes:
 
@@ -216,7 +214,7 @@ Implementation-specific binding notes:
 | P-1  | `DEPLOY_ROOT` | path | `/opt/nostream` | Operator convention | Where compose, `.env`, and `.nostr/` live |
 | P-2  | `RELAY_PORT` | integer | `8008` | `.env` / compose | HTTP + WebSocket port inside relay |
 | P-3  | `NOSTREAM_IMAGE` | string | `ghcr.io/cameri/nostream:main` | GHCR or loaded tar | Relay and migrate image |
-| P-4  | `NOSTR_DATA_DIR` | path | `${DEPLOY_ROOT}/.nostr` | Bootstrap | Settings, backups, Postgres bind mount parent |
+| P-4  | `NOSTR_DATA_DIR` | path | `${DEPLOY_ROOT}/.nostr` | Bootstrap env or default | Settings, backups, Postgres paths; `bootstrap.sh` creates `${P-4}/data` and `db-logs`. Reference compose uses `./.nostr` under **`P-1`** (equivalent when `NOSTR_DATA_DIR` unset) |
 | P-5  | `DB_NAME` | string | `nostr_ts_relay` | `.env` | Postgres database name |
 | P-6  | `DB_USER` | string | `nostr_ts_relay` | `.env` | Postgres user |
 | P-7  | `WORKER_COUNT` | integer | `2` | `.env` | Client worker processes in relay |
@@ -231,10 +229,14 @@ Implementation-specific binding notes:
 | P-16 | `DB_MIN_POOL_SIZE` | integer | `16` | `.env` | Knex pool minimum |
 | P-17 | `DB_MAX_POOL_SIZE` | integer | `64` | `.env` | Knex pool maximum |
 | P-18 | `DB_ACQUIRE_CONNECTION_TIMEOUT` | integer ms | `60000` | `.env` | Pool acquire timeout |
+| P-19 | `WS_DRAIN_TIMEOUT_MS` | integer ms | `30000` | Relay env / upstream default | WebSocket drain before exit (R-9); compose `stop_grace_period` must exceed this |
+| P-20 | `COMPOSE_PROJECT_NAME` | string | *(default project)* | Blue/green / multi-stack | Pass to `relay-verify.sh` when not using default compose project |
 
-Compose sets **`DB_HOST`**, **`DB_PORT`**, **`REDIS_HOST`**, **`REDIS_PORT`**, and
-**`NOSTR_CONFIG_DIR`** in `skeleton/compose.yml`; operators normally do not tune
-those separately from the skeleton (see `skeleton/.env.example`).
+Compose sets **`DB_HOST`**, **`DB_PORT`**, **`REDIS_HOST`**, **`REDIS_PORT`**,
+**`REDIS_USER`**, and **`NOSTR_CONFIG_DIR`** in `skeleton/compose.yml` (with
+**`REDIS_USER`** overridable via `.env`). Operators normally do not tune host/port
+pairs separately (see `skeleton/.env.example`). Admin credentials when enabled
+live in settings overrides (`admin` block), not in `.env`.
 
 ## Modules
 
@@ -341,8 +343,8 @@ Goal: NIP-11 and readiness.
 
 Steps:
 1. Run `scripts/relay-verify.sh` from the schematic package with
-   `DEPLOY_ROOT=${P-1}` and `RELAY_BASE=http://127.0.0.1:${P-2}` (see
-   `modules/operations.md`).
+   `DEPLOY_ROOT=${P-1}` (and `COMPOSE_PROJECT_NAME=…` if not the default project;
+   see `modules/operations.md`). Do not set `RELAY_BASE` unless overriding port discovery.
 
 Verify: A-1, A-2, A-3 pass.
 
@@ -375,7 +377,7 @@ Verify: external client loads NIP-11 from public URL; A-12.
 Automated (from schematic package):
 
 ```
-DEPLOY_ROOT=${P-1} RELAY_BASE=http://127.0.0.1:${P-2} /path/to/schematic/scripts/relay-verify.sh
+DEPLOY_ROOT=${P-1} /path/to/schematic/scripts/relay-verify.sh
 ```
 
 Manual or scripted (run from **`P-1`** after `docker compose up -d` unless noted):
@@ -392,9 +394,11 @@ Manual or scripted (run from **`P-1`** after `docker compose up -d` unless noted
   `cd ${P-1} && docker compose config --format json | jq -r '.services | ."nostream".image, ."nostream-migrate".image'`
   → two identical lines.
 - **A-6** (R-1): Migrate succeeded before relay start (from **`P-1`**):
-  `cd ${P-1} && docker compose ps -a --format json nostream-migrate | jq -e '.ExitCode == 0'`;
-  relay `StartedAt` after migrate `FinishedAt` (compare IDs from
-  `docker compose ps -aq nostream` and `docker compose ps -aq nostream-migrate`).
+  `migrate_id=$(docker compose ps -aq nostream-migrate | head -1)` and
+  `relay_id=$(docker compose ps -q nostream | head -1)`;
+  `docker inspect --format '{{.State.ExitCode}}' "$migrate_id"` → `0`;
+  `docker inspect --format '{{.State.FinishedAt}}' "$migrate_id"` strictly before
+  `docker inspect --format '{{.State.StartedAt}}' "$relay_id"` (RFC3339 compare).
 - **A-7** (R-3): Postgres data on host path:
   `test -d ${P-1}/.nostr/data && stat -c '%F' ${P-1}/.nostr/data` → `directory`.
   Optional persistence: insert a marker row or note, `docker compose down &&
@@ -444,7 +448,8 @@ Decisions:
   dev `docker-compose.yml` (which builds from source). Operators following this
   schematic match GHCR production layout.
 - 2026-09-26 — **`pull_policy: never`** default suits air-gapped and CI-loaded
-  images; online hosts may set `missing` if desired (document in operations module).
+  images; online hosts may set `PULL_POLICY=missing` in `.env` (see
+  `modules/image-delivery-and-pinning.md`).
 
 Open questions:
 

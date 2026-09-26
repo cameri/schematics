@@ -17,6 +17,17 @@ exposes so fleet layouts can be built separately.
 
 Cutover steps may be repeated per release; each instance keeps its own **`P-1`**.
 
+## Failure behaviour
+
+Routing traffic before green `/readyz` is 200 causes client errors. Probing
+`/healthz` during drain sends traffic to a relay that rejects new WebSockets.
+
+## Removal notes
+
+Drain backends with `docker compose stop` before removing LB pool members; use
+**`COMPOSE_PROJECT_NAME`** (**`P-20`**) when running `relay-verify.sh` against a
+non-default project.
+
 ## When this applies
 
 - Two or more relay instances behind HAProxy, nginx upstream groups, or cloud LB.

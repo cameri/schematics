@@ -1,5 +1,6 @@
 # Optional relay overrides — copy to ${DEPLOY_ROOT}/.nostr/settings.yaml when needed.
 # Omit entirely to use defaults from the container image.
+# Values here deep-merge over image defaults (see modules/configuration-and-secrets.md).
 
 info:
   relay_url: wss://relay.example.com

@@ -15,6 +15,17 @@ Responsibility: `.env` secrets, relay tuning, and optional YAML overrides.
 Re-editing `.env` and `docker compose up -d --force-recreate nostream` applies
 new secrets; rotating **`P-13`** may invalidate admin sessions.
 
+## Failure behaviour
+
+Missing or placeholder **`P-13`** / DB / Redis passwords prevent a healthy relay;
+migrate may fail before the relay starts. Invalid YAML in **`P-11`** can block
+relay startup — validate with a YAML linter before recreate.
+
+## Removal notes
+
+Delete `${DEPLOY_ROOT}/.env` only after rotating clients away; scrub secrets from
+backups if `.env` was archived.
+
 ## `.env` (host only, mode 600)
 
 Required keys (see `skeleton/.env.example`):

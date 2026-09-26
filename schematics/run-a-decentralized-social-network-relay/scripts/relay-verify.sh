@@ -2,10 +2,8 @@
 # Acceptance checks for run-a-decentralized-social-network-relay (A-1, A-2, A-3).
 set -eu
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
-
-# Deploy root: directory containing docker-compose.yml and .env (optional).
 DEPLOY_ROOT="${DEPLOY_ROOT:-}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}"
 
 load_relay_port() {
   if [ -n "$DEPLOY_ROOT" ] && [ -f "${DEPLOY_ROOT}/.env" ]; then
@@ -21,6 +19,17 @@ load_relay_port
 RELAY_BASE="${RELAY_BASE:-http://127.0.0.1:${RELAY_PORT}}"
 
 FAIL=0
+
+compose() {
+  if [ -z "$DEPLOY_ROOT" ]; then
+    return 1
+  fi
+  if [ -n "$COMPOSE_PROJECT_NAME" ]; then
+    ( cd "$DEPLOY_ROOT" && docker compose -p "$COMPOSE_PROJECT_NAME" "$@" )
+  else
+    ( cd "$DEPLOY_ROOT" && docker compose "$@" )
+  fi
+}
 
 check() {
   name="$1"
@@ -46,13 +55,15 @@ readyz_ok() {
 }
 
 nip11_ok() {
+  if ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
+    printf 'relay-verify: NIP-11 check requires python3 or jq\n' >&2
+    return 1
+  fi
   _body="$(curl -sf --max-time 10 -H 'Accept: application/nostr+json' "${RELAY_BASE}/")"
   if command -v python3 >/dev/null 2>&1; then
-    printf '%s' "$_body" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("name") or d.get("description")'
-  elif command -v jq >/dev/null 2>&1; then
-    printf '%s' "$_body" | jq -e '.name // .description' >/dev/null
+    printf '%s' "$_body" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("name") or d.get("description")' 2>/dev/null
   else
-    printf '%s' "$_body" | grep -q '"name"\|"description"'
+    printf '%s' "$_body" | jq -e '.name // .description' >/dev/null
   fi
 }
 
@@ -65,11 +76,11 @@ loopback_bind_ok() {
     return 1
   fi
 
-  if ! ( cd "$DEPLOY_ROOT" && docker compose ps --status running nostream 2>/dev/null | grep -q nostream ); then
+  if ! compose ps --status running nostream 2>/dev/null | grep -q nostream; then
     return 1
   fi
 
-  published="$( cd "$DEPLOY_ROOT" && docker compose port nostream "$RELAY_PORT" 2>/dev/null )" || published=""
+  published="$( compose port nostream "$RELAY_PORT" 2>/dev/null )" || published=""
   if [ -z "$published" ]; then
     return 1
   fi

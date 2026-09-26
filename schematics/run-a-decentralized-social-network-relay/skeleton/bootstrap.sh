@@ -13,6 +13,8 @@ TARGET="${1:-/opt/nostream}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NOSTREAM_GITHUB_REF="${NOSTREAM_GITHUB_REF:-main}"
+# P-4: data/settings parent (default ${DEPLOY_ROOT}/.nostr)
+NOSTR_DATA_DIR="${NOSTR_DATA_DIR:-${TARGET}/.nostr}"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -24,7 +26,7 @@ require_file() {
 require_file "$SCRIPT_DIR/compose.yml"
 require_file "$SCRIPT_DIR/.env.example"
 
-mkdir -p "$TARGET/.nostr/data" "$TARGET/.nostr/db-logs"
+mkdir -p "$NOSTR_DATA_DIR/data" "$NOSTR_DATA_DIR/db-logs"
 
 install -m 644 "$SCRIPT_DIR/compose.yml" "$TARGET/docker-compose.yml"
 
@@ -54,9 +56,9 @@ else
 fi
 
 if [[ "$(id -u)" -eq 0 ]]; then
-  chown 1000:1000 "$TARGET/.nostr"
+  chown 1000:1000 "$NOSTR_DATA_DIR"
 fi
-chmod 755 "$TARGET/.nostr"
+chmod 755 "$NOSTR_DATA_DIR"
 
 cat <<EOF
 
@@ -66,7 +68,7 @@ Next steps:
   1. Edit $TARGET/.env (SECRET, DB_PASSWORD, REDIS_PASSWORD, NOSTREAM_IMAGE)
   2. Load or pull the nostream image on this host
   3. cd $TARGET && docker compose up -d
-  4. DEPLOY_ROOT=$TARGET RELAY_BASE=http://127.0.0.1:\${RELAY_PORT:-8008} $PKG_ROOT/scripts/relay-verify.sh
+  4. DEPLOY_ROOT=$TARGET $PKG_ROOT/scripts/relay-verify.sh
 
 Optional overrides:
   cp $SCRIPT_DIR/settings.yaml.example $TARGET/.nostr/settings.yaml
