@@ -81,12 +81,15 @@ The `${CLAUDE_PLUGIN_ROOT}` paths in step 3 below are expanded by Claude Code, a
 you read them exactly as given. A harness that does not expand them (omp) hands you the
 literal string, and a read of it fails with `Path '${CLAUDE_PLUGIN_ROOT}/...' not
 found`. Resolve the root yourself in that case, before reading anything else: the
-installed plugin directory,
+installed plugin cache,
 `~/.omp/plugins/cache/plugins/cameri-schematics___schematics___<version>/` (take the
 highest semver version; under a flock member your own store is
-`~/.omp/profiles/<profile>/plugins/cache/plugins/...`), or the plugin's source checkout,
-`projects/schematics/skills/schematics/`, if you have it. An unexpanded variable is a
-harness difference, never a missing file.
+`~/.omp/profiles/<profile>/plugins/cache/plugins/...`), or the plugin's source checkout
+— `skills/schematics/` in the repository that publishes this plugin, and
+`projects/schematics/skills/schematics/` in this workspace. If a version was installed
+after this session started, this definition is still the older one: read the references
+from that older version's directory, or from the source checkout, rather than from the
+newest. An unexpanded variable is a harness difference, never a missing file.
 </reference_paths>
 
 **MANDATORY** - in this order:
