@@ -129,9 +129,48 @@ Tell the user:
 Built <name>@<user>/<repo> to .schematics/<name>/
   version: <version>   status: <status>
   requirements: R-1..R-<n>   parameters: P-1..P-<m>   acceptance: A-1..A-<k>
+  spec: sha256 <hex>   (record this — it pins the revision you built)
   next: review the spec, then ask me to implement it
 ```
 
+Two things this build should write down, because nothing else will have them
+later: the `sha256` of the built `SCHEMATIC.md` (`sha256sum
+.schematics/<name>/SCHEMATIC.md`) and the commit the fetch resolved to, when the
+source names one. Together with the version above they are what a build report
+is anchored to — and the session that implements the package will not have them
+unless this build recorded them.
+
 Implementation itself needs no special skill: the working session reads
 `SCHEMATIC.md` and follows its phases, discovering parameters locally and
-verifying against the acceptance tests.
+verifying against the acceptance tests. When that implementation finishes — or
+stops — the same session should offer to draft a build report, below.
+
+## After implementation: offer the build report
+
+A builder who finishes has something nobody else can supply: what the spec was
+like on a host that is not the author's. Offer to draft a build report when
+implementation ends, and say so to the builder — but keep the offer in its
+place.
+
+- **The report is the builder's act, and it is optional.** Present the filled
+  body and the form URL
+  (`https://github.com/cameri/schematics/issues/new?template=build-report.yml`)
+  for them to submit under their own account. Never open the issue for them,
+  never open it silently, and never make the offer a gate: a build is complete
+  whether or not anything is reported, and a build that stops is not a build
+  that failed to finish reporting.
+- **Draft from the context this session already holds** rather than
+  interrogating the builder: the schematic name and the `version:` from the
+  built spec's frontmatter; the commit and `sha256` recorded at build time; the
+  environment (`uname -s -m`, and the agent or harness doing the build); every
+  acceptance row reached, with the command actually run and the result it
+  printed; each place the spec and reality disagreed; and, if it stopped, the
+  phase number and what blocked it.
+- **Report, never verify.** The vocabulary is "A-2 passed here", not "A-2
+  passes": nobody reading the report can reproduce the builder's host. Quote
+  the command and its output, and write a row that did not run as `not run` —
+  never as `pass`.
+- **An unfinished build is a report too.** A run that stopped at phase 3
+  because a parameter could not be discovered is a finding about the spec. File
+  it, naming the phase and the blocker, instead of discarding the run.
+
