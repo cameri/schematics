@@ -17,7 +17,9 @@ touch the files or the database.
 
 - `EXPOSURE` — `private`, `localhost`, `tsdproxy`, or `cloudflare` — and
   `IMMICH_TRUSTED_PROXIES` when a proxy fronts the server.
-- `HTTP_PORT`, the port the server listens on inside the container.
+- `HTTP_PORT`, the host port the server is published on when `EXPOSURE=localhost`;
+  the server listens on 2283 inside the container, and the composition maps one
+  to the other.
 - An existing private network, tailnet, proxy, or tunnel, when the chosen option
   needs one.
 - `IMMICH_ALLOW_SETUP`, and an administrator account created before exposure.

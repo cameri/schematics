@@ -5,7 +5,7 @@ status: draft
 spec: 1
 description: Serving a self-hosted private photo and video library with Immich - its own Postgres carrying a vector extension and its own Valkey cache, a separate machine-learning service whose first index saturates a CPU, hardware acceleration as a parameter, tailnet-first exposure, and one backup contract that keeps the database and the originals in sync.
 created: 2026-09-25
-updated: 2026-09-25
+updated: 2026-09-27
 ---
 
 # Schematic: Serve Photos Using Containers (Immich + Data Layer + Machine Learning)
@@ -242,7 +242,7 @@ Every environment-specific value lives here and nowhere else.
 | P-11 | ML_BACKEND | enum | `cpu` | `ls -l /dev/dri`, `nvidia-smi -L`, `cat /sys/kernel/debug/rknpu/version` | Appends `-armnn`/`-cuda`/`-rocm`/`-openvino`/`-rknn` to the machine-learning tag and selects the device passthrough |
 | P-12 | CACHE_DIGEST | string | (required) | Same command against the Valkey image | Digest half of the cache image reference |
 | P-13 | TZ | string | (host timezone, e.g. `Etc/UTC`) | `timedatectl show -p Timezone --value` | Timestamps, and the fallback used when a photo carries no timezone |
-| P-14 | HTTP_PORT | int | `2283` | First free port when publishing: `ss -tlnp` | Port the server listens on inside the container; published only under `EXPOSURE=localhost` |
+| P-14 | HTTP_PORT | int | `2283` | First free port when publishing: `ss -tlnp` | Host port the server is published on under `EXPOSURE=localhost`; the server itself listens on 2283 inside the container |
 | P-15 | EXPOSURE | enum | `private` | Operator choice: `private` (attached to an existing private network), `localhost` (published on the loopback interface), `tsdproxy`, `cloudflare` | Which network attachment the server gets, and whether a port is published |
 | P-16 | IMMICH_TRUSTED_PROXIES | string | (empty) | Address or subnet of the reverse proxy, `docker network inspect` | Value of `IMMICH_TRUSTED_PROXIES`; empty means no proxy is trusted |
 | P-17 | MACHINE_LEARNING_REQUEST_THREADS | int | (unset = all cores) | `nproc` | Machine-learning request thread pool; the upstream documentation names this the first knob to tune |
@@ -367,7 +367,8 @@ Steps:
 
 1. `docker compose up -d immich-server`.
 2. Watch the logs until migrations finish: `docker compose logs -f immich-server`
-   reports the API listening on `${HTTP_PORT}`.
+   reports the API listening on 2283 inside the container (`HTTP_PORT` is the host
+   side of the publication, and only under `EXPOSURE=localhost`).
 3. Skip condition: `GET /api/server/ping` already answers `pong` — the server
    is up and nothing else in this phase is needed.
 
@@ -460,9 +461,11 @@ from the project directory after the phases. Its sections map to these tests.
 
 - **A-1** (covers R-1): `docker compose ps --format '{{.Service}} {{.Status}}'`
   lists four services, all `Up` (healthy where a healthcheck exists), and
-  `docker compose port immich-server ${HTTP_PORT}` prints a mapping only under
+  `docker compose port immich-server 2283` prints a mapping only under
   `EXPOSURE=localhost`. Expected: four services up; no published port on the
-  other three.
+  other three. (2283 is the container port the composition maps the host's
+  `HTTP_PORT` to; asking for `HTTP_PORT` as a container port answers nothing
+  whenever the two differ.)
 - **A-2** (covers R-2): the database image reference contains the
   Immich-maintained repository, and
   `docker compose exec -T database psql -U "${DB_USERNAME}" -d "${DB_DATABASE_NAME}"
