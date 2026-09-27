@@ -9,7 +9,7 @@
 # Env:
 #   COMPOSE_DIR       project directory holding compose.yml and .env (default .)
 #   IMMICH_URL        base URL to probe (default http://127.0.0.1:${HTTP_PORT})
-#   HTTP_PORT         server port (default 2283)
+#   HTTP_PORT         host port the server is published on (default 2283)
 #   EXPOSURE          private | localhost | tsdproxy | cloudflare (default private)
 #   DB_USERNAME       database role (default postgres)
 #   DB_DATABASE_NAME  database name (default immich)
@@ -70,12 +70,17 @@ say_services() {
             *) fail "$svc is not running" ;;
         esac
     done
-    published=$(compose port immich-server "$HTTP_PORT" 2>/dev/null || true)
+    # The composition publishes "127.0.0.1:${HTTP_PORT:-2283}:2283": HTTP_PORT is the
+    # HOST side and the container's own port is always 2283 (P-14), so the lookup asks
+    # for the container port. Querying $HTTP_PORT asked for a container port that does
+    # not exist whenever the two differ, and docker answers nothing for an unmapped
+    # port - which this check then read as proof that nothing is published.
+    published=$(compose port immich-server 2283 2>/dev/null || true)
     case "$EXPOSURE" in
         localhost)
             case "$published" in
                 127.0.0.1:*|\[::1\]:*) pass "server published on the loopback interface: $published" ;;
-                "") fail "EXPOSURE=localhost but nothing is published on $HTTP_PORT" ;;
+                "") fail "EXPOSURE=localhost but container port 2283 is not published (host port $HTTP_PORT)" ;;
                 *) fail "published on $published - expected the loopback interface only" ;;
             esac ;;
         *)
@@ -178,10 +183,27 @@ say_ml() {
             0|"")
                 note "no CPU ceiling is set (ML_CPU_LIMIT=${ML_CPU_LIMIT:-unset}): the first index may use the whole machine, which must be the operator's recorded decision" ;;
             *)
-                if [ "${nano:-0}" -gt 0 ] 2>/dev/null; then
-                    pass "CPU ceiling in force: HostConfig.NanoCpus=$nano for ML_CPU_LIMIT=$ML_CPU_LIMIT"
+                # ML_CPU_LIMIT is a CPU count (P-20, e.g. 4.0) and Compose applies it as
+                # the container's cpus limit, which Docker records as NanoCpus. The
+                # recorded ceiling is in force only when the two agree: accepting any
+                # positive NanoCpus passed a weaker cap, and the container's own figure
+                # is what A-9's "the observed peak matches the recorded ceiling" means.
+                if ! have awk; then
+                    fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is set but awk is missing, so the container's ceiling cannot be compared with it"
                 else
-                    fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is recorded but the container carries no CPU ceiling"
+                    want=$(awk -v cpus="$ML_CPU_LIMIT" 'BEGIN { printf "%.0f", cpus * 1000000000 }' 2>/dev/null)
+                    case "$want" in
+                        ""|0)
+                            fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is not a CPU ceiling this check can compare (P-20: a decimal such as 4.0, or 0 for none)" ;;
+                        *)
+                            if [ "${nano:-0}" -eq "$want" ]; then
+                                pass "CPU ceiling in force: HostConfig.NanoCpus=$nano equals ML_CPU_LIMIT=$ML_CPU_LIMIT"
+                            elif [ "${nano:-0}" -gt 0 ] && [ "${nano:-0}" -lt "$want" ]; then
+                                fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is recorded but the container's ceiling is weaker (HostConfig.NanoCpus=$nano): the first index can exceed the accepted limit"
+                            else
+                                fail "ML_CPU_LIMIT=$ML_CPU_LIMIT is recorded but the container carries HostConfig.NanoCpus=${nano:-0}, not the recorded ceiling"
+                            fi ;;
+                    esac
                 fi ;;
         esac
         note "provider evidence: docker compose logs immich-machine-learning | grep -i 'provider\\|loaded'"
