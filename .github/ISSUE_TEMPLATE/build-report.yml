@@ -1,0 +1,144 @@
+name: Build report
+description: Report how a schematic build actually went — including one that stopped early.
+title: "build-report: "
+labels: ["build-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for building, and for saying how it went.
+
+        This is a public, one-way report about your own build on your own host.
+        It is never a precondition for anything, and no reply is owed by you or
+        to you — but a report nobody files is the one outcome the project cannot
+        learn from, so **a build that stopped early is as welcome as one that
+        finished**. Fill in what you have, leave the rest blank, and if the
+        fields do not fit, write the whole thing in the last box.
+
+        Everything here is your own account. Nobody else ran your build and
+        nobody can reproduce your host, so a report is *reported*, never
+        *verified*: say what you ran and what it printed, and the next builder
+        can weigh it for themselves.
+
+        **Redact before you paste.** This is a public issue, so never paste a
+        secret, token, key, password or credential — and in particular never a
+        value a command substituted into one. Some of the documented acceptance
+        commands take a secret as an argument, and quoting one of those verbatim
+        here publishes that value. Replace it with a placeholder and describe
+        its shape instead of its value: "the 64-character hex value the
+        parameter substituted" is what a reader can act on; the value itself is
+        useful to nobody but an attacker. The same applies to any output line
+        that printed one, and to a sensitive value you discovered while filling
+        in a parameter — an internal hostname, an account id.
+
+  - type: input
+    id: schematic
+    attributes:
+      label: Schematic
+      description: The package name, as it appears in the catalog.
+      placeholder: expose-container-services-privately
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version:` from the frontmatter of the `SCHEMATIC.md` you built — the schematic's own version, not the authoring plugin's.
+      placeholder: 0.1.0
+
+  - type: input
+    id: spec_commit
+    attributes:
+      label: Commit fetched
+      description: The commit you fetched the spec from, or `HEAD` and the date if you could not name one. A report without this cannot be matched to a revision.
+      placeholder: "HEAD, 2026-09-27"
+
+  - type: input
+    id: spec_sha256
+    attributes:
+      label: sha256 of the SCHEMATIC.md built
+      description: "`sha256sum .schematics/<name>/SCHEMATIC.md` — the content hash of the spec you actually built. This is the one value that identifies the revision you read, so it is worth the one command even when nothing else is."
+      placeholder: 6b1a0e4f… (64 hex characters)
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance results
+      description: |
+        One line per row you reached:
+
+        `A-<n>` — `pass` / `fail` / `not run` — the command you ran
+
+        Quote the command rather than summarizing it, and quote what it printed when it failed. A row you did not reach is `not run`, not `pass`.
+
+        **Redact first**, per the note above: if the command took a secret, token, key or password as an argument, or the output printed one, put a placeholder (`<secret>`) where the value was and say what kind of value it is. Do not publish the value itself.
+      placeholder: |
+        A-1 pass — curl -fsS http://127.0.0.1:8008/healthz
+        A-2 fail — docker compose exec nostream-db pg_isready -U nostr  (exit 1, no output)
+        A-3 not run — needs a public hostname I do not have
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: The OS and architecture the build ran on (`uname -s -m`), plus anything the spec's Applicable Context excludes.
+      placeholder: Linux x86_64
+
+  - type: input
+    id: builder
+    attributes:
+      label: Agent or harness
+      description: Which agent or harness implemented it, and its version if you know it — or say if it was a human working by hand.
+      placeholder: Claude Code 2.0.1
+
+  - type: textarea
+    id: deviations
+    attributes:
+      label: Where the spec and reality disagreed
+      description: |
+        Anything the spec asserted that did not hold on your host: a version that behaved differently, a command that needed another flag, a step that assumed something you had to work around, a parameter whose discovery method returned nothing.
+
+        This is the most valuable part of a report, and it needs no length — one line per disagreement is plenty.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      description: How far the build got.
+      options:
+        - Built end to end, acceptance as documented
+        - Built end to end, with deviations
+        - Stopped before the end
+    validations:
+      required: true
+
+  - type: input
+    id: stopped_phase
+    attributes:
+      label: If you stopped — which phase
+      description: The phase number from the spec's Implementation Phases, and the step within it if you can name one.
+      placeholder: Phase 3, step 2
+
+  - type: textarea
+    id: blocked
+    attributes:
+      label: If you stopped — what blocked it
+      description: What you tried, what it printed, and what would be needed to get past it. A blocker is a finding about the spec, not a failure on your part.
+    validations:
+      required: false
+
+  - type: textarea
+    id: anything_else
+    attributes:
+      label: Anything else — and the free-form path
+      description: |
+        If the build failed early and the fields above do not fit, write the whole report here instead: what you tried, what happened, where you stopped, and what you would need next.
+
+        A short free-form report about a build that never got started is more useful than a form that went unfilled.
+    validations:
+      required: false

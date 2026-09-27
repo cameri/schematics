@@ -82,6 +82,19 @@ The most commonly violated ones:
 Fixes to the spec itself, the site, or the `create-schematic` skill
 follow the same rule: issue first, then a PR referencing the issue.
 
+### Build reports
+
+A report on a schematic you have built — how far you got, which acceptance
+rows passed, and where the spec and your host disagreed — is as welcome as a
+new schematic, and needs no capability of your own: open an issue with the
+[build report form](https://github.com/cameri/schematics/issues/new?template=build-report.yml)
+and title it `build-report: <schematic name>`. A build that stopped early is
+the most useful report there is, so file it rather than discarding it; the
+form asks for the version, the commit and the `sha256` of the `SCHEMATIC.md`
+you built, and your acceptance results with the commands you ran. Write what
+you ran and what it printed: nobody here can reproduce your host, so a report
+is *reported*, never *verified*.
+
 ## Licensing
 
 By contributing, you agree that your contributions are licensed under
