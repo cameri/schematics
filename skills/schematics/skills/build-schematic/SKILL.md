@@ -126,24 +126,34 @@ passes.
 Tell the user:
 
 ```
-Built <name>@<user>/<repo> to .schematics/<name>/
+Built <name>@<user>/<repo> to <target>
   version: <version>   status: <status>
   requirements: R-1..R-<n>   parameters: P-1..P-<m>   acceptance: A-1..A-<k>
-  spec: sha256 <hex>   (record this — it pins the revision you built)
+  spec: <spec file> sha256 <hex>   (record this — it pins the revision you built)
+  report: <form URL>   (welcome when implementation finishes, in any session)
   next: review the spec, then ask me to implement it
 ```
 
 Two things this build should write down, because nothing else will have them
-later: the `sha256` of the built `SCHEMATIC.md` (`sha256sum
-.schematics/<name>/SCHEMATIC.md`) and the commit the fetch resolved to, when the
-source names one. Together with the version above they are what a build report
-is anchored to — and the session that implements the package will not have them
-unless this build recorded them.
+later: the `sha256` of the spec it actually built, taken at its resolved path in
+the chosen target, and the commit the fetch resolved to when the source names
+one. The path matters — a catalog entry may name a spec file other than
+`SCHEMATIC.md`, and the target may be a directory other than the default — so
+hash the file that is there (`<target>/<spec>`) rather than a guessed name, and
+name the file alongside the hash. On a host without `sha256sum`, `shasum -a 256`
+computes the same value. Together with the version above they are what a build
+report is anchored to — and the session that implements the package will not
+have them unless this build recorded them.
 
-Implementation itself needs no special skill: the working session reads
-`SCHEMATIC.md` and follows its phases, discovering parameters locally and
-verifying against the acceptance tests. When that implementation finishes — or
-stops — the same session should offer to draft a build report, below.
+Implementation itself needs no special skill: the working session reads the spec
+and follows its phases, discovering parameters locally and verifying against the
+acceptance tests. When that implementation finishes — or stops — the session
+holding it should offer to draft a build report, below.
+
+That summary is also the handoff. A builder may take the spec to another agent
+session, another harness or a human, none of which load this skill, so the offer
+has to travel in the summary — URL included — rather than wait for a later turn
+of this session.
 
 ## After implementation: offer the build report
 
@@ -159,6 +169,13 @@ place.
   never open it silently, and never make the offer a gate: a build is complete
   whether or not anything is reported, and a build that stops is not a build
   that failed to finish reporting.
+- **Redact before presenting it, and say what was redacted.** The report is a
+  public issue. Never include a secret, token, key, password or credential —
+  and in particular not a value a command substituted into one, because a
+  documented acceptance command may take a secret as an argument and quoting it
+  verbatim publishes that value. Replace it with a placeholder (`<secret>`) and
+  describe its shape instead, which is what a reader can act on; the value is
+  useful to nobody but an attacker. Same for any output line that printed one.
 - **Draft from the context this session already holds** rather than
   interrogating the builder: the schematic name and the `version:` from the
   built spec's frontmatter; the commit and `sha256` recorded at build time; the
@@ -171,6 +188,6 @@ place.
   the command and its output, and write a row that did not run as `not run` —
   never as `pass`.
 - **An unfinished build is a report too.** A run that stopped at phase 3
-  because a parameter could not be discovered is a finding about the spec. File
-  it, naming the phase and the blocker, instead of discarding the run.
+  because a parameter could not be discovered is a finding about the spec. Offer
+  to draft a report naming the phase and blocker for the builder to file.
 

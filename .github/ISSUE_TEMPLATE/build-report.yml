@@ -20,6 +20,16 @@ body:
         *verified*: say what you ran and what it printed, and the next builder
         can weigh it for themselves.
 
+        **Redact before you paste.** This is a public issue, so never paste a
+        secret, token, key, password or credential — and in particular never a
+        value a command substituted into one. Some of the documented acceptance
+        commands take a secret as an argument, and quoting one of those verbatim
+        here publishes that value. Replace it with a placeholder and describe
+        its shape instead of its value: "the 64-character hex value the
+        parameter substituted" is what a reader can act on; the value itself is
+        useful to nobody but an attacker. The same applies to any output line
+        that printed one.
+
   - type: input
     id: schematic
     attributes:
@@ -60,6 +70,8 @@ body:
         `A-<n>` — `pass` / `fail` / `not run` — the command you ran
 
         Quote the command rather than summarizing it, and quote what it printed when it failed. A row you did not reach is `not run`, not `pass`.
+
+        **Redact first**, per the note above: if the command took a secret, token, key or password as an argument, or the output printed one, put a placeholder (`<secret>`) where the value was and say what kind of value it is. Do not publish the value itself.
       placeholder: |
         A-1 pass — curl -fsS http://127.0.0.1:8008/healthz
         A-2 fail — docker compose exec nostream-db pg_isready -U nostr  (exit 1, no output)
