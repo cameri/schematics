@@ -43,7 +43,9 @@ standards.
 
 Default `<schematics-root>` is `docs/schematics/` under the workspace/repo
 root where that convention exists; otherwise `./schematics/`. Always
-confirmable per invocation.
+confirmable per invocation. That is the authoring default: `build-schematic`
+places a package it fetches in `./.schematics/<name>/` under the current
+project instead, also confirmable.
 
 ## The ten binding principles
 

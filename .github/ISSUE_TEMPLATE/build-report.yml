@@ -28,7 +28,8 @@ body:
         its shape instead of its value: "the 64-character hex value the
         parameter substituted" is what a reader can act on; the value itself is
         useful to nobody but an attacker. The same applies to any output line
-        that printed one.
+        that printed one, and to a sensitive value you discovered while filling
+        in a parameter — an internal hostname, an account id.
 
   - type: input
     id: schematic
