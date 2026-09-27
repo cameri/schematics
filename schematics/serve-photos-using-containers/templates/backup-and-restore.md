@@ -38,7 +38,18 @@ docker compose exec -T database pg_dump --clean --if-exists \
 [ -s "$raw" ] || bad=1
 grep -q 'database dump complete' "$raw" 2>/dev/null || bad=1
 if [ "$bad" -eq 0 ]; then
-  gzip -c "$raw" > "$dump" && rm -f "$raw"
+  # Compress to a name of its own and move it into place only once gzip has
+  # succeeded: `> "$dump"` truncates the day's existing good dump before the
+  # compressed write is known to have worked, so a device that fills mid-write
+  # would replace a good backup with a fragment. The exit status is the proof
+  # here - unlike pg_dump above, gzip fails when it cannot write the whole stream.
+  compressed="${dump}.writing"
+  if gzip -c "$raw" > "$compressed" && [ -s "$compressed" ] && mv "$compressed" "$dump"; then
+    rm -f "$raw"
+  else
+    echo "compression failed - $dump is untouched; the complete dump is $raw" >&2
+    rm -f "$compressed"
+  fi
 else
   echo "dump incomplete - $dump is untouched" >&2
   rm -f "$raw"
