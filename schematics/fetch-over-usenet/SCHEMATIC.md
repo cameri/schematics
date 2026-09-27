@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: fetch-over-usenet
 version: 0.1.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: The shared usenet downloading infrastructure every media *arr registers with - SABnzbd as the one downloader, Prowlarr as the one indexer authority, unpackerr cleaning archives, and optional Bazarr and flaresolverr as shared services. Deploys once per host; media kinds (movies, series, music, books) join by category, never by second instance.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Fetch Over Usenet (Shared Infrastructure)
@@ -219,3 +218,5 @@ Open questions:
   `scripts/` (probe Prowlarr/SABnzbd APIs for a well-formed
   registration). Default: not yet; the contract is documented and the
   arr packages' acceptance tests cover their own side.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

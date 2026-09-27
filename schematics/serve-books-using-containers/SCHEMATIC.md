@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: serve-books-using-containers
 version: 0.2.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Serving a self-hosted digital library - Audiobookshelf reading the same dataset the fetching stack writes, with the public surface as a first-class choice: Tailscale serve by default, tsdproxy or a Cloudflare tunnel when you want a real hostname. Read-only by posture; the media never moves.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Serve Books Using Containers (Audiobookshelf + Optional Tunnel)
@@ -249,3 +248,5 @@ Open questions:
   docker network involvement). It is the zero-config tailnet path but
   ties exposure to host CLI state rather than compose. Default: not
   included until requested.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

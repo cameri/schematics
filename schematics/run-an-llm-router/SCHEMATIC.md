@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-an-llm-router
 version: 0.2.1
@@ -6,7 +5,7 @@ status: draft
 spec: 1
 description: A self-hosted OpenAI-compatible model router — one private /v1 endpoint in front of several BYOK providers, stable model aliases so clients never change when a provider does, provider keys encrypted at rest and decrypted in memory at boot, and a health-gated service clients point at instead of a metered shared provider.
 created: 2026-09-14
-updated: 2026-09-20
+updated: 2026-09-27
 ---
 
 # Schematic: Run an LLM Router
@@ -849,3 +848,5 @@ Open questions:
   which vendor is behind it and makes a provider migration look like a client
   change. Keep existing ids when migrating (R-8); choose provider-free ids for
   new deployments.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

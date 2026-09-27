@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: encrypt-container-secrets
 version: 0.2.2
@@ -6,7 +5,7 @@ status: stable
 spec: 1
 description: Encrypt service secrets with SOPS + age and inject them into container processes as environment variables at boot, in-memory, dual-recipient encryption, per-service key blast-radius, docker-secret wiring, and rotation without rebuilds.
 created: 2026-09-10
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: SOPS-Encrypted Secrets as Container Environment Variables
@@ -653,5 +652,4 @@ Open questions:
   operator. Default: no, the recipient list is recoverable from the encrypted
   file with `grep -o 'age1[a-z0-9]*'`.
 
-
-
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

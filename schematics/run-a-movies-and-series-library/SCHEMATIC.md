@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: run-a-movies-and-series-library
 version: 0.2.2
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: A composition schematic - runs a complete movies-and-series library by wiring the fetching half (Prowlarr, Sonarr, Radarr, Bazarr, SABnzbd, unpackerr) to the serving half (Jellyfin, Jellyseerr) through the shared media tree, with the request flow closing the loop from "I want to watch X" to "X is playing". Recommended but optional: hardening the Docker host and keeping deployments current. No images of its own; the glue is the loop, the ordering, and the cross-verification.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Run a Movies-and-Series Library (Composition)
@@ -241,3 +240,5 @@ Open questions:
   sibling package (it is optional infrastructure D-9 in the fetching
   half today). Default: stays a fetching-half option until a second
   stack wants it.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
