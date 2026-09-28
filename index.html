@@ -40,8 +40,14 @@
         <a class="btn btn-primary" href="#catalog">Browse schematics</a>
         <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub ↗</a>
       </div>
+      <!-- The featured count, written into the served markup: a crawler, curl or
+           an LLM summarising the page reads this HTML and never runs site.js,
+           so a placeholder here tells every machine reader the catalog is
+           empty. It counts the featured entries the catalog section below
+           renders, exactly like site.js, and scripts/check-site-render.js fails
+           when this number and the catalog's disagree. -->
       <div class="hero-stats">
-        <div class="stat"><span class="stat-num" id="stat-count">0</span><span class="stat-label">schematics</span></div>
+        <div class="stat"><span class="stat-num" id="stat-count">5</span><span class="stat-label">schematics</span></div>
         <div class="stat"><span class="stat-num">10</span><span class="stat-label">binding principles</span></div>
         <div class="stat"><span class="stat-num">0</span><span class="stat-label">coordination required</span></div>
       </div>
@@ -145,7 +151,7 @@ description: One-line summary copied to the marketplace
     <!-- ─── Getting Started ─────────────────────────────── -->
     <section class="section" id="getting-started">
       <h2 class="section-title">Getting started</h2>
-      <p class="section-lede">Four steps from this page to a hardened Docker host. Everything runs on your machine; the schematic is just Markdown.</p>
+      <p class="section-lede">Four steps from this page to a hardened Docker host, and a fifth once you have built it. Everything runs on your machine; the schematic is just Markdown.</p>
       <div class="flow">
         <div class="flow-step">
           <span class="flow-num">01</span>
@@ -177,6 +183,11 @@ build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</c
           <span class="flow-num">04</span>
           <h3>Verify against acceptance</h3>
           <p>The schematic's acceptance tests are the contract: the socket is no longer reachable raw, unauthorized daemon requests are denied, and <code>docker inspect</code> shows secrets encrypted at rest. If a check fails, the phase loops — not your Saturday.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">05</span>
+          <h3>Report how it went</h3>
+          <p>You are now the only person who knows what the spec is like on a host that is not the author's. <a href="https://github.com/cameri/schematics/issues/new?template=build-report.yml">File a build report</a> — what you ran and what it printed, acceptance row by row. A build that stopped early is as welcome as one that finished, and a report is <em>reported</em>, never verified: it is your account, not a claim we check.</p>
         </div>
       </div>
     </section>

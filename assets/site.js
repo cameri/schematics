@@ -80,6 +80,14 @@
     "omp plugin install schematics@cameri-schematics",
   ].join("\n");
 
+  // The build-report issue form (`.github/ISSUE_TEMPLATE/build-report.yml`).
+  // A builder who finished, or stopped, is the one source for what a spec was
+  // like on a host that is not the author's, so every schematic card offers the
+  // form: the schematic name is prefilled into the title convention
+  // CONTRIBUTING.md documents, and the form applies its own label.
+  var REPORT_URL = "https://github.com/cameri/schematics/issues/new" +
+    "?template=build-report.yml&title=";
+
   // ─── Catalog rendering ─────────────────────────────────────
   function renderCatalog(entries) {
     var host = document.getElementById("catalog-list");
@@ -177,6 +185,18 @@
       ghBtn.target = "_blank";
       ghBtn.rel = "noopener";
       actions.appendChild(ghBtn);
+
+      // Schematic cards only: the authoring card is a plugin, and there is no
+      // build of it to report. The draft the skill offers travels in the
+      // builder's own session; this is the same form for someone who arrived
+      // from the page instead.
+      if (!isAuthoring) {
+        var reportBtn = el("a", "cat-btn cat-report", "I built this ↗");
+        reportBtn.href = REPORT_URL + encodeURIComponent("build-report: " + plugin.name);
+        reportBtn.target = "_blank";
+        reportBtn.rel = "noopener";
+        actions.appendChild(reportBtn);
+      }
 
       card.appendChild(actions);
     return card;

@@ -12,6 +12,13 @@
 // rather than reading a local file the browser would not have got. The render
 // is sampled once the page's requests have settled, not after a fixed delay.
 //
+// And it covers the page a reader gets without JavaScript. index.html serves
+// the hero count as markup, because a crawler, curl or an LLM summarising the
+// site never runs the script - a placeholder there is what told every machine
+// reader the catalogue was empty (#67). The served number and the number the
+// catalogue implies have to match, so featuring another schematic cannot leave
+// the markup behind.
+//
 // No dependencies. Run from the repository root:  node scripts/check-site-render.js
 
 const fs = require("fs");
@@ -26,6 +33,15 @@ const PLUGINS = ".claude-plugin/marketplace.json";
 // or branch 404s in a browser and leaves the page in its load-error state,
 // while a suffix-only match would read a local file and pass anyway.
 const RAW_BASE = "https://raw.githubusercontent.com/cameri/schematics/main/";
+// The page a reader gets with no JavaScript at all: its hero count is markup,
+// and site.js recomputes the same number from the catalogue at load time.
+const SERVED_PAGE = "index.html";
+// The build-report issue form a schematic card links to, as assets/site.js
+// builds it. A URL is not a fetch, so it needs no entry in the allow-list
+// below - but it is asserted per card, because a dead report link is invisible
+// on the page that offers it.
+const REPORT_URL = "https://github.com/cameri/schematics/issues/new" +
+  "?template=build-report.yml&title=";
 
 // The predicates below must match renderCatalog / renderPluginSection in
 // assets/site.js. If the site's filter changes, change it here too - the point
@@ -113,6 +129,10 @@ function render(stall) {
     pluginCards: hosts["plugin-list"].querySelectorAll("article.catalog-card").length,
     emptyStateShown: hosts["catalog-list"].querySelector(".catalog-empty") !== null,
     heroStat: hosts["stat-count"].textContent,
+    // The build-report links the cards offer, in catalog order, so the check
+    // can assert each one carries its own schematic's name into the form.
+    reportLinks: hosts["catalog-list"].querySelectorAll("a.cat-report").map((n) => n.href),
+    pluginReportLinks: hosts["plugin-list"].querySelectorAll("a.cat-report").length,
     unexpected,
     issued: state.issued,
   }));
@@ -127,11 +147,31 @@ function expected() {
       `and a rename silently renders nothing`);
   }
   const plugins = JSON.parse(fs.readFileSync(path.join(ROOT, PLUGINS), "utf8"));
-  const featured = catalog.schematics.filter(isCatalogEntry).length;
+  const featuredEntries = catalog.schematics.filter(isCatalogEntry);
+  const featured = featuredEntries.length;
   const authoring = (plugins.plugins || []).filter(isPluginEntry).length;
   if (featured === 0) throw new Error(`${CATALOG} has no featured entries - nothing would render`);
   if (authoring !== 1) throw new Error(`${PLUGINS} should hold exactly one authoring plugin, found ${authoring}`);
-  return { featured, authoring, total: catalog.schematics.length };
+  return {
+    featured, authoring, total: catalog.schematics.length,
+    // One report link per card, each naming the schematic it belongs to.
+    reportLinks: featuredEntries.map((e) => REPORT_URL + encodeURIComponent("build-report: " + e.name)),
+  };
+}
+
+// The hero count as served, before any script runs. A crawler, curl or an LLM
+// summarising the site reads this and never executes site.js, so it has to
+// carry the real number itself; the assertion below is what keeps it from
+// drifting when the featured set changes.
+function servedHeroCount() {
+  const html = fs.readFileSync(path.join(ROOT, SERVED_PAGE), "utf8");
+  const m = html.match(/<span\b[^>]*\bid="stat-count"[^>]*>([\s\S]*?)<\/span>/);
+  if (!m) {
+    throw new Error(`${SERVED_PAGE} has no <span id="stat-count"> element: the count ` +
+      `a reader without JavaScript sees is gone, and the page falls back to whatever ` +
+      `site.js writes at load time`);
+  }
+  return m[1].trim();
 }
 
 const failures = [];
@@ -147,10 +187,27 @@ function checkNone(label, list) {
   if (!ok) failures.push(`${label}: ${list.join(", ")}`);
   console.log(`  ${ok ? "ok  " : "FAIL"} ${label} = ${list.length}`);
 }
+// A list whose members matter (not just its length): report the first
+// disagreement, because "got 5, want 5" has already passed by then.
+function checkList(label, got, want) {
+  const bad = want.findIndex((w, i) => got[i] !== w);
+  const ok = got.length === want.length && bad === -1;
+  if (!ok) {
+    const at = bad === -1 ? Math.min(got.length, want.length) : bad;
+    failures.push(`${label}: ${want.length} expected, ${got.length} rendered; ` +
+      `first difference at ${at + 1}: got ${JSON.stringify(got[at])}, ` +
+      `want ${JSON.stringify(want[at])}`);
+  }
+  console.log(`  ${ok ? "ok  " : "FAIL"} ${label} = ${got.length}`);
+}
 
 (async () => {
-  const { featured, authoring, total } = expected();
+  const { featured, authoring, total, reportLinks } = expected();
   console.log(`catalogues: ${total} schematic entries (${featured} featured), ${authoring} authoring plugin`);
+
+  // No JavaScript at all: this is the whole page a crawler or curl sees.
+  console.log("\nserved index.html (what a machine reader gets before site.js runs):");
+  check("hero count in the served markup", servedHeroCount(), String(featured));
 
   console.log("\nplugin marketplace available:");
   const normal = await render(false);
@@ -159,6 +216,8 @@ function checkNone(label, list) {
   check("plugin cards", normal.pluginCards, authoring);
   check("hero count", normal.heroStat, String(featured));
   check("empty state shown", normal.emptyStateShown, false);
+  checkList("build-report links", normal.reportLinks, reportLinks);
+  check("build-report links on the plugin card", normal.pluginReportLinks, 0);
 
   console.log("\nplugin marketplace STALLS - the catalogue must still render:");
   const stalled = await render(true);
