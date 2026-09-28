@@ -91,12 +91,14 @@
     // The main page shows ONLY featured schematics - the featured flag is
     // the curation mechanism that keeps the page from growing indefinitely.
     // Everything else stays in the catalog and on GitHub.
-    var schematics = (entries || [])
-      .filter(function (p) { return p.category !== "authoring" && p.featured; });
+    var allSchematics = (entries || [])
+      .filter(function (p) { return p.category !== "authoring"; });
+    var schematics = allSchematics.filter(function (p) { return p.featured; });
 
-    // Hero stat: schematic count (the authoring plugin is not a schematic)
+    // Hero stat: total schematic count (the authoring plugin is not a schematic;
+    // this counts all published schematics, not just the featured ones shown below)
     var statCount = document.getElementById("stat-count");
-    if (statCount) statCount.textContent = String(schematics.length);
+    if (statCount) statCount.textContent = String(allSchematics.length);
 
     // Idempotent: a re-run of init must not duplicate cards.
     host.innerHTML = "";
