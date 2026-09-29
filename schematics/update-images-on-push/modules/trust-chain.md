@@ -35,8 +35,9 @@ signal it checks - a check placed at the wrong layer is decoration.
 ## Gate 4: scoped Docker API
 
 - The worker reaches the daemon only through a deny-by-default socket
-  proxy (R-5): `IMAGES=1`, `CONTAINERS=1`, `POST=1`, nothing else, socket
-  mounted read-only, no published ports.
+  proxy (R-5): `IMAGES=1`, `CONTAINERS=1`, `POST=1`, with `EVENTS=0`,
+  `PING=0` and `VERSION=0` pinned off, nothing else, socket mounted
+  read-only, no published ports.
 - Compromise of the receiver (the internet-facing component) yields
   control of neither the daemon nor the host: the receiver cannot even
   reach the proxy (different network position, and it never touches

@@ -170,6 +170,28 @@
       ]
     },
     {
+      "name": "run-a-decentralized-social-network-relay",
+      "description": "A production Nostr relay (nostream) on Docker — host prep, Postgres and Redis, GHCR image pinning, migrations-before-start, loopback HTTP, reverse-proxy sketches, NIP-11 and /readyz probes, optional settings and tailnet exposure.",
+      "source": "./schematics/run-a-decentralized-social-network-relay",
+      "category": "infrastructure",
+      "author": {
+        "name": "Abhay Pandey",
+        "email": "pandeyabhay967@gmail.com"
+      },
+      "keywords": [
+        "nostr",
+        "nostream",
+        "relay",
+        "websocket",
+        "postgres",
+        "redis",
+        "docker",
+        "compose",
+        "decentralized",
+        "social"
+      ]
+    },
+    {
       "name": "fetch-books-over-vpn",
       "description": "Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.",
       "source": "./schematics/fetch-books-over-vpn",

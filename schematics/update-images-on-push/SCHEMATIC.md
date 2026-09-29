@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: update-images-on-push
-version: 0.2.1
+version: 0.2.2
 status: published
 spec: 1
 description: Self-updating Docker Compose deployments: when you push, the image updates. A GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-28
 ---
 
 # Schematic: Update Images on Push
@@ -181,8 +181,10 @@ Implementation-specific binding choices:
 ### Phase 1: Deploy the scoped Docker API proxy
 
 1. Follow the `restrict-docker-api-access` schematic's phases 1-3 with the
-   pull-only allowlist: `IMAGES=1`, `CONTAINERS=1`, `POST=1`.
-2. Verification: its audit script shows exactly those groups ALLOWED.
+   pull-only allowlist: `IMAGES=1`, `CONTAINERS=1`, `POST=1`, with
+   `EVENTS=0`, `PING=0` and `VERSION=0` pinned off.
+2. Verification: its audit script shows exactly those groups ALLOWED and the
+   other three denied.
 
 ### Phase 2: Create the dedicated tunnel
 
