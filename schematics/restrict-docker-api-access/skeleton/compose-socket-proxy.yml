@@ -7,10 +7,17 @@
 services:
   socket-proxy:
     # Digest-pinned (R-4). Update by replacing the digest after review.
-    image: tecnativa/restrict-docker-api-access:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: socket-proxy
     restart: unless-stopped
     environment:
+      # The pinned image sets EVENTS, PING and VERSION to 1 in its own ENV, so
+      # leaving them out still allows GET /events, GET /_ping and GET /version.
+      # Pin them off for the effective policy to be what this file says (R-2);
+      # see modules/endpoint-scoping.md.
+      EVENTS: 0      # no consumer watches the daemon event stream
+      PING: 0        # no consumer probes /_ping
+      VERSION: 0     # nothing reads the daemon version
       # Enable groups ONLY as consumers require them, each with a
       # justification (see modules/endpoint-scoping.md). Example of a
       # pull-only pipeline:

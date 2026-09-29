@@ -1,12 +1,12 @@
 <!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: restrict-docker-api-access
-version: 0.3.1
+version: 0.3.2
 status: published
 spec: 1
 description: Exposes a deny-by-default Docker API to containers over an internal network - an endpoint allowlist proxy in front of docker.sock so tooling can pull images or read status without ever mounting the socket or gaining control of the daemon.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-28
 ---
 
 # Schematic: Restrict Docker API Access
@@ -63,7 +63,9 @@ updated: 2026-09-17
   endpoint.
 - **R-2**: The proxy MUST deny every API endpoint group that is not
   explicitly enabled in its configuration (deny by default, not allow by
-  default).
+  default). Groups the image enables in its own `ENV` - `EVENTS`, `PING`
+  and `VERSION` - MUST be listed at `0`, because omitting a group leaves
+  that default in force.
 - **R-3**: Every enabled endpoint group MUST have a documented reason in
   the deployment config; an allowlist entry without a reason is a bug.
 - **R-4**: The proxy image MUST be pinned by digest, not by mutable tag.
@@ -116,16 +118,16 @@ Implementation-specific binding choices:
 |-----|------|------------|-----------|------------------|
 | D-1 | Docker Engine with unix socket | The proxy forwards to it | `docker info` | Proxy starts but every request fails with 5xx; audit script reports the daemon unreachable |
 | D-2 | Docker Compose v2 | Service definition and network isolation | `docker compose version` | Use `docker run` equivalents; compose syntax is not portable to v1 |
-| D-3 | tecnativa/restrict-docker-api-access image | The proxy itself (HAProxy in front of the socket) | Pinned digest in the compose file | Pull failure blocks deploy; any registry mirror may substitute |
+| D-3 | tecnativa/docker-socket-proxy image | The proxy itself (HAProxy in front of the socket) | Pinned digest in the compose file | Pull failure blocks deploy; any registry mirror may substitute |
 
 ## Parameters
 
 | Id  | Name | Type | Default | Discovery | Effect |
 |-----|------|------|---------|-----------|--------|
-| P-1 | PROXY_IMAGE | string | `tecnativa/restrict-docker-api-access` | The deployment's registry layout | Image to run; pin the tag to a digest |
+| P-1 | PROXY_IMAGE | string | `tecnativa/docker-socket-proxy` | The deployment's registry layout | Image to run; pin the tag to a digest |
 | P-2 | DOCKER_SOCKET_PATH | path | `/var/run/docker.sock` | `docker info -f '{{.DockerRootDir}}'` and host inspection | Socket mounted read-only into the proxy |
 | P-3 | COMPOSE_PROJECT_DIR | path | (the directory holding the compose file) | Where the consumer stack lives | Network attachment point for consumers |
-| P-4 | ALLOWED_GROUPS | env map | (empty) | Grep consumer configs for the API paths they call; each gets a justification | Endpoint groups enabled, e.g. `IMAGES=1`, `CONTAINERS=1` |
+| P-4 | ALLOWED_GROUPS | env map | `EVENTS=0`, `PING=0`, `VERSION=0` | Grep consumer configs for the API paths they call; each gets a justification | Endpoint groups enabled, e.g. `IMAGES=1`, `CONTAINERS=1`, plus those three pinned off |
 | P-5 | NETWORK_NAME | string | `docker-proxy` | Compose project conventions | Name of the internal network consumers join |
 | P-6 | PROXY_PORT | port | `2375` | The proxy image's default | In-network HTTP endpoint; never published |
 | P-7 | STATIC_PROXY_IP | IP address | (unset) | Only needed if a consumer runs `network_mode: host`; pick a free address inside P-5's subnet | Fixed address the proxy binds to on the internal network, so a host-network consumer can reach it without service-name resolution |
@@ -216,7 +218,9 @@ Implementation-specific binding choices:
 - **A-1** (R-1): `docker inspect` on every consumer shows no
   `/var/run/docker.sock` mount.
 - **A-2** (R-2, R-8): the audit script's allowed/denied matrix matches the
-  documented allowlist, including 403 on every disabled group.
+  documented allowlist, including 403 on every disabled group - `EVENTS`,
+  `PING` and `VERSION` among them, since the image enables those three by
+  default.
 - **A-3** (R-3): every enabled group in the compose config has a written
   justification next to it.
 - **A-4** (R-4): the image reference in the compose file contains an

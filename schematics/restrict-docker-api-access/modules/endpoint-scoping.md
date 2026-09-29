@@ -18,6 +18,15 @@ enable", plus the verb gating that container-control requires.
 | `BUILD` | `POST /build` | CI builders |
 | `SWARM`, `NODES`, `TASKS`, `SECRETS`, `CONFIG`, `PLUGINS`, `SESSION`, `SYSTEM`, `EVENTS`, `AUTH` | swarm/admin surfaces | cluster tooling (avoid) |
 
+### Groups the image enables in its own ENV
+
+The default image (`tecnativa/docker-socket-proxy`) sets `EVENTS=1`, `PING=1`
+and `VERSION=1` in its Dockerfile, alongside `0` for every other group. A
+compose file that simply omits a group therefore inherits those three and
+allows `GET /events`, `GET /_ping` and `GET /version` - omitting a group is
+not denying it, for those three. List them at `0` explicitly, as the skeleton
+does, and the effective policy matches the file (R-2).
+
 ## Verb gating
 
 Enabling a group enables its reads and, with `POST=1`, its writes under that
@@ -27,8 +36,9 @@ explicitly:
 - `ALLOW_START=0`, `ALLOW_STOP=0`, `ALLOW_RESTART=0` (defaults)
 
 The pull-only pipeline in the reference deployment therefore runs with
-exactly: `IMAGES=1`, `CONTAINERS=1`, `POST=1` - it can pull images and list
-containers, and cannot start, stop, restart, or exec anything.
+exactly: `IMAGES=1`, `CONTAINERS=1`, `POST=1`, plus `EVENTS=0`, `PING=0` and
+`VERSION=0` - it can pull images and list containers, and cannot start, stop,
+restart, exec, or read the event stream.
 
 ## Deriving the minimal set
 
@@ -71,10 +81,14 @@ A pull worker that runs `POST /images/create?fromImage=X&tag=Y` and reads
 `GET /containers/json` to report the running version:
 
 ```
+EVENTS: 0      # image ENV default is 1; nothing watches the event stream
+PING: 0        # image ENV default is 1; nothing probes /_ping
+VERSION: 0     # image ENV default is 1; nothing reads the daemon version
 IMAGES: 1      # POST /images/create (the pull), GET /images/... (existence)
 CONTAINERS: 1  # GET /containers/json (running-version status)
 POST: 1        # the POST verb itself; start/stop/restart stay off
 ```
 
-Everything else remains unset (denied): EXEC, NETWORKS, VOLUMES, SWARM,
-BUILD, SECRETS, CONFIG, NODES, TASKS, PLUGINS, SYSTEM, EVENTS, AUTH, SESSION.
+Everything else is unset and denied, the image's own ENV for it being `0`:
+EXEC, NETWORKS, VOLUMES, SWARM, BUILD, SECRETS, CONFIG, NODES, TASKS,
+PLUGINS, SYSTEM, AUTH, SESSION.
