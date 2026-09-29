@@ -13,11 +13,14 @@
 // is sampled once the page's requests have settled, not after a fixed delay.
 //
 // And it covers the page a reader gets without JavaScript. index.html serves
-// the hero count as markup, because a crawler, curl or an LLM summarising the
-// site never runs the script - a placeholder there is what told every machine
-// reader the catalogue was empty (#67). The served number and the number the
-// catalogue implies have to match, so featuring another schematic cannot leave
-// the markup behind.
+// its counts as markup, because a crawler, curl or an LLM summarising the site
+// never runs the script - a placeholder there is what told every machine reader
+// the catalogue was empty (#67). The hero states how many schematics are
+// PUBLISHED (every catalogue entry that is not the authoring plugin) and the
+// grid renders the featuring SUBSET of them, saying so in the catalog note, so
+// the numbers a reader is told and the cards they can count agree about which
+// set each one is. Both are asserted against the catalogue here, served and
+// rendered, so neither can drift when a schematic is added or featured.
 //
 // No dependencies. Run from the repository root:  node scripts/check-site-render.js
 
@@ -46,7 +49,10 @@ const REPORT_URL = "https://github.com/cameri/schematics/issues/new" +
 // The predicates below must match renderCatalog / renderPluginSection in
 // assets/site.js. If the site's filter changes, change it here too - the point
 // of this file is to fail when those two drift apart.
-const isCatalogEntry = (e) => e.category !== "authoring" && !!e.featured;
+// Two sets, matching the two the page distinguishes: every published schematic
+// (what the hero stat counts) and the featured subset (what the grid renders).
+const isPublishedEntry = (e) => e.category !== "authoring";
+const isFeaturedEntry = (e) => isPublishedEntry(e) && !!e.featured;
 const isPluginEntry = (e) => e.category === "authoring";
 
 function el(tag) {
@@ -88,7 +94,8 @@ function settle(state, maxTurns = 1000) {
 // that left the catalogue blank before the fetch was decoupled from the render.
 function render(stall) {
   const hosts = {};
-  for (const id of ["catalog-list", "plugin-list", "stat-count", "toast"]) hosts[id] = el("div");
+  for (const id of ["catalog-list", "plugin-list", "stat-count", "toast",
+                    "catalog-shown", "catalog-total"]) hosts[id] = el("div");
   const unexpected = [];
   const state = { issued: 0, settled: 0, held: 0 };
   const sandbox = {
@@ -129,6 +136,11 @@ function render(stall) {
     pluginCards: hosts["plugin-list"].querySelectorAll("article.catalog-card").length,
     emptyStateShown: hosts["catalog-list"].querySelector(".catalog-empty") !== null,
     heroStat: hosts["stat-count"].textContent,
+    // The grid is a labelled subset, so it carries both numbers: how many cards
+    // it shows and how many published schematics exist. They are asserted
+    // against the catalogue, not against each other.
+    catalogShown: hosts["catalog-shown"].textContent,
+    catalogTotal: hosts["catalog-total"].textContent,
     // The build-report links the cards offer, in catalog order, so the check
     // can assert each one carries its own schematic's name into the form.
     reportLinks: hosts["catalog-list"].querySelectorAll("a.cat-report").map((n) => n.href),
@@ -147,31 +159,34 @@ function expected() {
       `and a rename silently renders nothing`);
   }
   const plugins = JSON.parse(fs.readFileSync(path.join(ROOT, PLUGINS), "utf8"));
-  const featuredEntries = catalog.schematics.filter(isCatalogEntry);
+  const publishedEntries = catalog.schematics.filter(isPublishedEntry);
+  const featuredEntries = catalog.schematics.filter(isFeaturedEntry);
+  const published = publishedEntries.length;
   const featured = featuredEntries.length;
   const authoring = (plugins.plugins || []).filter(isPluginEntry).length;
-  if (featured === 0) throw new Error(`${CATALOG} has no featured entries - nothing would render`);
+  if (published === 0) throw new Error(`${CATALOG} has no published entries - nothing would render`);
+  if (featured === 0) throw new Error(`${CATALOG} has no featured entries - the grid would be empty`);
   if (authoring !== 1) throw new Error(`${PLUGINS} should hold exactly one authoring plugin, found ${authoring}`);
   return {
-    featured, authoring, total: catalog.schematics.length,
+    published, featured, authoring, total: catalog.schematics.length,
     // One report link per card, each naming the schematic it belongs to.
     reportLinks: featuredEntries.map((e) => REPORT_URL + encodeURIComponent("build-report: " + e.name)),
   };
 }
 
-// The hero count as served, before any script runs. A crawler, curl or an LLM
-// summarising the site reads this and never executes site.js, so it has to
-// carry the real number itself; the assertion below is what keeps it from
-// drifting when the featured set changes.
-function servedHeroCount() {
+// Text the served page carries before any script runs, found by element id. A
+// crawler, curl or an LLM summarising the site reads this HTML and never
+// executes site.js, so every count the page states has to be right here as
+// well - the assertion is what keeps it from drifting when either number moves.
+function servedText(id) {
   const html = fs.readFileSync(path.join(ROOT, SERVED_PAGE), "utf8");
-  const m = html.match(/<span\b[^>]*\bid="stat-count"[^>]*>([\s\S]*?)<\/span>/);
+  const m = html.match(new RegExp(`<([a-z]+)\\b[^>]*\\bid="${id}"[^>]*>([\\s\\S]*?)</\\1>`));
   if (!m) {
-    throw new Error(`${SERVED_PAGE} has no <span id="stat-count"> element: the count ` +
-      `a reader without JavaScript sees is gone, and the page falls back to whatever ` +
-      `site.js writes at load time`);
+    throw new Error(`${SERVED_PAGE} has no element with id="${id}": the number ` +
+      `a reader without JavaScript sees is gone, and the page falls back to ` +
+      `whatever site.js writes at load time`);
   }
-  return m[1].trim();
+  return m[2].trim();
 }
 
 const failures = [];
@@ -202,19 +217,24 @@ function checkList(label, got, want) {
 }
 
 (async () => {
-  const { featured, authoring, total, reportLinks } = expected();
-  console.log(`catalogues: ${total} schematic entries (${featured} featured), ${authoring} authoring plugin`);
+  const { published, featured, authoring, total, reportLinks } = expected();
+  console.log(`catalogues: ${total} catalog entries (${published} published, ${featured} featured), ` +
+    `${authoring} authoring plugin`);
 
   // No JavaScript at all: this is the whole page a crawler or curl sees.
   console.log("\nserved index.html (what a machine reader gets before site.js runs):");
-  check("hero count in the served markup", servedHeroCount(), String(featured));
+  check("published count in the served markup", servedText("stat-count"), String(published));
+  check("grid size in the served markup", servedText("catalog-shown"), String(featured));
+  check("catalog total in the served markup", servedText("catalog-total"), String(published));
 
   console.log("\nplugin marketplace available:");
   const normal = await render(false);
   checkNone("unexpected fetches", normal.unexpected);
-  check("schematic cards", normal.schematicCards, featured);
+  check("hero count = published schematics", normal.heroStat, String(published));
+  check("schematic cards = featured schematics", normal.schematicCards, featured);
+  check("note: cards shown", normal.catalogShown, String(featured));
+  check("note: published total", normal.catalogTotal, String(published));
   check("plugin cards", normal.pluginCards, authoring);
-  check("hero count", normal.heroStat, String(featured));
   check("empty state shown", normal.emptyStateShown, false);
   checkList("build-report links", normal.reportLinks, reportLinks);
   check("build-report links on the plugin card", normal.pluginReportLinks, 0);
@@ -222,8 +242,9 @@ function checkList(label, got, want) {
   console.log("\nplugin marketplace STALLS - the catalogue must still render:");
   const stalled = await render(true);
   checkNone("unexpected fetches", stalled.unexpected);
-  check("schematic cards", stalled.schematicCards, featured);
-  check("hero count", stalled.heroStat, String(featured));
+  check("hero count = published schematics", stalled.heroStat, String(published));
+  check("schematic cards = featured schematics", stalled.schematicCards, featured);
+  check("note: published total", stalled.catalogTotal, String(published));
   check("plugin cards", stalled.pluginCards, 0);
 
   if (failures.length) {
