@@ -40,8 +40,15 @@
         <a class="btn btn-primary" href="#catalog">Browse schematics</a>
         <a class="btn btn-ghost" href="https://github.com/cameri/schematics" target="_blank" rel="noopener">View on GitHub ↗</a>
       </div>
+      <!-- The published schematic count, written into the served markup: a
+           crawler, curl or an LLM summarising the page reads this HTML and
+           never runs site.js, so a placeholder here tells every machine reader
+           the catalog is empty. It counts every catalog entry that is not the
+           authoring plugin - the grid below renders the featured subset of
+           that set and says so - and scripts/check-site-render.js fails when
+           this number and the catalog's disagree. -->
       <div class="hero-stats">
-        <div class="stat"><span class="stat-num" id="stat-count">0</span><span class="stat-label">schematics</span></div>
+        <div class="stat"><span class="stat-num" id="stat-count">23</span><span class="stat-label">schematics</span></div>
         <div class="stat"><span class="stat-num">10</span><span class="stat-label">binding principles</span></div>
         <div class="stat"><span class="stat-num">0</span><span class="stat-label">coordination required</span></div>
       </div>
@@ -145,7 +152,7 @@ description: One-line summary copied to the marketplace
     <!-- ─── Getting Started ─────────────────────────────── -->
     <section class="section" id="getting-started">
       <h2 class="section-title">Getting started</h2>
-      <p class="section-lede">Four steps from this page to a hardened Docker host. Everything runs on your machine; the schematic is just Markdown.</p>
+      <p class="section-lede">Four steps from this page to a hardened Docker host, and a fifth once you have built it. Everything runs on your machine; the schematic is just Markdown.</p>
       <div class="flow">
         <div class="flow-step">
           <span class="flow-num">01</span>
@@ -177,6 +184,11 @@ build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</c
           <span class="flow-num">04</span>
           <h3>Verify against acceptance</h3>
           <p>The schematic's acceptance tests are the contract: the socket is no longer reachable raw, unauthorized daemon requests are denied, and <code>docker inspect</code> shows secrets encrypted at rest. If a check fails, the phase loops — not your Saturday.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-num">05</span>
+          <h3>Report how it went</h3>
+          <p>You are now the only person who knows what the spec is like on a host that is not the author's. <a href="https://github.com/cameri/schematics/issues/new?template=build-report.yml">File a build report</a> — what you ran and what it printed, acceptance row by row. A build that stopped early is as welcome as one that finished, and a report is <em>reported</em>, never verified: it is your account, not a claim we check.</p>
         </div>
       </div>
     </section>
@@ -244,7 +256,7 @@ build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</c
 
     <!-- ─── Catalog (schematics only) ────────────────────── -->
     <section class="section" id="catalog">
-      <h2 class="section-title">The schematics</h2>
+      <h2 class="section-title">Featured schematics</h2>
       <p class="section-lede">
         Published build specifications. Copy a build command and paste it into
         any agent session — Claude Code, Cursor, Pi, OpenCode, Codex:
@@ -253,6 +265,16 @@ build https://schemaformat.ai/schematics/improve-docker-security/SCHEMATIC.md</c
         marketplace, the authoring plugin adds the
         <code>create-schematic</code> / <code>build-schematic</code> skills. Live from
         <code>.agent-schematics/marketplace.json</code>.
+      </p>
+      <!-- The grid is a subset, so the page says which subset and how big the
+           whole catalog is. Both numbers are written from the catalog at render
+           time and served here as well, because a reader without JavaScript
+           sees only this HTML - and scripts/check-site-render.js fails when
+           either number stops matching .agent-schematics/marketplace.json. -->
+      <p class="catalog-note">
+        Showing the <strong id="catalog-shown">5</strong> featured of
+        <strong id="catalog-total">23</strong> published schematics —
+        <a href="https://schemaformat.ai/llms.txt">the full list</a>.
       </p>
       <div class="catalog" id="catalog-list"><!-- rendered by site.js --></div>
     </section>
