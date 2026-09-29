@@ -6,6 +6,8 @@
 
 **[schemaformat.ai](https://schemaformat.ai)** · [The Spec](#the-spec) · [The Catalog](#the-catalog) · [Author a Schematic](#author-a-schematic)
 
+[![Site](https://img.shields.io/badge/site-schemaformat.ai-blue?style=for-the-badge&logo=gitbook)](https://schemaformat.ai) [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](https://opensource.org/licenses/MIT) [![CI](https://img.shields.io/github/actions/workflow/status/cameri/schematics/validate.yml?branch=main&style=for-the-badge&logo=github)](https://github.com/cameri/schematics/actions?query=branch%3Amain+workflow%3Avalidate) [![Stars](https://img.shields.io/github/stars/cameri/schematics?style=for-the-badge&logo=github)](https://github.com/cameri/schematics/stargazers)
+
 </div>
 
 ---
