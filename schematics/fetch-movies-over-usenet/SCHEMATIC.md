@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: fetch-movies-over-usenet
 version: 0.1.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Privately acquiring movies over usenet - Radarr automating grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the movies library the server reads.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Fetch Movies Over Usenet
@@ -181,3 +180,5 @@ Open questions:
 - **Q-1**: Movie collections management (production has a
   `movie-collections` tree) - whether Radarr collection handling needs
   spec treatment. Default: out of scope until asked.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

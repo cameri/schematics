@@ -402,7 +402,16 @@ def is_date(value):
 
 seen_fields = {}
 for spec in specs:
-    fields = parse_frontmatter(open(spec, encoding='utf-8').read())
+    text = open(spec, encoding='utf-8').read()
+    # Frontmatter is only frontmatter when `---` opens the file, and FRONTMATTER is
+    # line-anchored but unanchored at the start of the file: a line above the block —
+    # an HTML comment, say — is still found, so every rule below passes on a file a
+    # reader, or a model, sees as prose. 19 of 22 specs shipped that way until a
+    # reader noticed; this is the assertion that would have caught it.
+    if not FRONTMATTER.match(text) and FRONTMATTER.search(text):
+        errors.append(f"{spec}: the file opens with something other than '---', so the "
+                      f"block below it is not frontmatter (nothing may precede the delimiter)")
+    fields = parse_frontmatter(text)
     if fields is None:
         errors.append(f"{spec}: no YAML frontmatter block")
         continue

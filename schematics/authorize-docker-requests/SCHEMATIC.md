@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: authorize-docker-requests
 version: 0.6.1
@@ -6,7 +5,7 @@ status: draft
 spec: 1
 description: Grants a sandbox container restricted Docker daemon access over TLS, policed by Open Policy Agent — certificate infrastructure, Rego policy, systemd TCP listener, and sandbox client provisioning.
 created: 2026-09-09
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 # Schematic: OPA Authorization for Docker Sandbox Access
@@ -1556,5 +1555,4 @@ Open questions:
   path (`/opa/authz/agent.rego`) are therefore correct as documented, and no
   second location for the policy file is needed.
 
-
-
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: fetch-series-over-usenet
 version: 0.1.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Privately acquiring series over usenet - Sonarr automating episode and season grabs through the shared downloading infrastructure (Prowlarr, SABnzbd, unpackerr) instead of deploying any of it again. Imports in place into the series library the server reads.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Fetch Series Over Usenet
@@ -176,3 +175,5 @@ Open questions:
 
 - **Q-1**: Anime-specific handling (Sonarr's anime profile quirks) -
   out of scope until an operator needs it.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

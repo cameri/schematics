@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: build-an-agent-dev-image
 version: 0.2.0
@@ -6,7 +5,7 @@ status: draft
 spec: 1
 description: "The dev base image of a sandboxed coding agent: a digest-pinned distribution image that boots one agent in one workspace from an environment contract, runs as a fixed non-root account, and carries the Docker CLI, git, and build tooling — harness-free and secret-free, so a per-harness layer pins it by digest and adds only its CLI."
 created: 2026-09-14
-updated: 2026-09-18
+updated: 2026-09-27
 ---
 
 # Schematic: Build an Agent Dev Image
@@ -905,3 +904,5 @@ Open questions:
   inheriting the contract keeps refusal semantics and `exec` behavior uniform
   across the set. A later part that must replace the entrypoint takes on the
   whole contract (R-2, R-4).
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

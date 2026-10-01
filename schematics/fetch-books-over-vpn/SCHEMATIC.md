@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: fetch-books-over-vpn
 version: 0.2.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Privately fetching books and audiobooks - gluetun as a structural VPN kill switch with Deluge sharing its network namespace, Chaptarr automating grabs, and a companion IP-sync service for indexers that allow exactly one seedbox IP. Every UI is tailnet-only; nothing public.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Fetch Books Over VPN (Gluetun, Deluge, Chaptarr, Mousehole)
@@ -291,3 +290,5 @@ Open questions:
   N-gated-indexers (production has exactly one) or kept as a
   Mousehole-specific recipe. Default: Mousehole-specific until a second
   gated indexer appears.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: expose-container-services-privately
 version: 0.1.0
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Privately exposing local container services on a tailnet - one TSDProxy container joins a Tailscale-compatible network and reverse-proxies selected services to per-service hostnames with automatic HTTPS. The exposure contract is per service (docker labels or list-file entries); services themselves carry no tunnel client, and nothing needs a public port.
 created: 2026-09-14
-updated: 2026-09-14
+updated: 2026-09-27
 ---
 
 # Schematic: Expose Container Services Privately (TSDProxy + Tailscale)
@@ -407,3 +406,5 @@ Open questions:
   role-based access). Default: leave it unauthenticated on the internal
   network only; if the dashboard is published beyond a trusted LAN, enable
   the API key per upstream docs.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

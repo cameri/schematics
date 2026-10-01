@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: update-images-on-push
 version: 0.2.2
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Self-updating Docker Compose deployments: when you push, the image updates. A GitHub push webhook flows through a Cloudflare tunnel and a path-token receiver into an in-memory queue, and a worker pulls the new image through a scoped Docker API proxy. HTTP ack in milliseconds, pull in the background, no open ports, no full docker socket anywhere.
 created: 2026-09-11
-updated: 2026-09-28
+updated: 2026-10-01
 ---
 
 # Schematic: Update Images on Push
@@ -292,3 +291,5 @@ Open questions:
   against a expected-digest file to detect registry tampering. Default:
   no - the registry trust model already covers it for public images;
   revisit for private registries with multiple writers.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->

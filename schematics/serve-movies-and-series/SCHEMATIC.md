@@ -1,4 +1,3 @@
-<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
 ---
 name: serve-movies-and-series
 version: 0.2.1
@@ -6,7 +5,7 @@ status: published
 spec: 1
 description: Serving a movies-and-series library - Jellyfin reading the same tree the fetching stack imports into, with Jellyseerr as the request front. Exposure as a first-class choice (local, tailnet, or a gated public hostname), read-only by posture over the media.
 created: 2026-09-11
-updated: 2026-09-17
+updated: 2026-09-27
 ---
 
 # Schematic: Serve Movies and Series
@@ -202,3 +201,5 @@ Open questions:
 - **Q-1**: Whether music libraries belong in this package's scope via
   the same Jellyfin instance (production serves music the same way).
   Default: yes as a note, formal contract in `run-a-music-library`.
+
+<!-- Recommended: use the schematics@cameri/schematics plugin to build this schematic -->
