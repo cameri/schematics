@@ -1,0 +1,96 @@
+# Starter Compose project for the photo library.
+# Copy this file and .env.example (renamed to .env) into the project directory,
+# fill the parameters from your Phase 0 record, then bring services up one phase
+# at a time. Every value comes from .env; nothing environment-specific is
+# written here.
+
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:?set IMMICH_VERSION in .env}@sha256:${SERVER_DIGEST:?resolve the digest per Phase 1}
+    volumes:
+      - ${UPLOAD_LOCATION:?set UPLOAD_LOCATION in .env}:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+    # EXPOSURE=localhost: publish on the loopback interface only.
+    # ports:
+    #   - "127.0.0.1:${HTTP_PORT:-2283}:2283"
+    # EXPOSURE=private|tsdproxy|cloudflare: attach to the network the exposure
+    # option provides instead of publishing, then uncomment and name it.
+    # networks:
+    #   - proxy
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    # The tag suffix selects the backend. Keep it in step with the `service:`
+    # value in the extends block below: the tag carries the runtime, the extends
+    # entry carries the device passthrough, and neither works without the other.
+    # cpu -> no suffix, armnn -> -armnn, cuda -> -cuda, rocm -> -rocm,
+    # openvino -> -openvino, rknn -> -rknn.
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:?set IMMICH_VERSION in .env}@sha256:${ML_DIGEST:?resolve the digest per Phase 1}
+    extends:
+      file: hwaccel.ml.yml
+      service: cpu # set to the ML_BACKEND value you recorded
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - .env
+    restart: always
+    healthcheck:
+      disable: false
+    # Bound the first indexing pass. 0 means no limit, so an unset ML_CPU_LIMIT
+    # leaves the container the whole machine; a value such as 4.0 caps it.
+    deploy:
+      resources:
+        limits:
+          cpus: "${ML_CPU_LIMIT:-0}"
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:${CACHE_VERSION:?set CACHE_VERSION in .env}@sha256:${CACHE_DIGEST:?resolve the digest per Phase 1}
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: always
+    # No authentication by default: the cache is reachable only inside the
+    # project network and the server reaches it by service name. This image
+    # ignores REDIS_PASSWORD, so a password takes three edits, not one: a
+    # `command: --requirepass <value>` here, REDIS_PASSWORD in .env, and the
+    # healthcheck above, which would otherwise fail with NOAUTH.
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:${DB_IMAGE_TAG:?set DB_IMAGE_TAG in .env}@sha256:${DB_DIGEST:?resolve the digest per Phase 1}
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+      # Read by the Immich-maintained Postgres image: SSD tunes for concurrent
+      # IO, HDD for spinning disks. The database service loads no env_file, so
+      # this line is what carries P-6 into the container.
+      DB_STORAGE_TYPE: ${DB_STORAGE_TYPE:-SSD}
+    volumes:
+      - ${DB_DATA_LOCATION:?set DB_DATA_LOCATION in .env}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    # An Engine older than v25 rejects this key; remove it there.
+    healthcheck:
+      disable: false
+
+volumes:
+  model-cache:
+
+# Uncomment when an exposure option attaches the server to a network that
+# already exists outside this project (a tailnet proxy or a tunnel).
+# networks:
+#   proxy:
+#     external: true
