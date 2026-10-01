@@ -73,10 +73,11 @@ RUN set -eux; \
 # assets, checked into the build rather than fetched: a build that verified
 # against a freshly fetched checksum would pin nothing.
 RUN set -eux; \
-    case "${TARGETARCH}" in \
+    target_arch="${TARGETARCH:-}"; \
+    case "${target_arch}" in \
         amd64) herdr_url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64"; herdr_sha="${HERDR_SHA256_AMD64}" ;; \
         arm64) herdr_url="https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-aarch64"; herdr_sha="${HERDR_SHA256_ARM64}" ;; \
-        *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}'; this image is built for amd64 and arm64." >&2; exit 1 ;; \
+        *) echo "ERROR: unsupported TARGETARCH '${target_arch}'; this image is built for amd64 and arm64." >&2; exit 1 ;; \
     esac; \
     curl -fsSL "${herdr_url}" -o /usr/local/bin/herdr; \
     echo "${herdr_sha}  /usr/local/bin/herdr" | sha256sum -c -; \

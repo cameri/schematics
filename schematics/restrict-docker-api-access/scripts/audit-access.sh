@@ -41,7 +41,11 @@ probe EXEC       -X POST "$BASE/containers/0000000000000000000000000000000000000
 probe BUILD      -X POST "$BASE/build"
 probe SECRETS    "$BASE/secrets"
 probe SWARM      "$BASE/swarm"
+# The three groups the image enables in its own ENV. They belong in the matrix
+# under deny-by-default (R-2): unset in the compose file does not mean denied.
 probe EVENTS     "$BASE/events"
+probe PING       "$BASE/_ping"
+probe VERSION    "$BASE/version"
 probe PLUGINS    "$BASE/plugins"
 echo
 echo "ALLOWED groups must match the documented allowlist exactly;"

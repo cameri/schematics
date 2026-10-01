@@ -11,8 +11,8 @@ YAML with `services:` and `networks:` top-level keys (Docker Compose v2).
 
 | Field | Meaning | Rule |
 |-------|---------|------|
-| image | tecnativa/restrict-docker-api-access, pinned `@sha256:` | Digest REQUIRED (R-4) |
-| environment | One var per enabled endpoint group, value `1` | Deny-by-default (R-2); each entry needs a comment justification (R-3) |
+| image | tecnativa/docker-socket-proxy, pinned `@sha256:` | Digest REQUIRED (R-4) |
+| environment | One var per enabled endpoint group, value `1`, plus `EVENTS`, `PING` and `VERSION` at `0` | Deny-by-default (R-2) - the image's own ENV sets those three to `1`, so they are pinned off; each enabled entry needs a comment justification (R-3) |
 | volumes | Exactly `/var/run/docker.sock:/var/run/docker.sock:ro` | Read-only REQUIRED (R-6) |
 | networks | The internal network only | No `ports:` key may exist (R-5) |
 | networks (P-7 variant) | Mapping form with `ipv4_address:` instead of a plain list entry | Only when a `network_mode: host` consumer needs P-7 (see host-network-consumers module); commented out by default |
@@ -32,7 +32,8 @@ YAML with `services:` and `networks:` top-level keys (Docker Compose v2).
 ## Validation checks
 
 1. `grep -c "ports:" compose-socket-proxy.yml` is 0.
-2. Every `environment:` entry has a trailing comment with a justification.
+2. Every `environment:` entry has a trailing comment - the justification for a
+   `1`, the reason it is pinned off for a `0`.
 3. The image reference contains `@sha256:`.
 4. If any consumer needs P-7: `ipam.config` and the proxy's
    `ipv4_address` are both present, uncommented, and the address falls

@@ -161,6 +161,17 @@ main { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem; }
 }
 .section-lede strong { color: var(--fg); font-weight: 450; }
 
+/* The catalog grid is a labelled subset of the catalog, so the note under the
+   section lede names the subset and the total before the cards. Small and
+   monospaced to read as a caption on the grid, not as another lede. */
+.catalog-note {
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  margin: -1.2rem 0 1.6rem;
+}
+.catalog-note strong { color: var(--fg-dim); font-weight: 500; }
+
 /* Feature grid: dense term + definition */
 .grid-3 {
   display: grid;

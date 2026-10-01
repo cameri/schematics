@@ -1,11 +1,11 @@
 ---
 name: run-multiplexed-agent-workspaces
-version: 0.2.1
+version: 0.2.3
 status: draft
 spec: 1
 description: "An agent host: the dev base image plus a herdr multiplexer that runs one named workspace per agent, relaunches only what crashes, keeps every agent's state on bind-mounted directories, and accepts herdr --remote attach over a key-only SSH transport — harness-free, secret-free and outbound-only by default."
 created: 2026-09-18
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 # Schematic: Run Multiplexed Agent Workspaces
